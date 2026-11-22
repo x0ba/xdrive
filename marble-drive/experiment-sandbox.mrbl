@@ -1,0 +1,191 @@
+<!doctype html>
+<html lang="en" data-marble="1">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="marble:capabilities" content="storage; net=none">
+<title>Interactive Data &amp; Chart Sandbox</title>
+<style>
+:root { --ink:#1c1915;--muted:#6d655c;--faint:#8d8478;--line:#e4dcd2;--paper:#f3efe7;--panel:#fffdf9;--panel-2:#f4efe6;--accent:#1f4b99;--accent-2:#1f7a4d;--accent-soft:#e6eefb;--good:#1e7a46;--warn:#9a5b12;--danger:#9d2c2c;--shadow:0 18px 40px rgba(48,36,22,.08);--serif:"Iowan Old Style",Palatino,"Palatino Linotype",Georgia,serif;--sans:"Avenir Next","Segoe UI",system-ui,sans-serif;--mono:"IBM Plex Mono",ui-monospace,SFMono-Regular,Menlo,monospace; }
+@media (prefers-color-scheme: dark) { :root { --ink:#efeae3;--muted:#b7aea2;--faint:#8f867b;--line:#34302b;--paper:#131210;--panel:#1c1a17;--panel-2:#26231f;--accent:#9db6ff;--accent-2:#8ed0b0;--accent-soft:#243156;--good:#8ed0b0;--warn:#e2b56a;--danger:#f0a3a3;--shadow:0 18px 40px rgba(0,0,0,.35); } }
+html[data-xdrive-theme="light"] { --ink:#1c1915;--muted:#6d655c;--faint:#8d8478;--line:#e4dcd2;--paper:#f3efe7;--panel:#fffdf9;--panel-2:#f4efe6;--accent:#1f4b99;--accent-2:#1f7a4d;--accent-soft:#e6eefb;--good:#1e7a46;--warn:#9a5b12;--danger:#9d2c2c;--shadow:0 18px 40px rgba(48,36,22,.08);--serif:"Iowan Old Style",Palatino,"Palatino Linotype",Georgia,serif;--sans:"Avenir Next","Segoe UI",system-ui,sans-serif;--mono:"IBM Plex Mono",ui-monospace,SFMono-Regular,Menlo,monospace; color-scheme: light; }
+html[data-xdrive-theme="dark"] { --ink:#efeae3;--muted:#b7aea2;--faint:#8f867b;--line:#34302b;--paper:#131210;--panel:#1c1a17;--panel-2:#26231f;--accent:#9db6ff;--accent-2:#8ed0b0;--accent-soft:#243156;--good:#8ed0b0;--warn:#e2b56a;--danger:#f0a3a3;--shadow:0 18px 40px rgba(0,0,0,.35); color-scheme: dark; }
+* { box-sizing: border-box; }
+html, body { margin: 0; min-height: 100%; }
+body { background: var(--paper); color: var(--ink); font: 16px/1.55 var(--sans); -webkit-font-smoothing: antialiased; }
+button, input { font: inherit; color: inherit; }
+button { cursor: pointer; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+[data-marble-editable]:focus { outline: none; box-shadow: inset 0 -1.5px 0 var(--accent); }
+.kicker { margin: 0 0 .35rem; color: var(--accent); font: 600 .72rem/1 var(--mono); letter-spacing: .14em; text-transform: uppercase; }
+h1 { font-family: var(--serif); font-weight: 560; letter-spacing: -.03em; line-height: 1.05; margin: 0; }
+h2 { font-family: var(--serif); font-size: 1.35rem; font-weight: 560; letter-spacing: -.02em; margin: 0 0 .4rem; }
+p { margin: 0; }
+.lede { color: var(--muted); max-width: 40rem; }
+marble-alt { display: block; }
+marble-alt > [data-marble-alt] { display: none; }
+marble-alt[data-marble-active="v1"] > [data-marble-alt="v1"],
+marble-alt[data-marble-active="v2"] > [data-marble-alt="v2"],
+marble-alt[data-marble-active="v3"] > [data-marble-alt="v3"],
+marble-alt[data-marble-active="v4"] > [data-marble-alt="v4"],
+marble-alt[data-marble-active="v5"] > [data-marble-alt="v5"],
+marble-alt[data-marble-active="v6"] > [data-marble-alt="v6"] { display: block; }
+marble-alt:not([data-marble-active]) > [data-marble-alt]:first-child { display: block; }
+[data-marble-sortable] { padding-left: 1.4rem; }
+.pill, .choose button, .tex-edit, .add {
+  border: 1px solid var(--line); background: var(--panel); border-radius: 999px;
+  padding: .18rem .65rem; font: 600 .75rem/1.4 var(--sans);
+}
+.choose { display: inline-flex; gap: .25rem; flex-wrap: wrap; }
+.choose button[aria-pressed="true"] { background: var(--accent); color: #fff; border-color: transparent; }
+.add { border-style: dashed; color: var(--accent); background: transparent; }
+.card, section.block {
+  background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 1rem 1.1rem;
+  box-shadow: var(--shadow);
+}
+
+
+  main { max-width: 68rem; margin: 0 auto; padding: 2rem 1.2rem 4rem; display: grid; grid-template-columns: 1.2fr .8fr; gap: 1rem; }
+  .span { grid-column: 1 / -1; }
+  h1 { font-size: 2.2rem; }
+  .chart-card, .table-card { background: var(--panel); border: 1px solid var(--line); border-radius: 16px; padding: 1rem; }
+  svg { width: 100%; height: auto; display: block; }
+  table { width: 100%; border-collapse: collapse; }
+  th, td { text-align: left; padding: .45rem .35rem; border-bottom: 1px solid var(--line); }
+  th { font: 600 .72rem/1.3 var(--mono); letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+  td { font-variant-numeric: tabular-nums; }
+  .stepper { display: inline-flex; align-items: center; gap: .35rem; margin-top: .8rem; }
+  .stepper button { width: 1.6rem; height: 1.6rem; border-radius: 999px; border: 1px solid var(--line); background: var(--panel-2); }
+  .add { margin-top: .8rem; }
+  @media (max-width: 860px) { main { grid-template-columns: 1fr; } }
+  </style>
+</head>
+<body>
+<main data-marble-id="bench-shell" data-smooth="2">
+  <header data-marble-id="bench-head" class="span">
+    <p data-marble-id="bench-kicker" class="kicker">Sandbox</p>
+    <h1 data-marble-id="bench-title" data-marble-editable>Interactive Data &amp; Chart Sandbox</h1>
+    <p data-marble-id="bench-lede" class="lede" data-marble-editable>Edit a loss or a token budget and the bars move. The table is the file; the chart is drawn from it.</p>
+  </header>
+  <section data-marble-id="chart-card" class="chart-card">
+    <svg data-marble-id="bench-chart" viewBox="0 0 640 280" role="img" aria-label="Loss by model">
+      <line x1="40" y1="210" x2="600" y2="210" stroke="currentColor" opacity="0.3"/>
+      <rect x="64" y="118" width="52" height="92" rx="6" fill="var(--accent)"/>
+      <rect x="184" y="105" width="52" height="105" rx="6" fill="var(--accent)"/>
+      <rect x="304" y="87" width="52" height="123" rx="6" fill="var(--accent)"/>
+      <rect x="424" y="129" width="52" height="81" rx="6" fill="var(--accent)"/>
+      <polyline points="90,120 210,107 330,89 450,131" fill="none" stroke="var(--accent-2)" stroke-width="2.5"/>
+      <text x="90" y="232" text-anchor="middle" font-size="12" fill="currentColor">Argon</text>
+      <text x="210" y="232" text-anchor="middle" font-size="12" fill="currentColor">Flash</text>
+      <text x="330" y="232" text-anchor="middle" font-size="12" fill="currentColor">Haiku</text>
+      <text x="450" y="232" text-anchor="middle" font-size="12" fill="currentColor">Opus</text>
+    </svg>
+    <p data-marble-id="bench-caption" data-marble-editable>Bar height is loss. The curve is the same series, nudged by the smoothing window.</p>
+    <div data-marble-id="smooth" class="stepper">
+      <span data-marble-id="smooth-name">Smoothing</span>
+      <button data-marble-id="smooth-dec" type="button" data-marble-step="data-smooth:1:6" data-marble-by="-1" data-marble-of="[data-marble-id=bench-shell]">−</button>
+      <b data-marble-id="smooth-val">2</b>
+      <button data-marble-id="smooth-inc" type="button" data-marble-step="data-smooth:1:6" data-marble-by="1" data-marble-of="[data-marble-id=bench-shell]">+</button>
+    </div>
+  </section>
+  <section data-marble-id="table-card" class="table-card">
+    <table data-marble-id="bench-table">
+      <thead data-marble-id="bench-thead">
+        <tr data-marble-id="bench-head-row">
+          <th data-marble-id="th-model">Model</th>
+          <th data-marble-id="th-loss">Loss</th>
+          <th data-marble-id="th-tok">Tokens (B)</th>
+        </tr>
+      </thead>
+      <tbody data-marble-id="bench-body" id="bench-body" data-marble-sortable="rows">
+        <tr data-marble-id="row-argon" data-marble-removable>
+          <td data-marble-id="row-argon-name" data-marble-editable>Argon</td>
+          <td data-marble-id="row-argon-loss" data-marble-editable>1.84</td>
+          <td data-marble-id="row-argon-tok" data-marble-editable>128</td>
+        </tr>
+        <tr data-marble-id="row-flash" data-marble-removable>
+          <td data-marble-id="row-flash-name" data-marble-editable>Flash</td>
+          <td data-marble-id="row-flash-loss" data-marble-editable>2.11</td>
+          <td data-marble-id="row-flash-tok" data-marble-editable>96</td>
+        </tr>
+        <tr data-marble-id="row-haiku" data-marble-removable>
+          <td data-marble-id="row-haiku-name" data-marble-editable>Haiku</td>
+          <td data-marble-id="row-haiku-loss" data-marble-editable>2.46</td>
+          <td data-marble-id="row-haiku-tok" data-marble-editable>64</td>
+        </tr>
+        <tr data-marble-id="row-opus" data-marble-removable>
+          <td data-marble-id="row-opus-name" data-marble-editable>Opus</td>
+          <td data-marble-id="row-opus-loss" data-marble-editable>1.62</td>
+          <td data-marble-id="row-opus-tok" data-marble-editable>40</td>
+        </tr>
+      </tbody>
+    </table>
+    <button data-marble-id="add-run" class="add" type="button" data-marble-add="#tpl-run" data-marble-into="#bench-body">+ Add run</button>
+    <template data-marble-id="tpl-run" id="tpl-run">
+      <tr data-marble-removable>
+        <td data-marble-editable>New run</td>
+        <td data-marble-editable>2.40</td>
+        <td data-marble-editable>32</td>
+      </tr>
+    </template>
+  </section>
+</main>
+<script>
+(function () {
+  function boot(start) {
+    if (window.marble) start(window.marble);
+    else document.addEventListener('marble:ready', function () { start(window.marble); }, { once: true });
+  }
+  boot(function (marble) {
+    var MID = 'data-marble-' + 'id';
+    var AFFORDANCES = ["data-marble-editable","data-marble-sortable","data-marble-canvas","data-marble-resizable","data-marble-removable","data-marble-add","data-marble-toggle","data-marble-choose","data-marble-expand","data-marble-step","data-marble-note"];
+    if (marble && marble.address) { marble.address(document.querySelectorAll(AFFORDANCES.map(function (a) { return "[" + a + "]"; }).join(","))); }
+    function qMarble(id) { return document.querySelector('[' + MID + '="' + id + '"]'); }
+    var shell = qMarble('bench-shell');
+    var chart = qMarble('bench-chart');
+    var last = '';
+    function num(cell) {
+      var n = parseFloat((cell && cell.textContent) || '');
+      return isFinite(n) ? n : 0;
+    }
+    function chartInner() {
+      var list = [].slice.call(document.querySelectorAll('#bench-body > tr'));
+      var smooth = Math.max(1, Number(shell.getAttribute('data-smooth') || '1'));
+      var parts = ['<line x1="40" y1="210" x2="600" y2="210" stroke="currentColor" opacity="0.3"/>'];
+      var points = [];
+      for (var i = 0; i < list.length; i++) {
+        var cells = list[i].children;
+        var loss = num(cells[1]);
+        var h = Math.max(4, Math.round(loss / 3.2 * 160));
+        var x = 64 + i * 120;
+        var y = 210 - h;
+        var name = ((cells[0] && cells[0].textContent) || '').trim().replace(/</g, '');
+        var nudge = Math.round((smooth - 1) * 2);
+        parts.push('<rect x="' + x + '" y="' + y + '" width="52" height="' + h + '" rx="6" fill="var(--accent)"/>');
+        parts.push('<text x="' + (x + 26) + '" y="232" text-anchor="middle" font-size="12" fill="currentColor">' + name + '</text>');
+        points.push((x + 26) + ',' + Math.max(16, y + nudge));
+      }
+      parts.push('<polyline points="' + points.join(' ') + '" fill="none" stroke="var(--accent-2)" stroke-width="2.5"/>');
+      return parts.join('');
+    }
+    function paint(file) {
+      var html = chartInner();
+      if (!chart || html === last) return;
+      last = html;
+      chart.innerHTML = html;
+      if (file && marble.canChange) marble.op({ type: 'setInner', id: 'bench-chart', html: html }, { immediate: true });
+    }
+    function syncSmooth() {
+      var val = qMarble('smooth-val');
+      if (val) val.textContent = shell.getAttribute('data-smooth') || '2';
+    }
+    document.getElementById('bench-body').addEventListener('focusout', function () { paint(true); });
+    new MutationObserver(function () { paint(true); }).observe(document.getElementById('bench-body'), { childList: true });
+    new MutationObserver(function () { syncSmooth(); paint(true); }).observe(shell, { attributes: true, attributeFilter: ['data-smooth'] });
+    marble.register(function () { syncSmooth(); });
+    syncSmooth();
+    });
+})();
+</script>
+</body>
+</html>

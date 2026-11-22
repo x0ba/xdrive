@@ -1,0 +1,196 @@
+<!doctype html>
+<html lang="en" data-marble="1">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="marble:capabilities" content="storage; net=none">
+<title>Literature Review &amp; Synthesis Matrix</title>
+<style>
+:root { --ink:#1c1915;--muted:#6d655c;--faint:#8d8478;--line:#e4dcd2;--paper:#f3efe7;--panel:#fffdf9;--panel-2:#f4efe6;--accent:#1f4b99;--accent-2:#1f7a4d;--accent-soft:#e6eefb;--good:#1e7a46;--warn:#9a5b12;--danger:#9d2c2c;--shadow:0 18px 40px rgba(48,36,22,.08);--serif:"Iowan Old Style",Palatino,"Palatino Linotype",Georgia,serif;--sans:"Avenir Next","Segoe UI",system-ui,sans-serif;--mono:"IBM Plex Mono",ui-monospace,SFMono-Regular,Menlo,monospace; }
+@media (prefers-color-scheme: dark) { :root { --ink:#efeae3;--muted:#b7aea2;--faint:#8f867b;--line:#34302b;--paper:#131210;--panel:#1c1a17;--panel-2:#26231f;--accent:#9db6ff;--accent-2:#8ed0b0;--accent-soft:#243156;--good:#8ed0b0;--warn:#e2b56a;--danger:#f0a3a3;--shadow:0 18px 40px rgba(0,0,0,.35); } }
+html[data-xdrive-theme="light"] { --ink:#1c1915;--muted:#6d655c;--faint:#8d8478;--line:#e4dcd2;--paper:#f3efe7;--panel:#fffdf9;--panel-2:#f4efe6;--accent:#1f4b99;--accent-2:#1f7a4d;--accent-soft:#e6eefb;--good:#1e7a46;--warn:#9a5b12;--danger:#9d2c2c;--shadow:0 18px 40px rgba(48,36,22,.08);--serif:"Iowan Old Style",Palatino,"Palatino Linotype",Georgia,serif;--sans:"Avenir Next","Segoe UI",system-ui,sans-serif;--mono:"IBM Plex Mono",ui-monospace,SFMono-Regular,Menlo,monospace; color-scheme: light; }
+html[data-xdrive-theme="dark"] { --ink:#efeae3;--muted:#b7aea2;--faint:#8f867b;--line:#34302b;--paper:#131210;--panel:#1c1a17;--panel-2:#26231f;--accent:#9db6ff;--accent-2:#8ed0b0;--accent-soft:#243156;--good:#8ed0b0;--warn:#e2b56a;--danger:#f0a3a3;--shadow:0 18px 40px rgba(0,0,0,.35); color-scheme: dark; }
+* { box-sizing: border-box; }
+html, body { margin: 0; min-height: 100%; }
+body { background: var(--paper); color: var(--ink); font: 16px/1.55 var(--sans); -webkit-font-smoothing: antialiased; }
+button, input { font: inherit; color: inherit; }
+button { cursor: pointer; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+[data-marble-editable]:focus { outline: none; box-shadow: inset 0 -1.5px 0 var(--accent); }
+.kicker { margin: 0 0 .35rem; color: var(--accent); font: 600 .72rem/1 var(--mono); letter-spacing: .14em; text-transform: uppercase; }
+h1 { font-family: var(--serif); font-weight: 560; letter-spacing: -.03em; line-height: 1.05; margin: 0; }
+h2 { font-family: var(--serif); font-size: 1.35rem; font-weight: 560; letter-spacing: -.02em; margin: 0 0 .4rem; }
+p { margin: 0; }
+.lede { color: var(--muted); max-width: 40rem; }
+marble-alt { display: block; }
+marble-alt > [data-marble-alt] { display: none; }
+marble-alt[data-marble-active="v1"] > [data-marble-alt="v1"],
+marble-alt[data-marble-active="v2"] > [data-marble-alt="v2"],
+marble-alt[data-marble-active="v3"] > [data-marble-alt="v3"],
+marble-alt[data-marble-active="v4"] > [data-marble-alt="v4"],
+marble-alt[data-marble-active="v5"] > [data-marble-alt="v5"],
+marble-alt[data-marble-active="v6"] > [data-marble-alt="v6"] { display: block; }
+marble-alt:not([data-marble-active]) > [data-marble-alt]:first-child { display: block; }
+[data-marble-sortable] { padding-left: 1.4rem; }
+.pill, .choose button, .tex-edit, .add {
+  border: 1px solid var(--line); background: var(--panel); border-radius: 999px;
+  padding: .18rem .65rem; font: 600 .75rem/1.4 var(--sans);
+}
+.choose { display: inline-flex; gap: .25rem; flex-wrap: wrap; }
+.choose button[aria-pressed="true"] { background: var(--accent); color: #fff; border-color: transparent; }
+.add { border-style: dashed; color: var(--accent); background: transparent; }
+.card, section.block {
+  background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 1rem 1.1rem;
+  box-shadow: var(--shadow);
+}
+
+
+  main { max-width: 68rem; margin: 0 auto; padding: 2rem 1.2rem 4rem; }
+  h1 { font-size: 2.2rem; margin-bottom: .4rem; }
+  .filters { margin: 1rem 0; }
+  table { width: 100%; border-collapse: collapse; background: var(--panel); border-radius: 14px; overflow: hidden; }
+  th, td { text-align: left; padding: .65rem .7rem; border-bottom: 1px solid var(--line); vertical-align: top; font-size: .92rem; }
+  th { font: 600 .72rem/1.3 var(--mono); letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+  tr[data-status="keep"] { --mark: var(--good); }
+  tr[data-status="reading"] { --mark: var(--accent); }
+  tr[data-status="drop"] { --mark: var(--danger); }
+  tbody tr { box-shadow: inset 3px 0 0 var(--mark, var(--line)); }
+  .matrix.marble-derived tr.marble-dim { display: none; }
+  .take { color: var(--ink); }
+  .add { margin-top: 1rem; }
+  .foot { margin-top: 1rem; color: var(--muted); font-size: .9rem; }
+  </style>
+</head>
+<body>
+<main data-marble-id="matrix-shell" class="matrix" data-filter="all">
+  <p data-marble-id="matrix-kicker" class="kicker">Synthesis</p>
+  <h1 data-marble-id="matrix-title" data-marble-editable>Literature Review &amp; Synthesis Matrix</h1>
+  <p data-marble-id="matrix-lede" class="lede" data-marble-editable>Five papers, one question: what has to be true for a bigger model to be a better reasoner, and which of these results actually says that.</p>
+  <div data-marble-id="matrix-filters" class="filters">
+    <span data-marble-id="filter-choose" class="choose" data-marble-choose="data-filter" data-marble-of="[data-marble-id=matrix-shell]">
+      <button data-marble-id="filter-all" type="button" data-marble-value="all">All</button>
+      <button data-marble-id="filter-reading" type="button" data-marble-value="reading">Reading</button>
+      <button data-marble-id="filter-keep" type="button" data-marble-value="keep">Keep</button>
+      <button data-marble-id="filter-drop" type="button" data-marble-value="drop">Drop</button>
+    </span>
+  </div>
+  <table data-marble-id="paper-table">
+    <thead data-marble-id="paper-head">
+      <tr data-marble-id="paper-head-row">
+        <th data-marble-id="th-paper">Paper</th>
+        <th data-marble-id="th-venue">Venue</th>
+        <th data-marble-id="th-method">Method</th>
+        <th data-marble-id="th-status">Status</th>
+        <th data-marble-id="th-take">Takeaway</th>
+      </tr>
+    </thead>
+    <tbody data-marble-id="paper-body" id="paper-body" data-marble-sortable="papers">
+      <tr data-marble-id="row-vaswani" data-status="keep" data-marble-removable>
+      <td data-marble-id="row-vaswani-name" data-marble-editable>Vaswani et al. 2017</td>
+      <td data-marble-id="row-vaswani-venue" data-marble-editable>NeurIPS</td>
+      <td data-marble-id="row-vaswani-method" data-marble-editable>Scaled dot-product attention</td>
+      <td data-marble-id="row-vaswani-status">
+        <span data-marble-id="row-vaswani-choose" class="choose" data-marble-choose="data-status" data-marble-look="off" data-marble-of="[data-marble-id=row-vaswani]">
+          <button data-marble-id="row-vaswani-reading" type="button" data-marble-value="reading">Reading</button>
+          <button data-marble-id="row-vaswani-keep" type="button" data-marble-value="keep">Keep</button>
+          <button data-marble-id="row-vaswani-drop" type="button" data-marble-value="drop">Drop</button>
+        </span>
+      </td>
+      <td data-marble-id="row-vaswani-take" class="take" data-marble-editable>The interface is the residual stream. Attention is how it moves, not what it stores.</td>
+    </tr>
+      <tr data-marble-id="row-kaplan" data-status="reading" data-marble-removable>
+      <td data-marble-id="row-kaplan-name" data-marble-editable>Kaplan et al. 2020</td>
+      <td data-marble-id="row-kaplan-venue" data-marble-editable>arXiv</td>
+      <td data-marble-id="row-kaplan-method" data-marble-editable>Power-law loss vs compute</td>
+      <td data-marble-id="row-kaplan-status">
+        <span data-marble-id="row-kaplan-choose" class="choose" data-marble-choose="data-status" data-marble-look="off" data-marble-of="[data-marble-id=row-kaplan]">
+          <button data-marble-id="row-kaplan-reading" type="button" data-marble-value="reading">Reading</button>
+          <button data-marble-id="row-kaplan-keep" type="button" data-marble-value="keep">Keep</button>
+          <button data-marble-id="row-kaplan-drop" type="button" data-marble-value="drop">Drop</button>
+        </span>
+      </td>
+      <td data-marble-id="row-kaplan-take" class="take" data-marble-editable>Loss falls as a power of compute. It does not say the model got wiser.</td>
+    </tr>
+      <tr data-marble-id="row-hoffmann" data-status="keep" data-marble-removable>
+      <td data-marble-id="row-hoffmann-name" data-marble-editable>Hoffmann et al. 2022</td>
+      <td data-marble-id="row-hoffmann-venue" data-marble-editable>NeurIPS</td>
+      <td data-marble-id="row-hoffmann-method" data-marble-editable>Compute-optimal tokens</td>
+      <td data-marble-id="row-hoffmann-status">
+        <span data-marble-id="row-hoffmann-choose" class="choose" data-marble-choose="data-status" data-marble-look="off" data-marble-of="[data-marble-id=row-hoffmann]">
+          <button data-marble-id="row-hoffmann-reading" type="button" data-marble-value="reading">Reading</button>
+          <button data-marble-id="row-hoffmann-keep" type="button" data-marble-value="keep">Keep</button>
+          <button data-marble-id="row-hoffmann-drop" type="button" data-marble-value="drop">Drop</button>
+        </span>
+      </td>
+      <td data-marble-id="row-hoffmann-take" class="take" data-marble-editable>Most models in the earlier curve were under-trained. Re-fit before you quote them.</td>
+    </tr>
+      <tr data-marble-id="row-wei" data-status="reading" data-marble-removable>
+      <td data-marble-id="row-wei-name" data-marble-editable>Wei et al. 2022</td>
+      <td data-marble-id="row-wei-venue" data-marble-editable>NeurIPS</td>
+      <td data-marble-id="row-wei-method" data-marble-editable>Chain of thought</td>
+      <td data-marble-id="row-wei-status">
+        <span data-marble-id="row-wei-choose" class="choose" data-marble-choose="data-status" data-marble-look="off" data-marble-of="[data-marble-id=row-wei]">
+          <button data-marble-id="row-wei-reading" type="button" data-marble-value="reading">Reading</button>
+          <button data-marble-id="row-wei-keep" type="button" data-marble-value="keep">Keep</button>
+          <button data-marble-id="row-wei-drop" type="button" data-marble-value="drop">Drop</button>
+        </span>
+      </td>
+      <td data-marble-id="row-wei-take" class="take" data-marble-editable>A prompt can move accuracy without moving the training loss. Treat it as a method, not a scale law.</td>
+    </tr>
+      <tr data-marble-id="row-dao" data-status="keep" data-marble-removable>
+      <td data-marble-id="row-dao-name" data-marble-editable>Dao et al. 2022</td>
+      <td data-marble-id="row-dao-venue" data-marble-editable>ICML</td>
+      <td data-marble-id="row-dao-method" data-marble-editable>IO-aware exact attention</td>
+      <td data-marble-id="row-dao-status">
+        <span data-marble-id="row-dao-choose" class="choose" data-marble-choose="data-status" data-marble-look="off" data-marble-of="[data-marble-id=row-dao]">
+          <button data-marble-id="row-dao-reading" type="button" data-marble-value="reading">Reading</button>
+          <button data-marble-id="row-dao-keep" type="button" data-marble-value="keep">Keep</button>
+          <button data-marble-id="row-dao-drop" type="button" data-marble-value="drop">Drop</button>
+        </span>
+      </td>
+      <td data-marble-id="row-dao-take" class="take" data-marble-editable>The speedup is real and the function is the same. Do not cite it as a new algorithm.</td>
+    </tr>
+    </tbody>
+  </table>
+  <button data-marble-id="add-paper" class="add" type="button" data-marble-add="#tpl-paper" data-marble-into="#paper-body">+ Add paper</button>
+  <template data-marble-id="tpl-paper" id="tpl-paper">
+    <tr data-marble-removable data-status="reading">
+      <td data-marble-editable>New paper</td>
+      <td data-marble-editable>Venue</td>
+      <td data-marble-editable>Method</td>
+      <td><span class="choose" data-marble-choose="data-status" data-marble-look="off"><button type="button" data-marble-value="reading">Reading</button><button type="button" data-marble-value="keep">Keep</button><button type="button" data-marble-value="drop">Drop</button></span></td>
+      <td data-marble-editable>The sentence you would still believe in a year.</td>
+    </tr>
+  </template>
+  <p data-marble-id="matrix-note" class="foot" data-marble-note><span data-marble-id="matrix-note-body" data-marble-note-body data-marble-editable>Status is a decision, so it is filed. The filter is only where you are looking.</span></p>
+</main>
+<script>
+(function () {
+  function boot(start) {
+    if (window.marble) start(window.marble);
+    else document.addEventListener('marble:ready', function () { start(window.marble); }, { once: true });
+  }
+  boot(function (marble) {
+    var MID = 'data-marble-' + 'id';
+    var AFFORDANCES = ["data-marble-editable","data-marble-sortable","data-marble-canvas","data-marble-resizable","data-marble-removable","data-marble-add","data-marble-toggle","data-marble-choose","data-marble-expand","data-marble-step","data-marble-note"];
+    if (marble && marble.address) { marble.address(document.querySelectorAll(AFFORDANCES.map(function (a) { return "[" + a + "]"; }).join(","))); }
+    function qMarble(id) { return document.querySelector('[' + MID + '="' + id + '"]'); }
+    var shell = qMarble('matrix-shell');
+    function derive() {
+      shell.classList.add('marble-derived');
+      var filter = shell.getAttribute('data-filter') || 'all';
+      var rows = document.querySelectorAll('#paper-body > tr');
+      for (var i = 0; i < rows.length; i++) {
+        var status = rows[i].getAttribute('data-status') || '';
+        rows[i].classList.toggle('marble-dim', filter !== 'all' && status !== filter);
+      }
+    }
+    marble.register(derive);
+    new MutationObserver(derive).observe(shell, { attributes: true, attributeFilter: ['data-filter'] });
+    new MutationObserver(derive).observe(document.getElementById('paper-body'), { attributes: true, subtree: true, attributeFilter: ['data-status'] });
+    derive();
+    });
+})();
+</script>
+</body>
+</html>

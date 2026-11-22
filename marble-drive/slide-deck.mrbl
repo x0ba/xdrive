@@ -1,0 +1,204 @@
+<!doctype html>
+<html lang="en" data-marble="1">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="marble:capabilities" content="storage; net=none">
+<title>Interactive Research Slideshow</title>
+<style>
+:root { --ink:#1c1915;--muted:#6d655c;--faint:#8d8478;--line:#e4dcd2;--paper:#f3efe7;--panel:#fffdf9;--panel-2:#f4efe6;--accent:#1f4b99;--accent-2:#1f7a4d;--accent-soft:#e6eefb;--good:#1e7a46;--warn:#9a5b12;--danger:#9d2c2c;--shadow:0 18px 40px rgba(48,36,22,.08);--serif:"Iowan Old Style",Palatino,"Palatino Linotype",Georgia,serif;--sans:"Avenir Next","Segoe UI",system-ui,sans-serif;--mono:"IBM Plex Mono",ui-monospace,SFMono-Regular,Menlo,monospace; }
+@media (prefers-color-scheme: dark) { :root { --ink:#efeae3;--muted:#b7aea2;--faint:#8f867b;--line:#34302b;--paper:#131210;--panel:#1c1a17;--panel-2:#26231f;--accent:#9db6ff;--accent-2:#8ed0b0;--accent-soft:#243156;--good:#8ed0b0;--warn:#e2b56a;--danger:#f0a3a3;--shadow:0 18px 40px rgba(0,0,0,.35); } }
+html[data-xdrive-theme="light"] { --ink:#1c1915;--muted:#6d655c;--faint:#8d8478;--line:#e4dcd2;--paper:#f3efe7;--panel:#fffdf9;--panel-2:#f4efe6;--accent:#1f4b99;--accent-2:#1f7a4d;--accent-soft:#e6eefb;--good:#1e7a46;--warn:#9a5b12;--danger:#9d2c2c;--shadow:0 18px 40px rgba(48,36,22,.08);--serif:"Iowan Old Style",Palatino,"Palatino Linotype",Georgia,serif;--sans:"Avenir Next","Segoe UI",system-ui,sans-serif;--mono:"IBM Plex Mono",ui-monospace,SFMono-Regular,Menlo,monospace; color-scheme: light; }
+html[data-xdrive-theme="dark"] { --ink:#efeae3;--muted:#b7aea2;--faint:#8f867b;--line:#34302b;--paper:#131210;--panel:#1c1a17;--panel-2:#26231f;--accent:#9db6ff;--accent-2:#8ed0b0;--accent-soft:#243156;--good:#8ed0b0;--warn:#e2b56a;--danger:#f0a3a3;--shadow:0 18px 40px rgba(0,0,0,.35); color-scheme: dark; }
+* { box-sizing: border-box; }
+html, body { margin: 0; min-height: 100%; }
+body { background: var(--paper); color: var(--ink); font: 16px/1.55 var(--sans); -webkit-font-smoothing: antialiased; }
+button, input { font: inherit; color: inherit; }
+button { cursor: pointer; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+[data-marble-editable]:focus { outline: none; box-shadow: inset 0 -1.5px 0 var(--accent); }
+.kicker { margin: 0 0 .35rem; color: var(--accent); font: 600 .72rem/1 var(--mono); letter-spacing: .14em; text-transform: uppercase; }
+h1 { font-family: var(--serif); font-weight: 560; letter-spacing: -.03em; line-height: 1.05; margin: 0; }
+h2 { font-family: var(--serif); font-size: 1.35rem; font-weight: 560; letter-spacing: -.02em; margin: 0 0 .4rem; }
+p { margin: 0; }
+.lede { color: var(--muted); max-width: 40rem; }
+marble-alt { display: block; }
+marble-alt > [data-marble-alt] { display: none; }
+marble-alt[data-marble-active="v1"] > [data-marble-alt="v1"],
+marble-alt[data-marble-active="v2"] > [data-marble-alt="v2"],
+marble-alt[data-marble-active="v3"] > [data-marble-alt="v3"],
+marble-alt[data-marble-active="v4"] > [data-marble-alt="v4"],
+marble-alt[data-marble-active="v5"] > [data-marble-alt="v5"],
+marble-alt[data-marble-active="v6"] > [data-marble-alt="v6"] { display: block; }
+marble-alt:not([data-marble-active]) > [data-marble-alt]:first-child { display: block; }
+[data-marble-sortable] { padding-left: 1.4rem; }
+.pill, .choose button, .tex-edit, .add {
+  border: 1px solid var(--line); background: var(--panel); border-radius: 999px;
+  padding: .18rem .65rem; font: 600 .75rem/1.4 var(--sans);
+}
+.choose { display: inline-flex; gap: .25rem; flex-wrap: wrap; }
+.choose button[aria-pressed="true"] { background: var(--accent); color: #fff; border-color: transparent; }
+.add { border-style: dashed; color: var(--accent); background: transparent; }
+.card, section.block {
+  background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 1rem 1.1rem;
+  box-shadow: var(--shadow);
+}
+
+
+  .deck { display: grid; grid-template-columns: 13rem 1fr; min-height: 100vh; }
+  .film { background: var(--panel-2); border-right: 1px solid var(--line); padding: 1rem .8rem 2rem; }
+  .film h1 { font-size: 1.15rem; margin: .2rem 0 .8rem; }
+  .filmstrip { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: .35rem; }
+  .filmstrip li { padding: .5rem .6rem; border-radius: 10px; background: transparent; }
+  .filmstrip li.marble-on, .deck:not(.marble-derived) .filmstrip li:first-child { background: var(--panel); box-shadow: var(--shadow); }
+  .stage-wrap { padding: 1.2rem; background: #221e1a; }
+  .slide { display: none; }
+  .deck.marble-derived .slide.marble-on { display: block; }
+  .deck:not(.marble-derived) .slide { display: none; }
+  .deck:not(.marble-derived) .slide[data-slide="slide-title"] { display: block; }
+  .card { background: #f7f3ec; color: #1c1915; border-radius: 16px; min-height: 26rem; padding: 1.8rem 1.8rem 1rem; display: flex; flex-direction: column; }
+  .card h1, .card h2 { color: #1c1915; }
+  .card .speaker { margin-top: auto; padding-top: .8rem; border-top: 1px solid #e4dcd2; color: #6d655c; font-size: .85rem; }
+  .pane-title:has(marble-alt[data-marble-active="v1"]) h1 { text-align: center; font-size: 2.6rem; margin-top: 4rem; }
+  .pane-title:has(marble-alt[data-marble-active="v2"]) { display: grid; grid-template-columns: 1.2fr .8fr; gap: 1rem; align-items: end; }
+  .pane-title:has(marble-alt[data-marble-active="v3"]) h1 { font-size: 1.7rem; }
+  .arch { display: grid; grid-template-columns: repeat(3, 1fr); gap: .6rem; margin-top: 1rem; }
+  .arch section { background: #fff; border: 1px solid #e4dcd2; border-radius: 12px; padding: .8rem; color: #1c1915; }
+  .nexts { margin: .8rem 0 0; padding-left: 1.1rem; }
+  .add { margin-top: .8rem; }
+  @media (max-width: 800px) { .deck { grid-template-columns: 1fr; } .arch { grid-template-columns: 1fr; } }
+  </style>
+</head>
+<body>
+<div data-marble-id="deck" id="deck" class="deck" data-active-slide="slide-title">
+  <aside data-marble-id="film" class="film">
+    <p data-marble-id="deck-kicker" class="kicker">Slideshow</p>
+    <h1 data-marble-id="deck-title" data-marble-editable>Interactive Research Slideshow</h1>
+    <ol data-marble-id="slide-list" id="slide-list" class="filmstrip" data-marble-sortable="slides">
+      <li data-marble-id="slide-title" data-marble-removable><p data-marble-id="slide-title-label" data-marble-editable>Title slide</p></li>
+      <li data-marble-id="slide-arch" data-marble-removable><p data-marble-id="slide-arch-label" data-marble-editable>Architecture diagram</p></li>
+      <li data-marble-id="slide-bench" data-marble-removable><p data-marble-id="slide-bench-label" data-marble-editable>Benchmark chart</p></li>
+      <li data-marble-id="slide-eq" data-marble-removable><p data-marble-id="slide-eq-label" data-marble-editable>Key equations</p></li>
+      <li data-marble-id="slide-next" data-marble-removable><p data-marble-id="slide-next-label" data-marble-editable>Next steps</p></li>
+    </ol>
+    <button data-marble-id="add-slide" class="add" type="button" data-marble-add="#tpl-slide" data-marble-into="#slide-list">+ Add slide</button>
+    <template data-marble-id="tpl-slide" id="tpl-slide">
+      <li data-marble-removable><p data-marble-editable>New slide</p></li>
+    </template>
+  </aside>
+  <div data-marble-id="slide-stage" id="slide-stage" class="stage-wrap">
+    <section data-marble-id="pane-title" class="slide card pane-title" data-slide="slide-title">
+      <marble-alt data-marble-id="title-layout" data-marble-active="v1">
+        <p data-marble-id="layout-v1" data-marble-alt="v1" class="kicker" data-marble-editable>Centered</p>
+        <p data-marble-id="layout-v2" data-marble-alt="v2" class="kicker" data-marble-editable>Split</p>
+        <p data-marble-id="layout-v3" data-marble-alt="v3" class="kicker" data-marble-editable>Kicker</p>
+      </marble-alt>
+      <h2 data-marble-id="slide-hero" data-marble-editable>A logical memory you can check</h2>
+      <p data-marble-id="slide-sub" data-marble-editable>Threshold, scaling, and the decoder we froze before the sweep.</p>
+      <p data-marble-id="notes-title" class="speaker" data-marble-editable>Open on the claim, not the architecture. The layout pills only change where the eye lands.</p>
+    </section>
+    <section data-marble-id="pane-arch" class="slide card" data-slide="slide-arch">
+      <h2 data-marble-id="arch-h" data-marble-editable>Architecture</h2>
+      <div data-marble-id="arch-row" class="arch">
+        <section data-marble-id="arch-box-1" data-marble-removable>
+          <h2 data-marble-id="arch-box-1-h" data-marble-editable>Encode</h2>
+          <p data-marble-id="arch-box-1-p" data-marble-editable>Rotated surface code, odd distance.</p>
+        </section>
+        <section data-marble-id="arch-box-2" data-marble-removable>
+          <h2 data-marble-id="arch-box-2-h" data-marble-editable>Syndrome</h2>
+          <p data-marble-id="arch-box-2-p" data-marble-editable>Circuit-level noise, then matching.</p>
+        </section>
+        <section data-marble-id="arch-box-3" data-marble-removable>
+          <h2 data-marble-id="arch-box-3-h" data-marble-editable>Correct</h2>
+          <p data-marble-id="arch-box-3-p" data-marble-editable>One decoder, frozen, named in the theorem.</p>
+        </section>
+      </div>
+      <p data-marble-id="notes-arch" class="speaker" data-marble-editable>Point at the middle box. That is the assumption the result depends on.</p>
+    </section>
+    <section data-marble-id="pane-bench" class="slide card" data-slide="slide-bench">
+      <h2 data-marble-id="bench-h" data-marble-editable>Benchmark</h2>
+      <svg data-marble-id="bench-svg" viewBox="0 0 520 180" width="100%" height="180" role="img" aria-label="Logical error by distance">
+        <line x1="40" y1="150" x2="490" y2="150" stroke="#1c1915" opacity="0.3"/>
+        <rect x="70" y="70" width="48" height="80" rx="6" fill="#1f4b99"/>
+        <rect x="180" y="46" width="48" height="104" rx="6" fill="#1f4b99"/>
+        <rect x="290" y="28" width="48" height="122" rx="6" fill="#1f7a4d"/>
+        <text x="94" y="168" text-anchor="middle" font-size="12" fill="#1c1915">d=3</text>
+        <text x="204" y="168" text-anchor="middle" font-size="12" fill="#1c1915">d=5</text>
+        <text x="314" y="168" text-anchor="middle" font-size="12" fill="#1c1915">d=7</text>
+      </svg>
+      <p data-marble-id="bench-caption" data-marble-editable>Logical error per round falls with distance once p is half the threshold. The green bar is the operating point.</p>
+      <p data-marble-id="notes-bench" class="speaker" data-marble-editable>Do not read the y-axis aloud. Say “below 10⁻³ at distance 7” and stop.</p>
+    </section>
+    <section data-marble-id="pane-eq" class="slide card" data-slide="slide-eq">
+      <h2 data-marble-id="eqs-h" data-marble-editable>Key equations</h2>
+      <p data-marble-id="eqs-1" data-marble-editable>P_L ≤ C (p / p_th)^((d+1)/2)</p>
+      <p data-marble-id="eqs-2" data-marble-editable>The constant C counts homology classes, not fit parameters.</p>
+      <p data-marble-id="notes-eq" class="speaker" data-marble-editable>If someone asks where C comes from, go back to the proof slide you have not written yet. Say so.</p>
+    </section>
+    <section data-marble-id="pane-next" class="slide card" data-slide="slide-next">
+      <h2 data-marble-id="next-h" data-marble-editable>Next steps</h2>
+      <ol data-marble-id="next-list" class="nexts" data-marble-sortable="nexts">
+        <li data-marble-id="next-1" data-marble-removable><span data-marble-id="next-1-t" data-marble-editable>Freeze the decoder hash in the notebook.</span></li>
+        <li data-marble-id="next-2" data-marble-removable><span data-marble-id="next-2-t" data-marble-editable>Rerun distance 7 with the logged shard.</span></li>
+        <li data-marble-id="next-3" data-marble-removable><span data-marble-id="next-3-t" data-marble-editable>Write the sentence a reviewer can falsify.</span></li>
+      </ol>
+      <p data-marble-id="notes-next" class="speaker" data-marble-editable>End on the falsifiable sentence. Do not take questions about a decoder you have not frozen.</p>
+    </section>
+  </div>
+</div>
+<script>
+(function () {
+  function boot(start) {
+    if (window.marble) start(window.marble);
+    else document.addEventListener('marble:ready', function () { start(window.marble); }, { once: true });
+  }
+  boot(function (marble) {
+    var MID = 'data-marble-' + 'id';
+    var AFFORDANCES = ["data-marble-editable","data-marble-sortable","data-marble-canvas","data-marble-resizable","data-marble-removable","data-marble-add","data-marble-toggle","data-marble-choose","data-marble-expand","data-marble-step","data-marble-note"];
+    if (marble && marble.address) { marble.address(document.querySelectorAll(AFFORDANCES.map(function (a) { return "[" + a + "]"; }).join(","))); }
+    function qMarble(id) { return document.querySelector('[' + MID + '="' + id + '"]'); }
+    var deck = qMarble('deck');
+    function derive() {
+      deck.classList.add('marble-derived');
+      var active = deck.getAttribute('data-active-slide');
+      var items = document.querySelectorAll('#slide-list > li');
+      for (var i = 0; i < items.length; i++) items[i].classList.toggle('marble-on', items[i].getAttribute('data-marble-id') === active);
+      var slides = document.querySelectorAll('#slide-stage > .slide');
+      for (var s = 0; s < slides.length; s++) slides[s].classList.toggle('marble-on', slides[s].getAttribute('data-slide') === active);
+    }
+    function ensureSlides() {
+      var items = document.querySelectorAll('#slide-list > li');
+      for (var i = 0; i < items.length; i++) {
+        var id = items[i].getAttribute('data-marble-id');
+        if (!id || document.querySelector('#slide-stage > [data-slide="' + id + '"]')) continue;
+        var titleEl = items[i].querySelector('[data-marble-editable]');
+        var title = (titleEl && titleEl.textContent || 'New slide').trim().replace(/</g, '');
+        var paneId = marble.newId();
+        var hId = marble.newId();
+        var pId = marble.newId();
+        var nId = marble.newId();
+        var html = '<section ' + MID + '="' + paneId + '" class="slide card" data-slide="' + id + '"><h2 ' + MID + '="' + hId + '" data-marble-editable>' + title + '</h2><p ' + MID + '="' + pId + '" data-marble-editable>One claim, then the evidence that would retire it.</p><p ' + MID + '="' + nId + '" class="speaker" data-marble-editable>Say this sentence, then stop.</p></section>';
+        var op = { type: 'insert', parentId: 'slide-stage', beforeId: null, html: html };
+        marble.apply(op);
+        if (marble.canChange) marble.op(op, { immediate: true });
+      }
+      derive();
+    }
+    document.getElementById('slide-list').addEventListener('click', function (event) {
+      if (event.target.closest('.marble-btn, .marble-grip')) return;
+      var li = event.target.closest('#slide-list > li');
+      if (!li) return;
+      var id = li.getAttribute('data-marble-id');
+      if (!id) return;
+      deck.setAttribute('data-active-slide', id);
+      derive();
+      marble.op({ type: 'setAttr', id: 'deck', name: 'data-active-slide', value: id }, { look: true });
+    });
+    marble.register(derive);
+    new MutationObserver(ensureSlides).observe(document.getElementById('slide-list'), { childList: true });
+    ensureSlides();
+    });
+})();
+</script>
+</body>
+</html>

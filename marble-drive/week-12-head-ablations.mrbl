@@ -1,0 +1,223 @@
+<!doctype html>
+<html lang="en" data-marble="1">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="marble:capabilities" content="storage; net=none">
+<title>Week 12 — Head Ablations</title>
+<style>
+:root { --ink:#1c1915;--muted:#6d655c;--faint:#8d8478;--line:#e4dcd2;--paper:#f3efe7;--panel:#fffdf9;--panel-2:#f4efe6;--accent:#1f4b99;--accent-2:#1f7a4d;--accent-soft:#e6eefb;--good:#1e7a46;--warn:#9a5b12;--danger:#9d2c2c;--shadow:0 18px 40px rgba(48,36,22,.08);--serif:"Iowan Old Style",Palatino,"Palatino Linotype",Georgia,serif;--sans:"Avenir Next","Segoe UI",system-ui,sans-serif;--mono:"IBM Plex Mono",ui-monospace,SFMono-Regular,Menlo,monospace; }
+@media (prefers-color-scheme: dark) { :root { --ink:#efeae3;--muted:#b7aea2;--faint:#8f867b;--line:#34302b;--paper:#131210;--panel:#1c1a17;--panel-2:#26231f;--accent:#9db6ff;--accent-2:#8ed0b0;--accent-soft:#243156;--good:#8ed0b0;--warn:#e2b56a;--danger:#f0a3a3;--shadow:0 18px 40px rgba(0,0,0,.35); } }
+html[data-xdrive-theme="light"] { --ink:#1c1915;--muted:#6d655c;--faint:#8d8478;--line:#e4dcd2;--paper:#f3efe7;--panel:#fffdf9;--panel-2:#f4efe6;--accent:#1f4b99;--accent-2:#1f7a4d;--accent-soft:#e6eefb;--good:#1e7a46;--warn:#9a5b12;--danger:#9d2c2c;--shadow:0 18px 40px rgba(48,36,22,.08);--serif:"Iowan Old Style",Palatino,"Palatino Linotype",Georgia,serif;--sans:"Avenir Next","Segoe UI",system-ui,sans-serif;--mono:"IBM Plex Mono",ui-monospace,SFMono-Regular,Menlo,monospace; color-scheme: light; }
+html[data-xdrive-theme="dark"] { --ink:#efeae3;--muted:#b7aea2;--faint:#8f867b;--line:#34302b;--paper:#131210;--panel:#1c1a17;--panel-2:#26231f;--accent:#9db6ff;--accent-2:#8ed0b0;--accent-soft:#243156;--good:#8ed0b0;--warn:#e2b56a;--danger:#f0a3a3;--shadow:0 18px 40px rgba(0,0,0,.35); color-scheme: dark; }
+* { box-sizing: border-box; }
+html, body { margin: 0; min-height: 100%; }
+body { background: var(--paper); color: var(--ink); font: 16px/1.55 var(--sans); -webkit-font-smoothing: antialiased; }
+button, input { font: inherit; color: inherit; }
+button { cursor: pointer; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+[data-marble-editable]:focus { outline: none; box-shadow: inset 0 -1.5px 0 var(--accent); }
+.kicker { margin: 0 0 .35rem; color: var(--accent); font: 600 .72rem/1 var(--mono); letter-spacing: .14em; text-transform: uppercase; }
+h1 { font-family: var(--serif); font-weight: 560; letter-spacing: -.03em; line-height: 1.05; margin: 0; }
+h2 { font-family: var(--serif); font-size: 1.35rem; font-weight: 560; letter-spacing: -.02em; margin: 0 0 .4rem; }
+p { margin: 0; }
+.lede { color: var(--muted); max-width: 40rem; }
+marble-alt { display: block; }
+marble-alt > [data-marble-alt] { display: none; }
+marble-alt[data-marble-active="v1"] > [data-marble-alt="v1"],
+marble-alt[data-marble-active="v2"] > [data-marble-alt="v2"],
+marble-alt[data-marble-active="v3"] > [data-marble-alt="v3"],
+marble-alt[data-marble-active="v4"] > [data-marble-alt="v4"],
+marble-alt[data-marble-active="v5"] > [data-marble-alt="v5"],
+marble-alt[data-marble-active="v6"] > [data-marble-alt="v6"] { display: block; }
+marble-alt:not([data-marble-active]) > [data-marble-alt]:first-child { display: block; }
+[data-marble-sortable] { padding-left: 1.4rem; }
+.pill, .choose button, .tex-edit, .add {
+  border: 1px solid var(--line); background: var(--panel); border-radius: 999px;
+  padding: .18rem .65rem; font: 600 .75rem/1.4 var(--sans);
+}
+.choose { display: inline-flex; gap: .25rem; flex-wrap: wrap; }
+.choose button[aria-pressed="true"] { background: var(--accent); color: #fff; border-color: transparent; }
+.add { border-style: dashed; color: var(--accent); background: transparent; }
+.card, section.block {
+  background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 1rem 1.1rem;
+  box-shadow: var(--shadow);
+}
+
+
+  .notebook { display: grid; grid-template-columns: 16.5rem 1fr; min-height: 100vh; }
+  .rail { border-right: 1px solid var(--line); padding: 1.2rem 1rem 2rem; background: var(--panel-2); }
+  .rail h1 { font-size: 1.35rem; margin-bottom: .8rem; }
+  .note-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: .35rem; }
+  .note-list li { padding: .55rem .7rem; border-radius: 10px; background: transparent; }
+  .note-list li.marble-on, .notebook:not(.marble-derived) .note-list li:first-child { background: var(--panel); box-shadow: var(--shadow); }
+  .stage { padding: 1.6rem 1.8rem 3rem; }
+  .notebook.marble-derived [data-note] { display: none; }
+  .notebook.marble-derived [data-note].marble-on { display: block; }
+  .notebook:not(.marble-derived) [data-note] { display: none; }
+  .notebook:not(.marble-derived) [data-note="note-hypothesis"] { display: block; }
+  .checks { list-style: none; margin: .8rem 0; padding: 0; display: flex; flex-direction: column; gap: .4rem; }
+  .checks li { display: flex; gap: .6rem; align-items: center; padding: .4rem .2rem; }
+  [data-done="yes"] [data-marble-editable] { text-decoration: line-through; color: var(--muted); }
+  .steps { display: flex; flex-wrap: wrap; gap: .6rem; margin-top: .8rem; }
+  .stepper { display: flex; align-items: center; gap: .35rem; padding: .35rem .5rem; border: 1px solid var(--line); border-radius: 999px; background: var(--panel); }
+  .stepper button { width: 1.5rem; height: 1.5rem; border-radius: 999px; border: 1px solid var(--line); background: var(--panel-2); }
+  .probes { display: grid; grid-template-columns: 1fr 1fr; gap: .7rem; margin-top: .8rem; }
+  .queue { list-style: none; margin: .6rem 0 0; padding: 0; display: flex; flex-direction: column; gap: .4rem; }
+  .add { margin-top: .8rem; }
+  @media (max-width: 800px) { .notebook { grid-template-columns: 1fr; } .probes { grid-template-columns: 1fr; } }
+  </style>
+</head>
+<body>
+<div data-marble-id="notebook-shell" id="notebook-shell" class="notebook" data-active-note="note-probes">
+  <aside class="rail" data-marble-id="notebook-rail">
+    <p data-marble-id="notebook-kicker" class="kicker">Lab notebook</p>
+    <h1 data-marble-id="notebook-title" data-marble-editable>Week 12 — Head Ablations</h1>
+    <ol data-marble-id="note-list" id="note-list" class="note-list" data-marble-sortable="notes">
+      <li data-marble-id="note-hypothesis" data-marble-removable><p data-marble-id="note-hypothesis-title" data-marble-editable>Hypothesis &amp; Ablations</p></li>
+      <li data-marble-id="note-probes" data-marble-removable><p data-marble-id="note-probes-title" data-marble-editable>Attention Head Probes</p></li>
+      <li data-marble-id="note-spike" data-marble-removable><p data-marble-id="note-spike-title" data-marble-editable>Loss Spike Postmortem</p></li>
+      <li data-marble-id="note-queue" data-marble-removable><p data-marble-id="note-queue-title" data-marble-editable>Reading Queue</p></li>
+    </ol>
+    <button data-marble-id="add-note" class="add" type="button" data-marble-add="#tpl-note" data-marble-into="#note-list">+ New note</button>
+    <template data-marble-id="tpl-note" id="tpl-note">
+      <li data-marble-removable><p data-marble-editable>New note</p></li>
+    </template>
+  </aside>
+  <div data-marble-id="note-stage" id="note-stage" class="stage">
+    <article data-marble-id="pane-hypothesis" data-note="note-hypothesis">
+      <h2 data-marble-id="pane-hypothesis-h" data-marble-editable>Hypothesis &amp; Ablations</h2>
+      <p data-marble-id="pane-hypothesis-p" data-marble-editable>The early-layer heads are doing position, not semantics. Ablate them only after the seed is frozen, or the loss spike and the ablation get blamed on each other.</p>
+      <ul data-marble-id="proto" class="checks" data-marble-sortable="protocol">
+        <li data-marble-id="chk-freeze" data-done="no" data-marble-removable>
+          <button data-marble-id="chk-freeze-tog" type="button" data-marble-toggle="data-done:yes|no" data-marble-of="[data-marble-id=chk-freeze]">Done</button>
+          <span data-marble-id="chk-freeze-label" data-marble-editable>Freeze seeds before the sweep</span>
+        </li>
+        <li data-marble-id="chk-seeds" data-done="yes" data-marble-removable>
+          <button data-marble-id="chk-seeds-tog" type="button" data-marble-toggle="data-done:yes|no" data-marble-of="[data-marble-id=chk-seeds]">Done</button>
+          <span data-marble-id="chk-seeds-label" data-marble-editable>Log the data order hash</span>
+        </li>
+        <li data-marble-id="chk-log" data-done="no" data-marble-removable>
+          <button data-marble-id="chk-log-tog" type="button" data-marble-toggle="data-done:yes|no" data-marble-of="[data-marble-id=chk-log]">Done</button>
+          <span data-marble-id="chk-log-label" data-marble-editable>Write the failed run before the next one</span>
+        </li>
+      </ul>
+      <div data-marble-id="hyper" class="steps">
+        <div data-marble-id="hp-lr" class="stepper" data-lr="3">
+          <span data-marble-id="hp-lr-name">lr 10^−</span>
+          <button data-marble-id="hp-lr-dec" type="button" data-marble-step="data-lr:1:8" data-marble-by="-1" data-marble-of="[data-marble-id=hp-lr]">−</button>
+          <b data-marble-id="hp-lr-val">3</b>
+          <button data-marble-id="hp-lr-inc" type="button" data-marble-step="data-lr:1:8" data-marble-by="1" data-marble-of="[data-marble-id=hp-lr]">+</button>
+        </div>
+        <div data-marble-id="hp-layers" class="stepper" data-layers="8">
+          <span data-marble-id="hp-layers-name">layers</span>
+          <button data-marble-id="hp-layers-dec" type="button" data-marble-step="data-layers:2:24" data-marble-by="-1" data-marble-of="[data-marble-id=hp-layers]">−</button>
+          <b data-marble-id="hp-layers-val">8</b>
+          <button data-marble-id="hp-layers-inc" type="button" data-marble-step="data-layers:2:24" data-marble-by="1" data-marble-of="[data-marble-id=hp-layers]">+</button>
+        </div>
+        <div data-marble-id="hp-seed" class="stepper" data-seed="4">
+          <span data-marble-id="hp-seed-name">seeds</span>
+          <button data-marble-id="hp-seed-dec" type="button" data-marble-step="data-seed:1:12" data-marble-by="-1" data-marble-of="[data-marble-id=hp-seed]">−</button>
+          <b data-marble-id="hp-seed-val">4</b>
+          <button data-marble-id="hp-seed-inc" type="button" data-marble-step="data-seed:1:12" data-marble-by="1" data-marble-of="[data-marble-id=hp-seed]">+</button>
+        </div>
+      </div>
+    </article>
+    <article data-marble-id="pane-probes" data-note="note-probes">
+      <h2 data-marble-id="pane-probes-h" data-marble-editable>Attention Head Probes</h2>
+      <p data-marble-id="pane-probes-p" data-marble-editable>Linear probes on the residual stream, fit per head, scored on the previous-token copy task. A head that probes well and ablates clean is a circuit, not a correlation.</p>
+      <div data-marble-id="probe-grid" class="probes">
+        <section data-marble-id="probe-1" class="block" data-marble-removable>
+          <h2 data-marble-id="probe-1-h" data-marble-editable>L2H4</h2>
+          <p data-marble-id="probe-1-p" data-marble-editable>Copies the previous token. Ablation raises copy loss by 0.4 without moving the main loss.</p>
+        </section>
+        <section data-marble-id="probe-2" class="block" data-marble-removable>
+          <h2 data-marble-id="probe-2-h" data-marble-editable>L5H1</h2>
+          <p data-marble-id="probe-2-p" data-marble-editable>Induction head. Probe accuracy 0.91. Leave it in until the name-mover is mapped.</p>
+        </section>
+      </div>
+    </article>
+    <article data-marble-id="pane-spike" data-note="note-spike">
+      <h2 data-marble-id="pane-spike-h" data-marble-editable>Loss Spike Postmortem</h2>
+      <p data-marble-id="pane-spike-p" data-marble-editable>Step 48,200. Loss 2.1 to 6.4 in forty steps, then a stall. The data order hash did not match the logged run.</p>
+      <p data-marble-id="spike-when" class="kicker" data-marble-editable>When</p>
+      <p data-marble-id="spike-when-p" data-marble-editable>Just after the learning-rate decay, on the shard that was reshuffled by hand.</p>
+      <p data-marble-id="spike-cause" class="kicker" data-marble-editable>Cause</p>
+      <p data-marble-id="spike-cause-p" data-marble-editable>Not the ablation. The spike reproduces with every head intact if the shard hash differs.</p>
+    </article>
+    <article data-marble-id="pane-queue" data-note="note-queue">
+      <h2 data-marble-id="pane-queue-h" data-marble-editable>Reading Queue</h2>
+      <ol data-marble-id="queue-list" class="queue" data-marble-sortable="queue">
+        <li data-marble-id="q-1" data-marble-removable><p data-marble-id="q-1-t" data-marble-editable>Olsson et al. — In-context learning and induction heads</p></li>
+        <li data-marble-id="q-2" data-marble-removable><p data-marble-id="q-2-t" data-marble-editable>Elhage et al. — A mathematical framework for transformer circuits</p></li>
+        <li data-marble-id="q-3" data-marble-removable><p data-marble-id="q-3-t" data-marble-editable>Power et al. — Grokking: generalization beyond overfitting</p></li>
+      </ol>
+    </article>
+  </div>
+</div>
+<script>
+(function () {
+  function boot(start) {
+    if (window.marble) start(window.marble);
+    else document.addEventListener('marble:ready', function () { start(window.marble); }, { once: true });
+  }
+  boot(function (marble) {
+    var MID = 'data-marble-' + 'id';
+    var AFFORDANCES = ["data-marble-editable","data-marble-sortable","data-marble-canvas","data-marble-resizable","data-marble-removable","data-marble-add","data-marble-toggle","data-marble-choose","data-marble-expand","data-marble-step","data-marble-note"];
+    if (marble && marble.address) { marble.address(document.querySelectorAll(AFFORDANCES.map(function (a) { return "[" + a + "]"; }).join(","))); }
+    function qMarble(id) { return document.querySelector('[' + MID + '="' + id + '"]'); }
+    var shell = qMarble('notebook-shell');
+    function syncSteps() {
+      var hosts = document.querySelectorAll('.stepper');
+      for (var i = 0; i < hosts.length; i++) {
+        var val = hosts[i].querySelector('b');
+        var name = hosts[i].hasAttribute('data-lr') ? 'data-lr' : hosts[i].hasAttribute('data-layers') ? 'data-layers' : 'data-seed';
+        if (val) val.textContent = hosts[i].getAttribute(name) || '';
+      }
+    }
+    function derive() {
+      if (!shell) return;
+      shell.classList.add('marble-derived');
+      var active = shell.getAttribute('data-active-note');
+      var items = document.querySelectorAll('#note-list > li');
+      for (var i = 0; i < items.length; i++) items[i].classList.toggle('marble-on', items[i].getAttribute('data-marble-id') === active);
+      var panes = document.querySelectorAll('#note-stage > [data-note]');
+      for (var p = 0; p < panes.length; p++) panes[p].classList.toggle('marble-on', panes[p].getAttribute('data-note') === active);
+      syncSteps();
+    }
+    function ensurePanes() {
+      var items = document.querySelectorAll('#note-list > li');
+      for (var i = 0; i < items.length; i++) {
+        var id = items[i].getAttribute('data-marble-id');
+        if (!id || document.querySelector('#note-stage > [data-note="' + id + '"]')) continue;
+        var titleEl = items[i].querySelector('[data-marble-editable]');
+        var title = (titleEl && titleEl.textContent || 'New note').trim();
+        var paneId = marble.newId();
+        var hId = marble.newId();
+        var pId = marble.newId();
+        var html = '<article ' + MID + '="' + paneId + '" data-note="' + id + '"><h2 ' + MID + '="' + hId + '" data-marble-editable>' + title.replace(/</g, '') + '</h2><p ' + MID + '="' + pId + '" data-marble-editable>What changed, what you measured, and what you would rerun.</p></article>';
+        var op = { type: 'insert', parentId: 'note-stage', beforeId: null, html: html };
+        marble.apply(op);
+        if (marble.canChange) marble.op(op, { immediate: true });
+      }
+      derive();
+    }
+    document.getElementById('note-list').addEventListener('click', function (event) {
+      if (event.target.closest('.marble-btn, .marble-grip')) return;
+      var li = event.target.closest('#note-list > li');
+      if (!li) return;
+      var id = li.getAttribute('data-marble-id');
+      if (!id) return;
+      shell.setAttribute('data-active-note', id);
+      derive();
+      marble.op({ type: 'setAttr', id: 'notebook-shell', name: 'data-active-note', value: id }, { look: true });
+    });
+    marble.register(derive);
+    new MutationObserver(ensurePanes).observe(document.getElementById('note-list'), { childList: true });
+    new MutationObserver(syncSteps).observe(qMarble('hyper'), { attributes: true, subtree: true });
+    ensurePanes();
+    });
+})();
+</script>
+</body>
+</html>
