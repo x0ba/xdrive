@@ -1,16 +1,14 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { CSSProperties } from 'react'
-import { Pin, Search, Sparkles, X } from 'lucide-react'
+import { Search, X } from 'lucide-react'
 import {
   AgentHeroComposer,
   BrowserTabStrip,
   DocumentBreadcrumbHeader,
   FilterPillBar,
   MarbleAppCard,
-  MetricOverviewStrip,
   SidebarRail,
   TemplateGalleryCard,
-  formatBytes,
   getCategoryIcon,
   getCategoryLabel,
   getPermissionMeta,
@@ -26,7 +24,6 @@ import {
   CursorAISidebar,
   SelectionSketchOverlay,
   connectedModelsFromSubscriptions,
-  permissionByLevel,
 } from '#/components/collaborator'
 import type {
   ConnectedModelOption,
@@ -99,42 +96,19 @@ const DEFAULT_OPEN = ['ws-qec-threshold', 'ws-week-12-ablations']
 
 const ROLE_LABEL: Record<SimulatedRole, string> = {
   owner: 'Owner',
-  view_only: 'View & Look Only',
-  comment_annotate: 'Annotate & Propose',
-  edit_no_ai: 'Edit without AI',
-  edit_with_ai_byok: 'Edit + Collaborator AI',
-  edit_with_ai_shared: 'Edit + Shared Owner AI',
+  view_only: 'View only',
+  comment_annotate: 'Propose',
+  edit_no_ai: 'Edit only',
+  edit_with_ai_byok: 'BYOK AI',
+  edit_with_ai_shared: 'Shared AI',
 }
 
 const SIM_ROLES: SimulatedRole[] = [
-  'owner',
   'view_only',
   'comment_annotate',
   'edit_no_ai',
   'edit_with_ai_byok',
   'edit_with_ai_shared',
-]
-
-const PROMPT_TEMPLATES: Array<{
-  title: string
-  prompt: string
-  category: MarbleAppCategory
-}> = [
-  {
-    category: 'latex',
-    title: 'LaTeX paper',
-    prompt: 'Build an interactive LaTeX paper on quantum error correction',
-  },
-  {
-    category: 'notebook',
-    title: 'Lab notebook',
-    prompt: 'Create a multi-note mechanistic interpretability lab notebook',
-  },
-  {
-    category: 'slides',
-    title: 'Benchmark deck',
-    prompt: 'Generate a benchmark comparison deck with SVG charts',
-  },
 ]
 
 const MODEL_FOR: Record<MarbleAppCategory, string> = {
@@ -440,36 +414,6 @@ function effectivePermission(role: SimulatedRole): SharePermissionLevel {
   return role
 }
 
-function gestureCopy(role: SharePermissionLevel): string {
-  const spec = permissionByLevel(role)
-  const parts = [
-    spec.look ? 'look gestures for notes, slides, and tabs stay on' : null,
-    spec.directEdit
-      ? 'direct edits (editable, sortable, add, remove) are on'
-      : 'direct edits are off',
-    spec.sketch
-      ? 'sketch and callouts can be sent to the model'
-      : 'sketch-to-AI is off',
-    spec.ai === 'off'
-      ? 'the prompt bar and collaborator cannot commit ops'
-      : spec.ai === 'propose'
-        ? 'AI can propose ops, and Keep stays locked'
-        : spec.ai === 'byok'
-          ? 'AI runs on the visitor’s own subscription'
-          : 'AI runs on the owner’s shared quota',
-  ].filter((part): part is string => Boolean(part))
-  return `${ROLE_LABEL[role]}. ${spec.summary} ${parts.join(' ')}.`
-}
-
-function matchesAccess(
-  doc: MarbleDocumentFile,
-  access: SharePermissionLevel | 'all',
-): boolean {
-  if (access === 'all') return true
-  if (doc.share.publicPermission === access) return true
-  return doc.share.collaborators.some((person) => person.permission === access)
-}
-
 function matchesQuery(doc: MarbleDocumentFile, query: string): boolean {
   const needle = query.trim().toLowerCase()
   if (!needle) return true
@@ -502,22 +446,6 @@ function forCard(doc: MarbleDocumentFile): MarbleDocumentFile {
 }
 
 function toBlueprint(doc: MarbleDocumentFile): MarbleTemplateBlueprint {
-  const affordances: MarbleTemplateBlueprint['affordances'] = []
-  if (doc.source.includes('data-marble-editable')) {
-    affordances.push('data-marble-editable')
-  }
-  if (doc.source.includes('data-marble-sortable')) {
-    affordances.push('data-marble-sortable')
-  }
-  if (doc.source.includes('marble-alt')) affordances.push('<marble-alt>')
-  if (doc.source.includes('data-marble-canvas')) {
-    affordances.push('data-marble-canvas')
-  }
-  if (doc.source.includes('data-marble-add'))
-    affordances.push('data-marble-add')
-  if (doc.source.includes('data-marble-look')) {
-    affordances.push('data-marble-look')
-  }
   return {
     id: doc.id,
     title: doc.title,
@@ -526,12 +454,9 @@ function toBlueprint(doc: MarbleDocumentFile): MarbleTemplateBlueprint {
     description: doc.description,
     nodeCount: doc.nodeCount,
     byteSize: doc.byteSize,
-    affordances,
+    affordances: [],
     recommendedModel: MODEL_FOR[doc.category],
-    previewHighlights: [
-      `${doc.nodeCount} addressable nodes`,
-      ...doc.tags.slice(0, 3),
-    ],
+    previewHighlights: [],
   }
 }
 
@@ -639,7 +564,6 @@ export function XDriveWorkspace({
   const [roles, setRoles] = useState<RoleAssignments>(DEFAULT_ROLE_ASSIGNMENTS)
   const [modelId, setModelId] = useState('xai/grok-4.7')
   const [category, setCategory] = useState<MarbleAppCategory | 'all'>('all')
-  const [access, setAccess] = useState<SharePermissionLevel | 'all'>('all')
   const [sortBy, setSortBy] = useState<SortOption>('updated')
   const [viewMode, setViewMode] = useState<DriveViewMode>('grid')
   const [searchQuery, setSearchQuery] = useState('')
@@ -709,9 +633,7 @@ export function XDriveWorkspace({
           id: model.id,
           name: model.name,
           providerId: model.providerId,
-          badge: subscription.connected
-            ? `${subscription.name} · ${model.badge}`
-            : `${subscription.name} · not linked`,
+          badge: subscription.name,
           role: model.role,
         })),
       ),
@@ -721,36 +643,13 @@ export function XDriveWorkspace({
   const filteredDocs = useMemo(() => {
     return docs
       .filter((doc) => category === 'all' || doc.category === category)
-      .filter((doc) => matchesAccess(doc, access))
       .filter((doc) => matchesQuery(doc, searchQuery))
       .slice()
       .sort((a, b) => compareDocs(a, b, sortBy))
-  }, [docs, category, access, searchQuery, sortBy])
+  }, [docs, category, searchQuery, sortBy])
 
   const sharedDocs = useMemo(() => docs.filter(isShared), [docs])
   const blueprints = useMemo(() => templates.map(toBlueprint), [templates])
-
-  const metrics = useMemo(() => {
-    const committedOps = docs.reduce(
-      (sum, doc) =>
-        sum +
-        doc.checkpoints.reduce(
-          (inner, checkpoint) => inner + checkpoint.opsCount,
-          0,
-        ),
-      0,
-    )
-    return {
-      totalApps: docs.length,
-      addressableNodes: docs.reduce((sum, doc) => sum + doc.nodeCount, 0),
-      committedOps,
-      totalByteSize: docs.reduce((sum, doc) => sum + doc.byteSize, 0),
-      activeSubscriptions: subscriptions.filter(
-        (subscription) =>
-          subscription.connected && subscription.status === 'active',
-      ).length,
-    }
-  }, [docs, subscriptions])
 
   const recentProposals = useMemo(() => {
     return library
@@ -791,18 +690,6 @@ export function XDriveWorkspace({
       fileName: doc.fileName,
       category: doc.category,
       nodeCount: doc.nodeCount,
-    }))
-
-  const recentApps = docs
-    .slice()
-    .sort((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt))
-    .slice(0, 5)
-    .map((doc) => ({
-      id: doc.id,
-      title: doc.title,
-      fileName: doc.fileName,
-      category: doc.category,
-      updatedAt: relativeTime(doc.updatedAt),
     }))
 
   const lastMessage = thread.at(-1)
@@ -937,7 +824,6 @@ export function XDriveWorkspace({
       previewRun.current += 1
       setLivePreview(null)
     } else {
-      // The iframe already applied this op. Rebuilding srcDoc would drop the caret.
       shownSourceRef.current = applied.source
     }
     const label = `${options?.look ? 'Look · ' : ''}${op.type}${op.id ? ` #${op.id}` : ''}`
@@ -1448,39 +1334,33 @@ export function XDriveWorkspace({
     const views: PaletteItem[] = [
       {
         id: 'nav-drive',
-        label: 'Drive Home',
+        label: 'Files',
         hint: 'Browse .mrbl apps',
         run: () => visit('home', 'drive'),
       },
       {
-        id: 'nav-agent',
-        label: 'Agent Studio',
-        hint: 'Build a new .mrbl app',
-        run: () => visit('home', 'agent-studio'),
-      },
-      {
         id: 'nav-templates',
-        label: 'Templates (.mrbl)',
-        hint: 'Six predefined apps',
+        label: 'Templates',
+        hint: 'Predefined .mrbl templates',
         run: () => visit('home', 'templates'),
       },
       {
         id: 'nav-shared',
-        label: 'Shared with Me',
+        label: 'Shared',
         hint: 'Permissions and visitor roles',
         run: () => visit('home', 'shared'),
       },
       {
         id: 'nav-subs',
-        label: 'AI Subscriptions',
-        hint: 'OpenCode Go, SpaceX AI, Claude, OpenAI',
+        label: 'Models',
+        hint: 'Connected providers',
         run: () => visit('home', 'subscriptions'),
       },
     ]
     const files: PaletteItem[] = library.map((doc) => ({
       id: doc.id,
       label: doc.title,
-      hint: doc.isTemplate ? `Template · ${doc.fileName}` : doc.fileName,
+      hint: doc.fileName,
       run: () => openDocument(doc.id),
     }))
     return [...views, ...files]
@@ -1521,7 +1401,7 @@ export function XDriveWorkspace({
         activeTabId={activeDoc ? activeDoc.id : 'home'}
         onSelectTab={(tabId) => visit(tabId, nav)}
         onCloseTab={closeTab}
-        onNewTab={() => visit('home', 'agent-studio')}
+        onNewTab={() => visit('home', 'drive')}
         canGoBack={trail.cursor > 0}
         canGoForward={trail.cursor < trail.places.length - 1}
         onBack={() => go(-1)}
@@ -1542,17 +1422,8 @@ export function XDriveWorkspace({
           onSelectNav={(next) => visit('home', next)}
           onOpenCommandPalette={() => setPaletteOpen(true)}
           pinnedApps={pinnedApps}
-          recentApps={recentApps}
           activeAppId={activeDoc?.id}
           onSelectApp={openDocument}
-          subscriptions={subscriptions.map((subscription) => ({
-            providerId: subscription.providerId,
-            name: subscription.name,
-            connected: subscription.connected,
-            status: subscription.status,
-            planName: subscription.planName,
-          }))}
-          onManageSubscriptions={() => visit('home', 'subscriptions')}
         />
         <div className="flex min-h-0 min-w-0 flex-1 flex-col">
           {activeDoc ? (
@@ -1561,8 +1432,6 @@ export function XDriveWorkspace({
                 folder={activeDoc.folder}
                 category={activeDoc.category}
                 fileName={activeDoc.fileName}
-                nodeCount={activeDoc.nodeCount}
-                byteSize={activeDoc.byteSize}
                 syncState={activeDoc.syncState}
                 interactionMode={mode}
                 onChangeInteractionMode={(next) => setMode(activeDoc.id, next)}
@@ -1580,35 +1449,6 @@ export function XDriveWorkspace({
                 }
                 isPublicLinkEnabled={activeDoc.share.isPublicLinkEnabled}
               />
-              <div className="flex flex-wrap items-center gap-2 border-b border-[var(--xd-border)] bg-[var(--xd-canvas)] px-4 py-1.5">
-                <span className="xd-mono rounded border border-[var(--xd-border)] bg-[var(--xd-elevated)] px-1.5 py-0.5 text-[10.5px] text-[var(--xd-ink-secondary)]">
-                  v{activeDoc.version}
-                </span>
-                {simulatedRole !== 'owner' && (
-                  <div className="flex min-w-0 flex-1 flex-wrap items-center gap-1.5">
-                    <p className="min-w-0 flex-1 text-[12px] leading-snug text-[var(--xd-ink-secondary)]">
-                      {gestureCopy(simulatedRole)}
-                    </p>
-                    <div className="flex flex-wrap gap-1">
-                      {SIM_ROLES.map((role) => (
-                        <button
-                          key={role}
-                          type="button"
-                          onClick={() => setSimulatedRole(role)}
-                          className={cn(
-                            'rounded border px-1.5 py-0.5 text-[10.5px]',
-                            role === simulatedRole
-                              ? 'border-[var(--xd-accent)] bg-[var(--xd-accent-soft)] text-[var(--xd-accent)]'
-                              : 'border-[var(--xd-border)] text-[var(--xd-ink-secondary)]',
-                          )}
-                        >
-                          {ROLE_LABEL[role]}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                )}
-              </div>
               <div className="min-h-0 flex-1">
                 {mode === 'source' ? (
                   <div className="flex h-full min-h-0">
@@ -1714,13 +1554,9 @@ export function XDriveWorkspace({
             </div>
           ) : (
             <div className="min-h-0 flex-1 overflow-y-auto">
-              {nav === 'drive' && (
-                <div className="mx-auto flex w-full max-w-6xl flex-col gap-5 px-5 py-5">
+              {(nav === 'drive' || nav === 'agent-studio') && (
+                <div className="mx-auto flex w-full max-w-5xl flex-col gap-5 px-6 py-6">
                   <div>
-                    <p className="mb-2 text-[13px] text-[var(--xd-ink-secondary)]">
-                      Ask xDrive Agent to build a new .mrbl app or search your
-                      research drive...
-                    </p>
                     <AgentHeroComposer
                       models={composerModels}
                       selectedModelId={modelId}
@@ -1729,18 +1565,6 @@ export function XDriveWorkspace({
                       onQuickStartTemplate={(_category, prompt) =>
                         buildApp(prompt, modelId)
                       }
-                      onTriggerSketchMode={() => {
-                        const target = openTabIds[0]
-                        if (!target) return
-                        setMode(target, 'sketch')
-                        openDocument(target)
-                      }}
-                      onTriggerAttachNode={() => {
-                        const target = openTabIds[0]
-                        if (!target) return
-                        setMode(target, 'select')
-                        openDocument(target)
-                      }}
                     />
                     {agentStatus && (
                       <p className="mt-2 text-[12px] text-[var(--xd-ink-secondary)]">
@@ -1748,315 +1572,117 @@ export function XDriveWorkspace({
                       </p>
                     )}
                   </div>
-                  <MetricOverviewStrip
-                    totalApps={metrics.totalApps}
-                    addressableNodes={metrics.addressableNodes}
-                    committedOps={metrics.committedOps}
-                    activeSubscriptions={metrics.activeSubscriptions}
-                    totalSubscriptions={subscriptions.length}
-                    totalByteSize={metrics.totalByteSize}
-                  />
+
                   <FilterPillBar
                     selectedCategory={category}
                     onSelectCategory={setCategory}
-                    selectedAccess={access}
-                    onSelectAccess={setAccess}
                     sortBy={sortBy}
                     onSelectSort={setSortBy}
                     viewMode={viewMode}
                     onChangeViewMode={setViewMode}
                     searchQuery={searchQuery}
                     onChangeSearchQuery={setSearchQuery}
-                    totalResults={filteredDocs.length}
                   />
+
                   {filteredDocs.length === 0 ? (
-                    <p className="rounded-md border border-dashed border-[var(--xd-border)] px-4 py-8 text-center text-[13px] text-[var(--xd-ink-muted)]">
-                      No .mrbl apps match this filter.
+                    <p className="py-12 text-center text-[13px] text-[var(--xd-ink-muted)]">
+                      No matching files.
                     </p>
                   ) : viewMode === 'grid' ? (
-                    <div className="grid grid-cols-1 gap-3 xl:grid-cols-2">
+                    <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
                       {filteredDocs.map((doc) => (
-                        <div key={doc.id} className="flex flex-col gap-1">
-                          <div className="flex justify-end">
-                            <button
-                              type="button"
-                              onClick={() => toggleFlag(doc.id, 'pinned')}
-                              aria-pressed={doc.pinned}
-                              className={cn(
-                                'inline-flex h-6 items-center gap-1 rounded px-1.5 text-[11px]',
-                                doc.pinned
-                                  ? 'text-[var(--xd-accent)]'
-                                  : 'text-[var(--xd-ink-muted)] hover:text-[var(--xd-ink)]',
-                              )}
-                            >
-                              <Pin
-                                className={cn(
-                                  'size-3',
-                                  doc.pinned && 'fill-current',
-                                )}
-                              />
-                              {doc.pinned ? 'Pinned' : 'Pin'}
-                            </button>
-                          </div>
-                          <MarbleAppCard
-                            doc={forCard(doc)}
-                            onOpen={() => openDocument(doc.id)}
-                            onDuplicate={() =>
-                              setNamer({
-                                sourceId: doc.id,
-                                title: `${doc.title} copy`,
-                              })
-                            }
-                            onShare={() => setShareId(doc.id)}
-                            onToggleStar={() => toggleFlag(doc.id, 'starred')}
-                          />
-                        </div>
+                        <MarbleAppCard
+                          key={doc.id}
+                          doc={forCard(doc)}
+                          onOpen={() => openDocument(doc.id)}
+                          onDuplicate={() =>
+                            setNamer({
+                              sourceId: doc.id,
+                              title: `${doc.title} copy`,
+                            })
+                          }
+                          onShare={() => setShareId(doc.id)}
+                          onToggleStar={() => toggleFlag(doc.id, 'starred')}
+                          onTogglePin={() => toggleFlag(doc.id, 'pinned')}
+                        />
                       ))}
                     </div>
                   ) : (
                     <div className="overflow-x-auto rounded-md border border-[var(--xd-border)]">
-                      <table className="w-full min-w-[760px] text-left text-[12.5px]">
-                        <thead className="bg-[var(--xd-rail)] text-[11px] text-[var(--xd-ink-muted)]">
+                      <table className="w-full text-left text-[12.5px]">
+                        <thead className="border-b border-[var(--xd-border)] bg-[var(--xd-rail)] text-[11px] text-[var(--xd-ink-muted)]">
                           <tr>
-                            <th className="px-3 py-2 font-medium">App</th>
-                            <th className="px-3 py-2 font-medium">Category</th>
-                            <th className="px-3 py-2 font-medium">Nodes</th>
-                            <th className="px-3 py-2 font-medium">Size</th>
+                            <th className="px-3 py-2 font-medium">File</th>
+                            <th className="px-3 py-2 font-medium">Type</th>
                             <th className="px-3 py-2 font-medium">Edited</th>
-                            <th className="px-3 py-2 font-medium">Access</th>
                             <th className="px-3 py-2 font-medium"> </th>
                           </tr>
                         </thead>
-                        <tbody>
-                          {filteredDocs.map((doc) => {
-                            const meta = getPermissionMeta(
-                              doc.share.publicPermission,
-                            )
-                            return (
-                              <tr
-                                key={doc.id}
-                                className="border-t border-[var(--xd-border)]"
+                        <tbody className="divide-y divide-[var(--xd-border)]">
+                          {filteredDocs.map((doc) => (
+                            <tr
+                              key={doc.id}
+                              onClick={() => openDocument(doc.id)}
+                              className="cursor-pointer transition-colors hover:bg-[var(--xd-surface-hover)]/50"
+                            >
+                              <td className="px-3 py-2.5">
+                                <div className="font-medium text-[var(--xd-ink)]">
+                                  {doc.title}
+                                </div>
+                                <div className="xd-mono text-[10.5px] text-[var(--xd-ink-muted)]">
+                                  {doc.fileName}
+                                </div>
+                              </td>
+                              <td className="px-3 py-2.5 text-[var(--xd-ink-secondary)]">
+                                <span className="inline-flex items-center gap-1.5">
+                                  {getCategoryIcon(doc.category, 'size-3.5')}
+                                  <span>{getCategoryLabel(doc.category)}</span>
+                                </span>
+                              </td>
+                              <td className="xd-tabular px-3 py-2.5 text-[var(--xd-ink-muted)]">
+                                {relativeTime(doc.updatedAt)}
+                              </td>
+                              <td
+                                className="px-3 py-2.5"
+                                onClick={(e) => e.stopPropagation()}
                               >
-                                <td className="px-3 py-2">
+                                <div className="flex justify-end gap-1.5">
                                   <button
                                     type="button"
-                                    onClick={() => openDocument(doc.id)}
-                                    className="font-medium text-[var(--xd-ink)] hover:text-[var(--xd-accent)]"
+                                    onClick={() =>
+                                      setNamer({
+                                        sourceId: doc.id,
+                                        title: `${doc.title} copy`,
+                                      })
+                                    }
+                                    className="rounded px-2 py-1 text-[11px] text-[var(--xd-ink-secondary)] hover:bg-[var(--xd-surface-hover)] hover:text-[var(--xd-ink)]"
                                   >
-                                    {doc.title}
+                                    Duplicate
                                   </button>
-                                  <div className="xd-mono text-[10.5px] text-[var(--xd-ink-muted)]">
-                                    {doc.fileName}
-                                  </div>
-                                </td>
-                                <td className="px-3 py-2 text-[var(--xd-ink-secondary)]">
-                                  <span className="inline-flex items-center gap-1">
-                                    {getCategoryIcon(doc.category, 'size-3.5')}
-                                    {getCategoryLabel(doc.category)}
-                                  </span>
-                                </td>
-                                <td className="xd-tabular px-3 py-2">
-                                  {doc.nodeCount}
-                                </td>
-                                <td className="px-3 py-2">
-                                  {formatBytes(doc.byteSize)}
-                                </td>
-                                <td className="px-3 py-2 text-[var(--xd-ink-secondary)]">
-                                  {relativeTime(doc.updatedAt)}
-                                </td>
-                                <td className="px-3 py-2">
-                                  <span
-                                    className={cn(
-                                      'inline-flex rounded border px-1.5 py-0.5 text-[10.5px]',
-                                      meta.badgeClass,
-                                    )}
+                                  <button
+                                    type="button"
+                                    onClick={() => setShareId(doc.id)}
+                                    className="rounded px-2 py-1 text-[11px] text-[var(--xd-ink-secondary)] hover:bg-[var(--xd-surface-hover)] hover:text-[var(--xd-ink)]"
                                   >
-                                    {meta.shortLabel}
-                                  </span>
-                                </td>
-                                <td className="px-3 py-2">
-                                  <div className="flex justify-end gap-1">
-                                    <button
-                                      type="button"
-                                      onClick={() =>
-                                        toggleFlag(doc.id, 'starred')
-                                      }
-                                      className="rounded border border-[var(--xd-border)] px-1.5 py-0.5 text-[11px]"
-                                    >
-                                      {doc.starred ? 'Starred' : 'Star'}
-                                    </button>
-                                    <button
-                                      type="button"
-                                      onClick={() =>
-                                        toggleFlag(doc.id, 'pinned')
-                                      }
-                                      className="rounded border border-[var(--xd-border)] px-1.5 py-0.5 text-[11px]"
-                                    >
-                                      {doc.pinned ? 'Unpin' : 'Pin'}
-                                    </button>
-                                    <button
-                                      type="button"
-                                      onClick={() =>
-                                        setNamer({
-                                          sourceId: doc.id,
-                                          title: `${doc.title} copy`,
-                                        })
-                                      }
-                                      className="rounded border border-[var(--xd-border)] px-1.5 py-0.5 text-[11px]"
-                                    >
-                                      Duplicate .mrbl
-                                    </button>
-                                    <button
-                                      type="button"
-                                      onClick={() => setShareId(doc.id)}
-                                      className="rounded border border-[var(--xd-border)] px-1.5 py-0.5 text-[11px]"
-                                    >
-                                      Share
-                                    </button>
-                                    <button
-                                      type="button"
-                                      onClick={() => openDocument(doc.id)}
-                                      className="rounded bg-[var(--xd-accent)] px-1.5 py-0.5 text-[11px] text-white"
-                                    >
-                                      Open App
-                                    </button>
-                                  </div>
-                                </td>
-                              </tr>
-                            )
-                          })}
+                                    Share
+                                  </button>
+                                </div>
+                              </td>
+                            </tr>
+                          ))}
                         </tbody>
                       </table>
                     </div>
                   )}
-                  <section className="space-y-3">
-                    <h2 className="text-[14px] font-semibold tracking-tight">
-                      Predefined Marble (.mrbl) App Templates — Duplicate any
-                      .mrbl file to create a new self-contained app
-                    </h2>
-                    <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
-                      {blueprints.map((template) => (
-                        <TemplateGalleryCard
-                          key={template.id}
-                          template={template}
-                          onPreviewTemplate={() => openDocument(template.id)}
-                          onDuplicateTemplate={() =>
-                            setNamer({
-                              sourceId: template.id,
-                              title: `${template.title} copy`,
-                            })
-                          }
-                        />
-                      ))}
-                    </div>
-                  </section>
                 </div>
               )}
-              {nav === 'agent-studio' && (
-                <div className="mx-auto flex w-full max-w-3xl flex-col gap-8 px-5 py-10">
-                  <AgentHeroComposer
-                    models={composerModels}
-                    selectedModelId={modelId}
-                    onSelectModel={setModelId}
-                    onSubmitPrompt={buildApp}
-                    onQuickStartTemplate={(_category, prompt) =>
-                      buildApp(prompt, modelId)
-                    }
-                    onTriggerSketchMode={() => {
-                      const target = docs.at(0)
-                      if (!target) return
-                      setMode(target.id, 'sketch')
-                      openDocument(target.id)
-                    }}
-                    onTriggerAttachNode={() => {
-                      const target = docs.at(0)
-                      if (!target) return
-                      setMode(target.id, 'select')
-                      openDocument(target.id)
-                    }}
-                  />
-                  <section>
-                    <h2 className="text-[13px] font-semibold">
-                      Prompt templates
-                    </h2>
-                    <div className="mt-2 grid gap-2">
-                      {PROMPT_TEMPLATES.map((template) => (
-                        <button
-                          key={template.prompt}
-                          type="button"
-                          onClick={() => buildApp(template.prompt, modelId)}
-                          className="flex items-start gap-2 rounded-md border border-[var(--xd-border)] bg-[var(--xd-canvas)] px-3 py-2.5 text-left hover:border-[var(--xd-accent-border)]"
-                        >
-                          <Sparkles className="mt-0.5 size-3.5 shrink-0 text-[var(--xd-accent)]" />
-                          <span>
-                            <span className="block text-[13px] font-medium">
-                              {template.title}
-                            </span>
-                            <span className="mt-0.5 block text-[12.5px] text-[var(--xd-ink-secondary)]">
-                              {template.prompt}
-                            </span>
-                          </span>
-                        </button>
-                      ))}
-                    </div>
-                    {agentStatus && (
-                      <p className="mt-2 text-[12px] text-[var(--xd-ink-secondary)]">
-                        {agentStatus}
-                      </p>
-                    )}
-                  </section>
-                  <section>
-                    <h2 className="text-[13px] font-semibold">
-                      Recent AI op proposals
-                    </h2>
-                    {recentProposals.length === 0 ? (
-                      <p className="mt-2 text-[12.5px] text-[var(--xd-ink-muted)]">
-                        Proposals from the collaborator land here, across every
-                        open .mrbl app.
-                      </p>
-                    ) : (
-                      <ul className="mt-2 space-y-2">
-                        {recentProposals.map(({ proposal, doc }) => (
-                          <li key={proposal.id}>
-                            <button
-                              type="button"
-                              onClick={() => openDocument(doc.id)}
-                              className="w-full rounded-md border border-[var(--xd-border)] px-3 py-2 text-left hover:border-[var(--xd-border-strong)]"
-                            >
-                              <span className="flex items-center justify-between gap-2">
-                                <span className="truncate text-[12.5px] font-medium">
-                                  {proposal.note}
-                                </span>
-                                <span className="xd-mono shrink-0 text-[10px] uppercase text-[var(--xd-ink-muted)]">
-                                  {proposal.status}
-                                </span>
-                              </span>
-                              <span className="mt-1 block truncate text-[11.5px] text-[var(--xd-ink-secondary)]">
-                                {doc.fileName}
-                                {proposal.stage
-                                  ? ` · ${proposal.stage}`
-                                  : ''} · {proposal.modelId}
-                              </span>
-                            </button>
-                          </li>
-                        ))}
-                      </ul>
-                    )}
-                  </section>
-                </div>
-              )}
+
               {nav === 'templates' && (
-                <div className="mx-auto flex w-full max-w-6xl flex-col gap-4 px-5 py-5">
-                  <div>
-                    <h1 className="text-[18px] font-semibold tracking-tight">
-                      Templates (.mrbl)
-                    </h1>
-                    <p className="mt-1 text-[12.5px] text-[var(--xd-ink-secondary)]">
-                      Duplicate .mrbl copies the file into your drive and opens
-                      it. Preview Template opens the predefined app directly.
-                    </p>
-                  </div>
-                  <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
+                <div className="mx-auto flex w-full max-w-5xl flex-col gap-4 px-6 py-6">
+                  <h1 className="text-[16px] font-semibold tracking-tight">
+                    Templates
+                  </h1>
+                  <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
                     {blueprints.map((template) => (
                       <TemplateGalleryCard
                         key={template.id}
@@ -2073,91 +1699,63 @@ export function XDriveWorkspace({
                   </div>
                 </div>
               )}
+
               {nav === 'shared' && (
-                <div className="mx-auto flex w-full max-w-4xl flex-col gap-4 px-5 py-5">
-                  <div>
-                    <h1 className="text-[18px] font-semibold tracking-tight">
-                      Shared with Me
-                    </h1>
-                    <p className="mt-1 text-[12.5px] text-[var(--xd-ink-secondary)]">
-                      Granular Marble permissions. Simulate a visitor role to
-                      test which gestures and AI tools stay on.
-                    </p>
-                  </div>
+                <div className="mx-auto flex w-full max-w-4xl flex-col gap-4 px-6 py-6">
+                  <h1 className="text-[16px] font-semibold tracking-tight">
+                    Shared
+                  </h1>
                   {sharedDocs.length === 0 ? (
-                    <p className="rounded-md border border-dashed border-[var(--xd-border)] px-4 py-8 text-center text-[13px] text-[var(--xd-ink-muted)]">
-                      Nothing has been shared into this drive yet.
+                    <p className="py-12 text-center text-[13px] text-[var(--xd-ink-muted)]">
+                      No shared files.
                     </p>
                   ) : (
-                    <ul className="space-y-3">
+                    <ul className="divide-y divide-[var(--xd-border)] rounded-md border border-[var(--xd-border)]">
                       {sharedDocs.map((doc) => (
                         <li
                           key={doc.id}
-                          className="rounded-md border border-[var(--xd-border)] bg-[var(--xd-canvas)] p-4"
+                          className="flex flex-wrap items-center justify-between gap-3 bg-[var(--xd-canvas)] px-4 py-3"
                         >
-                          <div className="flex flex-wrap items-start justify-between gap-2">
-                            <div>
-                              <h2 className="text-[15px] font-semibold">
-                                {doc.title}
-                              </h2>
-                              <p className="xd-mono text-[11px] text-[var(--xd-ink-muted)]">
-                                {doc.fileName}
-                              </p>
-                            </div>
-                            <button
-                              type="button"
-                              onClick={() => setShareId(doc.id)}
-                              className="rounded-md border border-[var(--xd-border)] px-2 py-1 text-[12px]"
-                            >
-                              Manage Permissions
-                            </button>
-                          </div>
-                          <div className="mt-3 flex flex-wrap gap-1.5">
-                            <span
-                              className={cn(
-                                'rounded border px-1.5 py-0.5 text-[11px]',
-                                getPermissionMeta(doc.share.publicPermission)
-                                  .badgeClass,
-                              )}
-                            >
-                              Public link ·{' '}
-                              {ROLE_LABEL[doc.share.publicPermission]}
-                            </span>
-                            {doc.share.collaborators.map((person) => (
-                              <span
-                                key={person.id}
-                                className={cn(
-                                  'rounded border px-1.5 py-0.5 text-[11px]',
-                                  getPermissionMeta(person.permission)
-                                    .badgeClass,
-                                )}
-                              >
-                                {person.name} · {ROLE_LABEL[person.permission]}
-                              </span>
-                            ))}
-                          </div>
-                          <div className="mt-3 flex flex-wrap gap-1">
-                            {SIM_ROLES.filter((role) => role !== 'owner').map(
-                              (role) => (
-                                <button
-                                  key={role}
-                                  type="button"
-                                  onClick={() => {
-                                    setSimulatedRole(role)
-                                    openDocument(doc.id)
-                                  }}
-                                  className="rounded border border-[var(--xd-border)] px-1.5 py-0.5 text-[11px] text-[var(--xd-ink-secondary)] hover:text-[var(--xd-ink)]"
-                                >
-                                  Simulate {ROLE_LABEL[role]}
-                                </button>
-                              ),
-                            )}
+                          <div className="min-w-0">
                             <button
                               type="button"
                               onClick={() => openDocument(doc.id)}
-                              className="rounded bg-[var(--xd-accent)] px-2 py-0.5 text-[11px] text-white"
+                              className="truncate text-left text-[13.5px] font-medium hover:text-[var(--xd-accent)]"
                             >
-                              Open App
+                              {doc.title}
+                            </button>
+                            <div className="mt-0.5 flex items-center gap-2 text-[11px] text-[var(--xd-ink-muted)]">
+                              <span className="xd-mono">{doc.fileName}</span>
+                              <span>·</span>
+                              <span>
+                                {
+                                  getPermissionMeta(doc.share.publicPermission)
+                                    .shortLabel
+                                }
+                              </span>
+                            </div>
+                          </div>
+
+                          <div className="flex flex-wrap items-center gap-1">
+                            {SIM_ROLES.map((role) => (
+                              <button
+                                key={role}
+                                type="button"
+                                onClick={() => {
+                                  setSimulatedRole(role)
+                                  openDocument(doc.id)
+                                }}
+                                className="rounded border border-[var(--xd-border)] px-2 py-0.5 text-[11px] text-[var(--xd-ink-secondary)] hover:text-[var(--xd-ink)]"
+                              >
+                                {ROLE_LABEL[role]}
+                              </button>
+                            ))}
+                            <button
+                              type="button"
+                              onClick={() => setShareId(doc.id)}
+                              className="ml-1 rounded border border-[var(--xd-border)] bg-[var(--xd-elevated)] px-2.5 py-0.5 text-[11.5px] font-medium"
+                            >
+                              Share
                             </button>
                           </div>
                         </li>
@@ -2166,8 +1764,9 @@ export function XDriveWorkspace({
                   )}
                 </div>
               )}
+
               {nav === 'subscriptions' && (
-                <div className="mx-auto w-full max-w-5xl px-5 py-5">
+                <div className="mx-auto w-full max-w-4xl px-6 py-6">
                   <SubscriptionModal
                     variant="page"
                     subscriptions={subscriptions}
@@ -2185,7 +1784,7 @@ export function XDriveWorkspace({
         {aiSidebarOpen && (
           <CursorAISidebar
             key={sidebarKey}
-            fileName={activeDoc?.fileName ?? 'xdrive-research-lab.mrbl'}
+            fileName={activeDoc?.fileName ?? 'xdrive.mrbl'}
             messages={thread}
             checkpoints={activeDoc?.checkpoints ?? []}
             proposals={
@@ -2260,40 +1859,35 @@ export function XDriveWorkspace({
           <form
             role="dialog"
             aria-label="Name the duplicated .mrbl app"
-            className="w-full max-w-md rounded-lg border border-[var(--xd-border-strong)] bg-[var(--xd-canvas)] p-4 shadow-xl"
+            className="w-full max-w-sm rounded-lg border border-[var(--xd-border-strong)] bg-[var(--xd-canvas)] p-4 shadow-xl"
             onSubmit={(event) => {
               event.preventDefault()
               commitDuplicate(namer.title)
             }}
           >
-            <h2 className="text-[14px] font-semibold">Duplicate .mrbl</h2>
-            <p className="mt-1 text-[12px] text-[var(--xd-ink-secondary)]">
-              Creates a fresh self-contained file and opens it in a tab.
-            </p>
-            <label className="mt-3 block text-[12px]">
-              <span className="text-[var(--xd-ink-muted)]">App name</span>
-              <input
-                autoFocus
-                value={namer.title}
-                onChange={(event) =>
-                  setNamer({ ...namer, title: event.target.value })
-                }
-                className="mt-1 h-8 w-full rounded-md border border-[var(--xd-border)] bg-[var(--xd-rail)] px-2 text-[13px] outline-none focus-visible:border-[var(--xd-accent)]"
-              />
-            </label>
-            <div className="mt-3 flex justify-end gap-2">
+            <h2 className="text-[13.5px] font-semibold">Duplicate file</h2>
+            <input
+              autoFocus
+              aria-label="App name"
+              value={namer.title}
+              onChange={(event) =>
+                setNamer({ ...namer, title: event.target.value })
+              }
+              className="mt-2.5 h-8 w-full rounded border border-[var(--xd-border)] bg-[var(--xd-rail)] px-2.5 text-[12.5px] outline-none focus-visible:border-[var(--xd-accent)]"
+            />
+            <div className="mt-3 flex justify-end gap-1.5">
               <button
                 type="button"
                 onClick={() => setNamer(null)}
-                className="rounded-md border border-[var(--xd-border)] px-2 py-1 text-[12px]"
+                className="rounded border border-[var(--xd-border)] px-2.5 py-1 text-[12px]"
               >
                 Cancel
               </button>
               <button
                 type="submit"
-                className="rounded-md bg-[var(--xd-accent)] px-2 py-1 text-[12px] text-white"
+                className="rounded bg-[var(--xd-accent)] px-2.5 py-1 text-[12px] text-white"
               >
-                Create and open
+                Create
               </button>
             </div>
           </form>
@@ -2307,7 +1901,7 @@ export function XDriveWorkspace({
           <div
             role="dialog"
             aria-label="Command palette"
-            className="w-full max-w-lg overflow-hidden rounded-lg border border-[var(--xd-border-strong)] bg-[var(--xd-canvas)] shadow-xl"
+            className="w-full max-w-md overflow-hidden rounded-lg border border-[var(--xd-border-strong)] bg-[var(--xd-canvas)] shadow-xl"
             onMouseDown={(event) => event.stopPropagation()}
           >
             <div className="flex items-center gap-2 border-b border-[var(--xd-border)] px-3">
@@ -2336,9 +1930,9 @@ export function XDriveWorkspace({
                     item.run()
                   }
                 }}
-                placeholder="Search apps, templates, and views"
+                placeholder="Jump to file or view..."
                 aria-label="Quick search"
-                className="h-10 w-full bg-transparent text-[13px] outline-none"
+                className="h-9 w-full bg-transparent text-[12.5px] outline-none"
               />
               <button
                 type="button"
@@ -2349,9 +1943,9 @@ export function XDriveWorkspace({
                 <X className="size-3.5" />
               </button>
             </div>
-            <ul className="max-h-80 overflow-y-auto py-1">
+            <ul className="max-h-72 overflow-y-auto py-1">
               {paletteItems.length === 0 && (
-                <li className="px-3 py-3 text-[12.5px] text-[var(--xd-ink-muted)]">
+                <li className="px-3 py-3 text-[12px] text-[var(--xd-ink-muted)]">
                   No matches.
                 </li>
               )}
@@ -2366,11 +1960,11 @@ export function XDriveWorkspace({
                       item.run()
                     }}
                     className={cn(
-                      'flex w-full items-center justify-between gap-3 px-3 py-2 text-left',
+                      'flex w-full items-center justify-between gap-3 px-3 py-1.5 text-left',
                       index === paletteIndex && 'bg-[var(--xd-surface-hover)]',
                     )}
                   >
-                    <span className="truncate text-[13px]">{item.label}</span>
+                    <span className="truncate text-[12.5px]">{item.label}</span>
                     <span className="xd-mono shrink-0 text-[10.5px] text-[var(--xd-ink-muted)]">
                       {item.hint}
                     </span>

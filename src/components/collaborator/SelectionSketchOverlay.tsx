@@ -269,16 +269,16 @@ function paintPen(
 }
 
 const TOOLS: Array<{ id: SketchTool; label: string; icon: ReactNode }> = [
-  { id: 'pen', label: 'Freehand Pen', icon: <PenTool className="size-3.5" /> },
+  { id: 'pen', label: 'Pen', icon: <PenTool className="size-3.5" /> },
   { id: 'arrow', label: 'Arrow', icon: <ArrowUpRight className="size-3.5" /> },
   {
     id: 'highlight',
-    label: 'Highlight Box',
+    label: 'Box',
     icon: <Square className="size-3.5" />,
   },
   {
     id: 'callout',
-    label: 'Text Callout',
+    label: 'Note',
     icon: <MessageSquare className="size-3.5" />,
   },
 ]
@@ -342,7 +342,6 @@ export function SelectionSketchOverlay({
     null,
   )
   const [notice, setNotice] = useState<string | null>(null)
-  const [log, setLog] = useState<MarbleIntentRequest[]>([])
   const [pendingIds, setPendingIds] = useState<string[]>([])
   const colorRef = useRef(color)
   colorRef.current = color
@@ -417,17 +416,16 @@ export function SelectionSketchOverlay({
   }
 
   function publish(request: MarbleIntentRequest) {
-    setLog((prev) => [request, ...prev].slice(0, 3))
     setPendingIds(request.targetIds)
     window.setTimeout(() => setPendingIds([]), 1600)
     onIntent?.(request)
     if (request.kind === 'scale' && request.gesture) {
       setNotice(
-        `Scale restyle · gesture { x: ${request.gesture.x.toFixed(2)}, y: ${request.gesture.y.toFixed(2)} } · ${request.targetIds.map((id) => `#${id}`).join(' ')}`,
+        `Scale ${request.gesture.x.toFixed(2)}×${request.gesture.y.toFixed(2)}`,
       )
       return
     }
-    setNotice(`${request.kind} · ${request.instruction}`)
+    setNotice(request.instruction)
   }
 
   function toPoint(event: ReactPointerEvent<HTMLDivElement>): Point {
@@ -661,7 +659,7 @@ export function SelectionSketchOverlay({
       return
     }
     if (annotations.length === 0) {
-      setNotice('Draw on the stage, then send the sketch with a prompt.')
+      setNotice('Draw on the stage first.')
       return
     }
     if (!prompt.trim()) {
@@ -707,7 +705,7 @@ export function SelectionSketchOverlay({
   const showBar = spatial && (selection.length > 0 || annotations.length > 0)
   const barStyle: CSSProperties = anchor
     ? {
-        left: `clamp(8px, ${anchor.x * 100}%, calc(100% - 528px))`,
+        left: `clamp(8px, ${anchor.x * 100}%, calc(100% - 496px))`,
         top:
           anchor.y + anchor.h > 0.72
             ? undefined
@@ -823,7 +821,7 @@ export function SelectionSketchOverlay({
                 key={node.id}
                 type="button"
                 data-node-id={node.id}
-                title={`${node.affordances.join(' · ')} · ${node.textPreview}`}
+                title={`#${node.id}`}
                 onPointerDown={(event) => event.stopPropagation()}
                 onClick={(event) => {
                   event.stopPropagation()
@@ -835,7 +833,7 @@ export function SelectionSketchOverlay({
                   updateSelection(next)
                 }}
                 className={cn(
-                  'absolute z-20 rounded-md border text-left',
+                  'absolute z-20 rounded border text-left',
                   active
                     ? 'border-[var(--xd-accent)] bg-[var(--xd-accent-soft)]'
                     : 'border-transparent hover:border-[var(--xd-border-strong)]',
@@ -869,8 +867,7 @@ export function SelectionSketchOverlay({
           >
             {liveScale && (
               <span className="xd-tabular absolute -top-5 left-0 rounded bg-[var(--xd-accent)] px-1.5 py-0.5 text-[10px] text-white">
-                gesture {'{'} x: {liveScale.gesture.x.toFixed(2)}, y:{' '}
-                {liveScale.gesture.y.toFixed(2)} {'}'}
+                {liveScale.gesture.x.toFixed(2)}×{liveScale.gesture.y.toFixed(2)}
               </span>
             )}
             {CORNERS.map((corner) => (
@@ -898,7 +895,7 @@ export function SelectionSketchOverlay({
             <div
               key={item.id}
               data-overlay-chrome=""
-              className="absolute z-30 max-w-[180px] rounded-md px-1.5 py-1 text-[11px] text-white shadow-md"
+              className="absolute z-30 max-w-[180px] rounded px-1.5 py-1 text-[11px] text-white shadow-md"
               style={{
                 left: `${item.boundingBox.x * 100}%`,
                 top: `${item.boundingBox.y * 100}%`,
@@ -933,14 +930,14 @@ export function SelectionSketchOverlay({
               onChange={(event) =>
                 setCallout({ ...callout, text: event.target.value })
               }
-              placeholder="Callout"
-              className="h-7 w-40 rounded-md border border-[var(--xd-border-strong)] bg-[var(--xd-canvas)] px-2 text-[12px] text-[var(--xd-ink)] outline-none"
+              placeholder="Note..."
+              className="h-7 w-36 rounded border border-[var(--xd-border-strong)] bg-[var(--xd-canvas)] px-2 text-[12px] text-[var(--xd-ink)] outline-none"
             />
             <button
               type="submit"
-              className="h-7 rounded-md bg-[var(--xd-sketch)] px-2 text-[11px] font-medium text-black"
+              className="h-7 rounded bg-[var(--xd-sketch)] px-2 text-[11px] font-medium text-black"
             >
-              Pin
+              Add
             </button>
           </form>
         )}
@@ -948,7 +945,7 @@ export function SelectionSketchOverlay({
         {mode === 'sketch' && (
           <div
             data-overlay-chrome=""
-            className="absolute top-3 left-1/2 z-40 flex -translate-x-1/2 flex-wrap items-center gap-1 rounded-full border border-[var(--xd-border-strong)] bg-[var(--xd-elevated)] px-1.5 py-1 shadow-lg"
+            className="absolute top-3 left-1/2 z-40 flex -translate-x-1/2 items-center gap-1 rounded-md border border-[var(--xd-border-strong)] bg-[var(--xd-elevated)] px-1.5 py-1 shadow-md"
             onPointerDown={(event) => event.stopPropagation()}
           >
             {TOOLS.map((item) => (
@@ -959,17 +956,17 @@ export function SelectionSketchOverlay({
                 disabled={!spec.sketch}
                 onClick={() => setTool(item.id)}
                 className={cn(
-                  'inline-flex h-7 items-center gap-1 rounded-full px-2 text-[11.5px] font-medium disabled:opacity-40',
+                  'inline-flex h-6 items-center gap-1 rounded px-2 text-[11px] font-medium disabled:opacity-40',
                   tool === item.id
                     ? 'bg-[var(--xd-sketch-soft)] text-[var(--xd-sketch)]'
-                    : 'text-[var(--xd-ink)]',
+                    : 'text-[var(--xd-ink-secondary)] hover:text-[var(--xd-ink)]',
                 )}
               >
                 {item.icon}
-                {item.label}
+                <span>{item.label}</span>
               </button>
             ))}
-            <span className="mx-1 h-4 w-px bg-[var(--xd-border)]" />
+            <span className="mx-1 h-3.5 w-px bg-[var(--xd-border)]" />
             {SKETCH_COLORS.map((swatch) => (
               <button
                 key={swatch.id}
@@ -979,7 +976,7 @@ export function SelectionSketchOverlay({
                 disabled={!spec.sketch}
                 onClick={() => setColor(swatch.value)}
                 className={cn(
-                  'size-5 rounded-full border-2 disabled:opacity-40',
+                  'size-4 rounded-full border-2 disabled:opacity-40',
                   color === swatch.value
                     ? 'border-[var(--xd-ink)]'
                     : 'border-transparent',
@@ -987,24 +984,24 @@ export function SelectionSketchOverlay({
                 style={{ backgroundColor: swatch.value }}
               />
             ))}
-            <span className="mx-1 h-4 w-px bg-[var(--xd-border)]" />
+            <span className="mx-1 h-3.5 w-px bg-[var(--xd-border)]" />
             <button
               type="button"
               onClick={clearSketch}
               disabled={!spec.sketch || annotations.length === 0}
-              className="inline-flex h-7 items-center gap-1 rounded-full px-2 text-[11.5px] font-medium disabled:opacity-40"
+              className="inline-flex h-6 items-center gap-1 rounded px-2 text-[11px] text-[var(--xd-ink-secondary)] hover:text-[var(--xd-ink)] disabled:opacity-40"
             >
-              <Eraser className="size-3.5" />
-              Clear Sketch
+              <Eraser className="size-3" />
+              <span>Clear</span>
             </button>
             <button
               type="button"
               onClick={sendSketch}
               disabled={!spec.sketch || blocked || annotations.length === 0}
-              className="inline-flex h-7 items-center gap-1 rounded-full bg-[var(--xd-sketch)] px-2 text-[11.5px] font-medium text-black disabled:opacity-40"
+              className="inline-flex h-6 items-center gap-1 rounded bg-[var(--xd-sketch)] px-2 text-[11px] font-medium text-black disabled:opacity-40"
             >
-              <Send className="size-3.5" />
-              Send Sketch + Prompt to AI
+              <Send className="size-3" />
+              <span>Send</span>
             </button>
           </div>
         )}
@@ -1012,9 +1009,9 @@ export function SelectionSketchOverlay({
         {mode === 'sketch' && !spec.sketch && spec.blockReason && (
           <p
             data-overlay-chrome=""
-            className="absolute top-16 left-1/2 z-40 w-[min(520px,calc(100%-24px))] -translate-x-1/2 rounded-md border border-[var(--xd-border)] bg-[var(--xd-rail)] px-3 py-2 text-[12px] leading-snug text-[var(--xd-ink-secondary)]"
+            className="absolute top-14 left-1/2 z-40 -translate-x-1/2 rounded border border-[var(--xd-border)] bg-[var(--xd-rail)] px-3 py-1.5 text-[11.5px] text-[var(--xd-ink-secondary)]"
           >
-            {spec.blockReason}
+            {spec.title} — Sketching is disabled
           </p>
         )}
 
@@ -1035,24 +1032,16 @@ export function SelectionSketchOverlay({
           </div>
         )}
 
-        <div
-          className="pointer-events-none absolute bottom-3 left-3 z-40 max-w-md space-y-1"
-          aria-live="polite"
-        >
-          {notice && (
-            <p className="rounded-md border border-[var(--xd-border)] bg-[var(--xd-elevated)]/95 px-2 py-1 text-[11.5px] text-[var(--xd-ink)] shadow-sm">
+        {notice && (
+          <div
+            className="pointer-events-none absolute bottom-3 left-3 z-40 max-w-sm"
+            aria-live="polite"
+          >
+            <p className="truncate rounded border border-[var(--xd-border)] bg-[var(--xd-elevated)]/95 px-2 py-1 text-[11px] text-[var(--xd-ink)] shadow-2xs">
               {notice}
             </p>
-          )}
-          {log[0] && (
-            <p className="xd-mono text-[10.5px] text-[var(--xd-ink-muted)]">
-              Last intent {log[0].kind}
-              {log[0].gesture
-                ? ` · x ${log[0].gesture.x.toFixed(2)} y ${log[0].gesture.y.toFixed(2)}`
-                : ''}
-            </p>
-          )}
-        </div>
+          </div>
+        )}
       </div>
     </div>
   )
@@ -1096,14 +1085,11 @@ export function DemoMrblStage({
       <div className="absolute inset-x-0 top-0 flex h-[7%] items-center justify-between gap-3 px-4">
         <p className="xd-mono truncate text-[11px] text-[var(--xd-ink-muted)]">
           {fileName}
-          <span className="ml-2 text-[var(--xd-ink-subtle)]">
-            live .mrbl stage
-          </span>
         </p>
         <div
           role="group"
           aria-label="data-marble-look"
-          className="inline-flex rounded-md border border-[var(--xd-border)] bg-[var(--xd-rail)] p-0.5"
+          className="inline-flex rounded border border-[var(--xd-border)] bg-[var(--xd-rail)] p-0.5"
         >
           {(['manuscript', 'notes', 'proof'] as const).map((item) => (
             <button
@@ -1112,9 +1098,9 @@ export function DemoMrblStage({
               aria-pressed={look === item}
               onClick={() => setLook(item)}
               className={cn(
-                'rounded px-2 py-0.5 text-[11px] capitalize',
+                'rounded-xs px-2 py-0.5 text-[11px] capitalize',
                 look === item
-                  ? 'bg-[var(--xd-elevated)] text-[var(--xd-ink)]'
+                  ? 'bg-[var(--xd-canvas)] text-[var(--xd-ink)]'
                   : 'text-[var(--xd-ink-secondary)]',
               )}
             >
@@ -1127,7 +1113,7 @@ export function DemoMrblStage({
         <article
           key={node.id}
           data-marble-id={node.id}
-          className="absolute overflow-hidden rounded-md border border-[var(--xd-border)] bg-[var(--xd-elevated)] px-3 py-2"
+          className="absolute overflow-hidden rounded border border-[var(--xd-border)] bg-[var(--xd-elevated)] px-3 py-2"
           style={{
             left: `${node.rect.left}%`,
             top: `${node.rect.top}%`,
@@ -1176,7 +1162,7 @@ function NodeFace({ node, look }: { node: StageNode; look: LookId }) {
           {[40, 70, 55, 88, 62].map((height, index) => (
             <span
               key={index}
-              className="flex-1 rounded-sm bg-[var(--xd-accent)]/80"
+              className="flex-1 rounded-xs bg-[var(--xd-accent)]/80"
               style={{ height: `${height}%` }}
             />
           ))}

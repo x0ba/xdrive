@@ -2,9 +2,8 @@ import { useEffect, useRef, useState } from 'react'
 import type {
   KeyboardEvent as ReactKeyboardEvent,
   PointerEvent as ReactPointerEvent,
-  ReactNode,
 } from 'react'
-import { FileDiff, History, Lock, MessageSquare, X } from 'lucide-react'
+import { Lock, X } from 'lucide-react'
 import type {
   AIMessage,
   MarbleCheckpoint,
@@ -35,7 +34,6 @@ export const QUICK_PROMPTS = [
   'Add an interactive chart section',
   'Create <marble-alt> variations for selected heading',
   'Wire selected table to filter cards',
-  'Build a new custom .mrbl app',
 ] as const
 
 const STAGE_PLANS: Record<MarbleIntentKind, string[]> = {
@@ -130,13 +128,6 @@ export const DEMO_PROPOSALS: MarbleOpProposal[] = [DEMO_PROPOSAL]
 
 export const DEMO_MESSAGES: AIMessage[] = [
   {
-    id: 'msg-system',
-    role: 'system',
-    content:
-      'Ops stay proposed until you keep them. A keep is one checkpoint covering the batch and its provenance.',
-    timestamp: '2026-11-22T14:02:00.000Z',
-  },
-  {
     id: 'msg-user-1',
     role: 'user',
     content:
@@ -163,8 +154,7 @@ export const DEMO_MESSAGES: AIMessage[] = [
   {
     id: 'msg-assistant-1',
     role: 'assistant',
-    content:
-      'Growing the open page in four stages. Nothing reaches the file until you keep the proposal.',
+    content: 'Proposed 4 operations on #sec-method.',
     timestamp: '2026-11-22T14:05:00.000Z',
     modelId: 'xai/grok-4.7',
     providerId: 'xai',
@@ -209,8 +199,7 @@ export const DEMO_CHECKPOINTS: MarbleCheckpoint[] = [
     timestamp: Date.parse('2026-11-21T18:12:00Z'),
     author: 'You',
     opsCount: 6,
-    source: 'Duplicate .mrbl',
-    note: 'Template ids were reminted. The abstract and Bell figure kept their roles.',
+    source: 'Duplicate',
   },
   {
     sha: '44de10aa91c3',
@@ -224,10 +213,9 @@ export const DEMO_CHECKPOINTS: MarbleCheckpoint[] = [
     sha: 'b70e5512cd08',
     label: 'Keep · figure caption restyle',
     timestamp: Date.parse('2026-11-22T11:16:00Z'),
-    author: 'SpaceX AI · Grok 4.7',
+    author: 'Grok 4.7',
     opsCount: 3,
     source: 'Keep',
-    note: 'Scale gesture 0.92 × 0.78 read as a tighter caption, not a bitmap scale.',
   },
 ]
 
@@ -453,8 +441,7 @@ function draftFromIntent(
   const assistant: AIMessage = {
     id: uid('msg'),
     role: 'assistant',
-    content:
-      'Growing the open page in stages. This preview uses the op vocabulary locally — a connected model would fill the same slots. Nothing is written until you keep it.',
+    content: 'Prepared staged operations.',
     timestamp: new Date().toISOString(),
     modelId: request.modelId,
     providerId: request.providerId,
@@ -471,13 +458,11 @@ function draftFromIntent(
 }
 
 export function CursorAISidebar({
-  fileName = 'quantum-error-correction.mrbl',
   messages = DEMO_MESSAGES,
   checkpoints = DEMO_CHECKPOINTS,
   proposals = DEMO_PROPOSALS,
   selectedElements = [],
   sketches = [],
-  strokes = [],
   models = PROMPT_MODELS,
   modelId: modelIdProp,
   onModelChange,
@@ -496,9 +481,8 @@ export function CursorAISidebar({
   const [proposalList, setProposalList] =
     useState<MarbleOpProposal[]>(proposals)
   const [history, setHistory] = useState<MarbleCheckpoint[]>(checkpoints)
-  const [activeSha, setActiveSha] = useState<string | null>(null)
   const [draft, setDraft] = useState('')
-  const [internalWidth, setInternalWidth] = useState(widthProp ?? 360)
+  const [internalWidth, setInternalWidth] = useState(widthProp ?? 340)
   const [internalModel, setInternalModel] = useState(
     () => modelIdProp ?? resolveModel(models)?.id ?? 'xai/grok-4.7',
   )
@@ -663,7 +647,7 @@ export function CursorAISidebar({
     if (event.key === 'ArrowLeft')
       setInternalWidth((value) => Math.min(380, value + 10))
     if (event.key === 'ArrowRight')
-      setInternalWidth((value) => Math.max(340, value - 10))
+      setInternalWidth((value) => Math.max(300, value - 10))
   }
 
   function onResizeDown(event: ReactPointerEvent<HTMLDivElement>) {
@@ -674,7 +658,7 @@ export function CursorAISidebar({
     const move = (ev: PointerEvent) => {
       const next = Math.min(
         380,
-        Math.max(340, startWidth - (ev.clientX - startX)),
+        Math.max(300, startWidth - (ev.clientX - startX)),
       )
       setInternalWidth(next)
     }
@@ -688,30 +672,20 @@ export function CursorAISidebar({
 
   const canKeep = spec.ai === 'byok' || spec.ai === 'shared'
   const canDiscard = !blocked
+  const hasContext = visibleElements.length > 0 || visibleSketches.length > 0
+  const hasUserMessages = thread.some((m) => m.role === 'user')
 
-  const tabs: Array<{ id: TabId; label: string; icon: ReactNode }> = [
-    {
-      id: 'chat',
-      label: 'Collaborator Chat',
-      icon: <MessageSquare className="size-3.5" />,
-    },
-    {
-      id: 'ops',
-      label: 'Proposed Ops & Diff',
-      icon: <FileDiff className="size-3.5" />,
-    },
-    {
-      id: 'history',
-      label: 'Checkpoint History',
-      icon: <History className="size-3.5" />,
-    },
+  const tabs: Array<{ id: TabId; label: string }> = [
+    { id: 'chat', label: 'Chat' },
+    { id: 'ops', label: 'Diff' },
+    { id: 'history', label: 'History' },
   ]
 
   return (
     <aside
       data-component="cursor-ai-sidebar"
       className={cn(
-        'relative flex h-full min-h-[640px] shrink-0 flex-col border-l border-[var(--xd-border)] bg-[var(--xd-rail)] text-[var(--xd-ink)]',
+        'relative flex h-full min-h-[480px] shrink-0 flex-col border-l border-[var(--xd-border)] bg-[var(--xd-rail)] text-[var(--xd-ink)]',
         className,
       )}
       style={{ width }}
@@ -719,111 +693,111 @@ export function CursorAISidebar({
       <div
         role="separator"
         aria-orientation="vertical"
-        aria-valuemin={340}
+        aria-valuemin={300}
         aria-valuemax={380}
         aria-valuenow={width}
         aria-label="Resize collaborator sidebar"
         tabIndex={0}
         onKeyDown={onResizeKey}
         onPointerDown={onResizeDown}
-        className="absolute top-0 left-0 h-full w-1.5 cursor-col-resize hover:bg-[var(--xd-accent)]/40"
+        className="absolute top-0 left-0 h-full w-1 cursor-col-resize hover:bg-[var(--xd-accent)]/40"
       />
 
-      <header className="border-b border-[var(--xd-border)] px-3 py-2.5">
-        <div className="flex items-center justify-between gap-2">
-          <p className="text-[12px] font-semibold tracking-wide text-[var(--xd-ink-muted)] uppercase">
-            AI Collaborator
-          </p>
-          <ModelSelect
-            models={models}
-            modelId={modelId}
-            onChange={setModel}
-            disabled={blocked}
-          />
+      <header className="flex h-9 items-center justify-between gap-2 border-b border-[var(--xd-border)] px-2.5">
+        <div
+          role="tablist"
+          aria-label="Collaborator sections"
+          className="flex items-center gap-0.5"
+        >
+          {tabs.map((item) => (
+            <button
+              key={item.id}
+              type="button"
+              role="tab"
+              aria-selected={tab === item.id}
+              onClick={() => setTab(item.id)}
+              className={cn(
+                'rounded px-2 py-1 text-[11.5px] font-medium transition-colors',
+                tab === item.id
+                  ? 'bg-[var(--xd-surface-active)] text-[var(--xd-ink)]'
+                  : 'text-[var(--xd-ink-muted)] hover:text-[var(--xd-ink)]',
+              )}
+            >
+              {item.label}
+            </button>
+          ))}
         </div>
-        <div className="mt-2 flex flex-wrap gap-1">
-          <span className="xd-mono inline-flex items-center rounded border border-[var(--xd-border)] bg-[var(--xd-canvas)] px-1.5 py-0.5 text-[10.5px]">
-            {fileName}
-          </span>
+
+        <ModelSelect
+          models={models}
+          modelId={modelId}
+          onChange={setModel}
+          disabled={blocked}
+        />
+      </header>
+
+      {hasContext && (
+        <div className="flex flex-wrap gap-1 border-b border-[var(--xd-border)] px-2.5 py-1.5">
           {visibleElements.map((element) => (
             <span
               key={element.id}
-              className="inline-flex items-center gap-1 rounded border border-[var(--xd-accent-border)] bg-[var(--xd-accent-soft)] px-1.5 py-0.5 text-[10.5px] text-[var(--xd-accent)]"
+              className="inline-flex items-center gap-1 rounded bg-[var(--xd-accent-soft)] px-1.5 py-0.5 text-[10.5px] text-[var(--xd-accent)]"
             >
               <span className="xd-mono">#{element.id}</span>
               <button
                 type="button"
-                aria-label={`Remove #${element.id} from context`}
+                aria-label={`Remove #${element.id}`}
                 onClick={() => {
                   if (onRemoveElement) onRemoveElement(element.id)
                   else setHiddenElements((prev) => [...prev, element.id])
                 }}
-                className="text-[var(--xd-accent)]/80 hover:text-[var(--xd-accent)]"
+                className="opacity-75 hover:opacity-100"
               >
-                <X className="size-3" />
+                <X className="size-2.5" />
               </button>
             </span>
           ))}
-          {visibleSketches.map((sketch) => {
-            const stroke = strokes.find((item) => item.id === sketch.id)
-            return (
+          {visibleSketches.map((sketch) => (
+            <span
+              key={sketch.id}
+              className="inline-flex items-center gap-1 rounded bg-[var(--xd-sketch-soft)] px-1.5 py-0.5 text-[10.5px] text-[var(--xd-sketch)]"
+            >
               <span
-                key={sketch.id}
-                className="inline-flex items-center gap-1 rounded border border-[var(--xd-sketch)]/40 bg-[var(--xd-sketch-soft)] py-0.5 pr-1 pl-0.5 text-[10.5px] text-[var(--xd-sketch)]"
+                className="size-1.5 rounded-full"
+                style={{ backgroundColor: sketch.color }}
+                aria-hidden
+              />
+              <span>{sketch.kind}</span>
+              <button
+                type="button"
+                aria-label={`Remove ${sketch.kind} sketch`}
+                onClick={() => {
+                  if (onRemoveSketch) onRemoveSketch(sketch.id)
+                  else setHiddenSketches((prev) => [...prev, sketch.id])
+                }}
               >
-                <SketchThumb stroke={stroke} color={sketch.color} />
-                {sketch.kind}
-                <button
-                  type="button"
-                  aria-label={`Remove ${sketch.kind} sketch`}
-                  onClick={() => {
-                    if (onRemoveSketch) onRemoveSketch(sketch.id)
-                    else setHiddenSketches((prev) => [...prev, sketch.id])
-                  }}
-                >
-                  <X className="size-3" />
-                </button>
-              </span>
-            )
-          })}
+                <X className="size-2.5" />
+              </button>
+            </span>
+          ))}
         </div>
-      </header>
-
-      <div
-        role="tablist"
-        aria-label="Collaborator sections"
-        className="flex border-b border-[var(--xd-border)]"
-      >
-        {tabs.map((item) => (
-          <button
-            key={item.id}
-            type="button"
-            role="tab"
-            aria-selected={tab === item.id}
-            onClick={() => setTab(item.id)}
-            className={cn(
-              'inline-flex flex-1 items-center justify-center gap-1 px-1.5 py-2 text-[11px] font-medium',
-              tab === item.id
-                ? 'border-b-2 border-[var(--xd-accent)] text-[var(--xd-ink)]'
-                : 'text-[var(--xd-ink-muted)] hover:text-[var(--xd-ink)]',
-            )}
-          >
-            {item.icon}
-            <span className="truncate">{item.label}</span>
-          </button>
-        ))}
-      </div>
+      )}
 
       {blocked && (
-        <p className="flex items-start gap-1.5 border-b border-[var(--xd-border)] bg-[var(--xd-canvas)] px-3 py-2 text-[11.5px] leading-snug text-[var(--xd-ink-secondary)]">
-          <Lock className="mt-0.5 size-3.5 shrink-0" />
-          <span>{spec.blockReason}</span>
+        <p className="flex items-center gap-1.5 border-b border-[var(--xd-border)] bg-[var(--xd-canvas)] px-2.5 py-1.5 text-[11.5px] text-[var(--xd-ink-secondary)]">
+          <Lock className="size-3 shrink-0" />
+          <span className="truncate">{spec.title} — AI locked</span>
         </p>
       )}
 
       <div className="min-h-0 flex-1 overflow-y-auto" role="tabpanel">
         {tab === 'chat' && (
-          <ol className="space-y-3 px-3 py-3">
+          <ol className="space-y-3 px-2.5 py-2.5">
+            {thread.length === 0 && (
+              <li className="py-6 text-center text-[12px] text-[var(--xd-ink-muted)]">
+                Select a node or ask for a change.
+              </li>
+            )}
             {thread.map((message) => (
               <li key={message.id}>
                 <MessageBubble message={message} />
@@ -847,9 +821,9 @@ export function CursorAISidebar({
           </ol>
         )}
         {tab === 'ops' && (
-          <div className="space-y-3 px-3 py-3">
+          <div className="space-y-2.5 px-2.5 py-2.5">
             {proposalList.length === 0 && (
-              <p className="text-[12.5px] text-[var(--xd-ink-muted)]">
+              <p className="py-6 text-center text-[12px] text-[var(--xd-ink-muted)]">
                 No proposals yet.
               </p>
             )}
@@ -867,72 +841,47 @@ export function CursorAISidebar({
           </div>
         )}
         {tab === 'history' && (
-          <ol className="space-y-2 px-3 py-3">
-            {history.map((checkpoint) => {
-              const viewing = activeSha === checkpoint.sha
-              return (
-                <li
-                  key={checkpoint.sha}
-                  className={cn(
-                    'rounded-md border px-2.5 py-2',
-                    viewing
-                      ? 'border-[var(--xd-accent-border)] bg-[var(--xd-accent-soft)]'
-                      : 'border-[var(--xd-border)] bg-[var(--xd-canvas)]',
-                  )}
-                >
-                  <div className="flex items-start justify-between gap-2">
-                    <div>
-                      <p className="text-[12.5px] font-medium">
-                        {checkpoint.label}
-                      </p>
-                      <p className="xd-mono mt-0.5 text-[10.5px] text-[var(--xd-ink-muted)]">
-                        {checkpoint.sha.slice(0, 7)} · {checkpoint.source} ·{' '}
-                        {checkpoint.opsCount} ops
-                      </p>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() =>
-                        setActiveSha(viewing ? null : checkpoint.sha)
-                      }
-                      className="rounded border border-[var(--xd-border)] px-1.5 py-0.5 text-[11px]"
-                    >
-                      {viewing ? 'Close' : 'View'}
-                    </button>
-                  </div>
-                  <p className="mt-1 text-[11px] text-[var(--xd-ink-secondary)]">
-                    {checkpoint.author} · {formatWhen(checkpoint.timestamp)}
-                  </p>
-                  {viewing && (
-                    <p className="mt-1.5 text-[12px] leading-snug text-[var(--xd-ink-secondary)]">
-                      {checkpoint.note ?? 'No note on this checkpoint.'} The
-                      live file stays as it is until you keep a proposal.
-                    </p>
-                  )}
-                </li>
-              )
-            })}
+          <ol className="space-y-1.5 px-2.5 py-2.5">
+            {history.length === 0 && (
+              <li className="py-6 text-center text-[12px] text-[var(--xd-ink-muted)]">
+                No checkpoints yet.
+              </li>
+            )}
+            {history.map((checkpoint) => (
+              <li
+                key={checkpoint.sha}
+                className="rounded border border-[var(--xd-border)] bg-[var(--xd-canvas)] px-2.5 py-2"
+              >
+                <p className="text-[12px] font-medium">{checkpoint.label}</p>
+                <p className="xd-mono mt-0.5 text-[10.5px] text-[var(--xd-ink-muted)]">
+                  {checkpoint.sha.slice(0, 7)} · {checkpoint.opsCount} ops ·{' '}
+                  {formatWhen(checkpoint.timestamp)}
+                </p>
+              </li>
+            ))}
           </ol>
         )}
       </div>
 
       {tab === 'chat' && (
-        <div className="border-t border-[var(--xd-border)] bg-[var(--xd-canvas)] px-3 py-2.5">
-          <div className="mb-2 flex flex-wrap gap-1">
-            {QUICK_PROMPTS.map((prompt) => (
-              <button
-                key={prompt}
-                type="button"
-                disabled={blocked}
-                onClick={() => sendText(prompt)}
-                className="rounded-full border border-[var(--xd-border)] px-2 py-1 text-left text-[11px] text-[var(--xd-ink-secondary)] hover:bg-[var(--xd-surface-hover)] disabled:opacity-40"
-              >
-                {prompt}
-              </button>
-            ))}
-          </div>
+        <div className="border-t border-[var(--xd-border)] bg-[var(--xd-canvas)] p-2.5">
+          {!hasUserMessages && (
+            <div className="mb-2 flex flex-wrap gap-1">
+              {QUICK_PROMPTS.map((prompt) => (
+                <button
+                  key={prompt}
+                  type="button"
+                  disabled={blocked}
+                  onClick={() => sendText(prompt)}
+                  className="rounded border border-[var(--xd-border)] px-2 py-0.5 text-left text-[11px] text-[var(--xd-ink-secondary)] hover:bg-[var(--xd-surface-hover)] disabled:opacity-40"
+                >
+                  {prompt}
+                </button>
+              ))}
+            </div>
+          )}
           <form
-            className="flex items-end gap-2"
+            className="flex items-end gap-1.5"
             onSubmit={(event) => {
               event.preventDefault()
               sendText(draft)
@@ -954,16 +903,14 @@ export function CursorAISidebar({
                 }
               }}
               placeholder={
-                blocked
-                  ? 'AI is locked for this role'
-                  : 'Ask for a change to the .mrbl app…'
+                blocked ? 'AI locked' : 'Ask for a change...'
               }
-              className="max-h-28 min-h-14 flex-1 resize-none rounded-md border border-[var(--xd-border)] bg-[var(--xd-rail)] px-2 py-1.5 text-[12.5px] outline-none focus-visible:border-[var(--xd-accent)] disabled:opacity-50"
+              className="max-h-24 min-h-12 flex-1 resize-none rounded border border-[var(--xd-border)] bg-[var(--xd-rail)] px-2 py-1.5 text-[12px] outline-none focus-visible:border-[var(--xd-accent)] disabled:opacity-50"
             />
             <button
               type="submit"
               disabled={blocked || draft.trim().length === 0}
-              className="inline-flex h-8 items-center rounded-md bg-[var(--xd-accent)] px-2.5 text-[12px] font-medium text-white disabled:opacity-40"
+              className="inline-flex h-7 items-center rounded bg-[var(--xd-accent)] px-2.5 text-[11.5px] font-medium text-white disabled:opacity-35"
             >
               {spec.ai === 'propose' ? 'Propose' : 'Send'}
             </button>
@@ -978,23 +925,15 @@ function MessageBubble({ message }: { message: AIMessage }) {
   const align = message.role === 'user'
   return (
     <div className={cn('max-w-[95%]', align && 'ml-auto')}>
-      <p className="mb-1 text-[10.5px] text-[var(--xd-ink-muted)]">
-        {message.role === 'assistant'
-          ? 'Collaborator'
-          : message.role === 'user'
-            ? 'You'
-            : 'System'}
-        {message.modelId ? ` · ${message.modelId}` : ''} ·{' '}
-        {formatWhen(message.timestamp)}
-      </p>
       <div
         className={cn(
-          'rounded-md px-2.5 py-2 text-[12.5px] leading-snug',
-          message.role === 'user' && 'bg-[var(--xd-accent-soft)]',
+          'rounded px-2.5 py-1.5 text-[12px] leading-snug',
+          message.role === 'user' &&
+            'bg-[var(--xd-accent-soft)] text-[var(--xd-ink)]',
           message.role === 'assistant' &&
-            'border border-[var(--xd-border)] bg-[var(--xd-canvas)]',
+            'border border-[var(--xd-border)] bg-[var(--xd-canvas)] text-[var(--xd-ink-secondary)]',
           message.role === 'system' &&
-            'border border-dashed border-[var(--xd-border)] text-[var(--xd-ink-secondary)]',
+            'border border-dashed border-[var(--xd-border)] text-[var(--xd-ink-muted)]',
         )}
       >
         {message.content}
@@ -1005,15 +944,15 @@ function MessageBubble({ message }: { message: AIMessage }) {
 
 function StageList({ stages }: { stages: NonNullable<AIMessage['stages']> }) {
   return (
-    <ol className="mt-2 space-y-1 rounded-md border border-[var(--xd-border)] bg-[var(--xd-canvas)] px-2.5 py-2">
+    <ol className="mt-1.5 space-y-1 rounded border border-[var(--xd-border)] bg-[var(--xd-canvas)] px-2.5 py-1.5">
       {stages.map((stage) => (
         <li
           key={stage.stageNumber}
-          className="flex items-start gap-2 text-[12px]"
+          className="flex items-center gap-2 text-[11.5px]"
         >
           <span
             className={cn(
-              'mt-1 size-1.5 shrink-0 rounded-full',
+              'size-1.5 shrink-0 rounded-full',
               stage.completed
                 ? 'bg-[var(--xd-commit)]'
                 : 'bg-[var(--xd-sketch)]',
@@ -1021,13 +960,14 @@ function StageList({ stages }: { stages: NonNullable<AIMessage['stages']> }) {
             aria-hidden
           />
           <span
-            className={
+            className={cn(
+              'truncate',
               stage.completed
                 ? 'text-[var(--xd-ink)]'
-                : 'text-[var(--xd-ink-secondary)]'
-            }
+                : 'text-[var(--xd-ink-secondary)]',
+            )}
           >
-            Stage {stage.stageNumber} of {stage.totalStages}: {stage.note}
+            {stage.note}
           </span>
         </li>
       ))}
@@ -1063,123 +1003,60 @@ export function OpReviewCard({
   const settled =
     proposal.status === 'committed' || proposal.status === 'discarded'
   return (
-    <article className="mt-2 rounded-md border border-[var(--xd-border)] border-l-[3px] border-l-[var(--xd-sketch)] bg-[var(--xd-canvas)] px-2.5 py-2">
+    <article className="mt-1.5 rounded border border-[var(--xd-border)] bg-[var(--xd-canvas)] p-2">
       <header className="flex items-start justify-between gap-2">
-        <div>
-          <p className="text-[12.5px] font-medium">{proposal.note}</p>
-          <p className="mt-0.5 text-[11px] text-[var(--xd-ink-muted)]">
-            {proposal.instruction}
-          </p>
-        </div>
-        <span className="xd-mono shrink-0 rounded border border-[var(--xd-border)] px-1.5 py-0.5 text-[10px] uppercase">
+        <p className="text-[12px] font-medium leading-snug">{proposal.note}</p>
+        <span className="xd-mono shrink-0 text-[10px] uppercase text-[var(--xd-ink-muted)]">
           {proposal.status}
         </span>
       </header>
-      <p className="xd-mono mt-1 text-[10.5px] text-[var(--xd-ink-muted)]">
-        {proposal.providerId}/{proposal.modelId} ·{' '}
-        {proposal.targetIds.map((id) => `#${id}`).join(' ') || 'no targets'}
-      </p>
-      <ul className="mt-2 space-y-1.5">
+      <ul className="mt-1.5 space-y-1">
         {proposal.ops.map((op, index) => (
           <li
             key={`${proposal.id}-${index}`}
             className="rounded border border-[var(--xd-border)] bg-[var(--xd-rail)]"
           >
             <details>
-              <summary className="cursor-pointer list-none px-2 py-1.5 text-[12px]">
+              <summary className="cursor-pointer list-none px-2 py-1 text-[11.5px]">
                 <span className={cn('xd-mono font-medium', OP_TONE[op.type])}>
                   {op.type}
                 </span>
-                <span className="xd-mono ml-2 text-[var(--xd-ink-secondary)]">
+                <span className="xd-mono ml-1.5 text-[var(--xd-ink-secondary)]">
                   {op.id ? `#${op.id}` : op.parentId ? `→ #${op.parentId}` : ''}
                 </span>
               </summary>
-              <pre className="xd-mono overflow-x-auto border-t border-[var(--xd-border)] px-2 py-1.5 text-[10.5px] leading-relaxed whitespace-pre-wrap text-[var(--xd-ink-secondary)]">
+              <pre className="xd-mono overflow-x-auto border-t border-[var(--xd-border)] px-2 py-1 text-[10px] leading-relaxed whitespace-pre-wrap text-[var(--xd-ink-secondary)]">
                 {opLines(op).join('\n')}
               </pre>
             </details>
           </li>
         ))}
       </ul>
-      {proposal.inverseOps && proposal.inverseOps.length > 0 && (
-        <details className="mt-2">
-          <summary className="cursor-pointer text-[11px] text-[var(--xd-ink-muted)]">
-            Inverse ops ({proposal.inverseOps.length})
-          </summary>
-          <pre className="xd-mono mt-1 overflow-x-auto text-[10.5px] whitespace-pre-wrap text-[var(--xd-ink-muted)]">
-            {proposal.inverseOps
-              .map((op) => opLines(op).join(' · '))
-              .join('\n')}
-          </pre>
-        </details>
-      )}
-      <div className="mt-2 flex flex-wrap gap-1.5">
-        <button
-          type="button"
-          disabled={!canKeep || settled || proposal.status === 'thinking'}
-          title={
-            proposeOnly
-              ? 'This role proposes ops. It cannot commit them to the .mrbl file.'
-              : 'Keep writes these ops into the .mrbl file as one checkpoint.'
-          }
-          onClick={onKeep}
-          className="inline-flex h-7 items-center rounded-md bg-[var(--xd-commit)] px-2 text-[11.5px] font-medium text-white disabled:opacity-40"
-        >
-          Keep (Commit to .mrbl)
-        </button>
-        <button
-          type="button"
-          disabled={!canDiscard || settled || proposal.status === 'thinking'}
-          title="Discard applies inverse ops and drops the proposal."
-          onClick={onDiscard}
-          className="inline-flex h-7 items-center rounded-md border border-[var(--xd-border)] px-2 text-[11.5px] font-medium disabled:opacity-40"
-        >
-          Discard (Invert Ops)
-        </button>
-      </div>
-      {proposeOnly && !settled && (
-        <p className="mt-1.5 text-[11px] text-[var(--xd-sketch)]">
-          Annotate & Propose can queue this card. Only an edit role can keep it.
-        </p>
+      {!settled && (
+        <div className="mt-2 flex items-center gap-1.5">
+          <button
+            type="button"
+            disabled={!canKeep || proposal.status === 'thinking'}
+            title={
+              proposeOnly
+                ? 'Propose-only role cannot commit ops.'
+                : 'Commit ops to file'
+            }
+            onClick={onKeep}
+            className="inline-flex h-6 items-center rounded bg-[var(--xd-commit)] px-2 text-[11px] font-medium text-white disabled:opacity-35"
+          >
+            Keep
+          </button>
+          <button
+            type="button"
+            disabled={!canDiscard || proposal.status === 'thinking'}
+            onClick={onDiscard}
+            className="inline-flex h-6 items-center rounded border border-[var(--xd-border)] px-2 text-[11px] font-medium text-[var(--xd-ink-secondary)] hover:text-[var(--xd-ink)] disabled:opacity-35"
+          >
+            Discard
+          </button>
+        </div>
       )}
     </article>
-  )
-}
-
-function SketchThumb({
-  stroke,
-  color,
-}: {
-  stroke?: SketchStroke
-  color: string
-}) {
-  const points = stroke?.points ?? []
-  return (
-    <svg
-      viewBox="0 0 100 100"
-      className="h-5 w-7 rounded bg-[var(--xd-canvas)]"
-      aria-hidden
-    >
-      {stroke?.tool === 'pen' && points.length > 1 && (
-        <polyline
-          points={points
-            .map((point) => `${point.x * 100},${point.y * 100}`)
-            .join(' ')}
-          fill="none"
-          stroke={color}
-          strokeWidth="8"
-          strokeLinecap="round"
-        />
-      )}
-      {(stroke?.tool === 'highlight' || stroke?.tool === 'rect') && (
-        <rect x="8" y="18" width="84" height="64" fill={color} opacity="0.45" />
-      )}
-      {stroke?.tool === 'arrow' && (
-        <line x1="10" y1="80" x2="90" y2="20" stroke={color} strokeWidth="8" />
-      )}
-      {(!stroke || stroke.tool === 'callout') && (
-        <circle cx="24" cy="72" r="12" fill={color} />
-      )}
-    </svg>
   )
 }

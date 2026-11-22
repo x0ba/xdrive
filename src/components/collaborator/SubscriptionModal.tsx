@@ -32,27 +32,20 @@ export const ROLE_FIELDS: Array<{
   },
   {
     key: 'exploration',
-    label: 'Exploration & Fast Edits',
-    hint: 'Low-latency restyles and scans',
+    label: 'Exploration',
+    hint: 'Fast edits and scans',
   },
   {
     key: 'review',
-    label: 'Code & Op Review',
-    hint: 'Diff reading and idiom checks before a keep',
+    label: 'Review',
+    hint: 'Diff checks before keeping ops',
   },
   {
     key: 'design',
-    label: 'UI Design',
-    hint: 'Layout, type, and in-file controls',
+    label: 'Design',
+    hint: 'Layout, typography, and controls',
   },
 ]
-
-const PROVIDER_MARK: Record<AIProviderId, string> = {
-  'opencode-go': 'Go',
-  xai: 'xAI',
-  claude: 'Cl',
-  openai: 'AI',
-}
 
 function model(
   spec: Omit<ManagedModel, 'badge'> & { badge?: string },
@@ -67,7 +60,7 @@ export const DEFAULT_SUBSCRIPTIONS: ManagedSubscription[] = [
   {
     providerId: 'opencode-go',
     name: 'OpenCode Go',
-    tagline: 'One subscription, several models, routed through the Go bridge.',
+    tagline: 'Unified subscription routing across Gemini, Grok, Claude, and DeepSeek.',
     planName: 'Go',
     connected: true,
     authMethod: 'subscription_oauth',
@@ -85,7 +78,7 @@ export const DEFAULT_SUBSCRIPTIONS: ManagedSubscription[] = [
         contextWindow: '1M',
         speedTier: 'deep',
         supportsVisionSketch: true,
-        recommendedFor: 'Manuscript layout and in-file UI',
+        recommendedFor: 'Manuscript layout and UI',
       }),
       model({
         id: 'opencode-go/grok-4.7',
@@ -118,25 +111,14 @@ export const DEFAULT_SUBSCRIPTIONS: ManagedSubscription[] = [
         contextWindow: '128K',
         speedTier: 'instant',
         supportsVisionSketch: false,
-        recommendedFor: 'Exploration and cheap scans',
-      }),
-      model({
-        id: 'opencode-go/qwen4-max',
-        name: 'Qwen4 Max',
-        providerId: 'opencode-go',
-        promptLabel: 'OpenCode Go · Qwen4 Max',
-        role: 'reasoning',
-        contextWindow: '256K',
-        speedTier: 'deep',
-        supportsVisionSketch: false,
-        recommendedFor: 'Long derivations',
+        recommendedFor: 'Fast exploration',
       }),
     ],
   },
   {
     providerId: 'xai',
     name: 'SpaceX AI',
-    tagline: 'xAI Grok models for implementation and fast edits.',
+    tagline: 'Grok models for implementation and fast edits.',
     planName: 'SuperGrok',
     connected: true,
     authMethod: 'api_key',
@@ -155,7 +137,7 @@ export const DEFAULT_SUBSCRIPTIONS: ManagedSubscription[] = [
         contextWindow: '256K',
         speedTier: 'deep',
         supportsVisionSketch: true,
-        recommendedFor: 'Growing a live .mrbl page in stages',
+        recommendedFor: 'Staged .mrbl edits',
       }),
       model({
         id: 'xai/grok-4.7-build-fast',
@@ -166,25 +148,14 @@ export const DEFAULT_SUBSCRIPTIONS: ManagedSubscription[] = [
         contextWindow: '256K',
         speedTier: 'instant',
         supportsVisionSketch: true,
-        recommendedFor: 'Scale-to-restyle gestures',
-      }),
-      model({
-        id: 'xai/grok-4.6',
-        name: 'Grok 4.6',
-        providerId: 'xai',
-        promptLabel: 'SpaceX AI · Grok 4.6',
-        role: 'reasoning',
-        contextWindow: '128K',
-        speedTier: 'fast',
-        supportsVisionSketch: true,
-        recommendedFor: 'Fallback reasoning',
+        recommendedFor: 'Scale gestures',
       }),
     ],
   },
   {
     providerId: 'claude',
     name: 'Anthropic Claude',
-    tagline: 'Claude for code review and careful op diffs.',
+    tagline: 'Claude models for code review and op diffs.',
     planName: 'Pro',
     connected: true,
     authMethod: 'subscription_oauth',
@@ -202,7 +173,7 @@ export const DEFAULT_SUBSCRIPTIONS: ManagedSubscription[] = [
         contextWindow: '200K',
         speedTier: 'fast',
         supportsVisionSketch: true,
-        recommendedFor: 'Reading a proposed diff',
+        recommendedFor: 'Diff review',
       }),
       model({
         id: 'claude-opus-5-5',
@@ -213,25 +184,14 @@ export const DEFAULT_SUBSCRIPTIONS: ManagedSubscription[] = [
         contextWindow: '200K',
         speedTier: 'deep',
         supportsVisionSketch: true,
-        recommendedFor: 'Hard structural edits',
-      }),
-      model({
-        id: 'claude-haiku-5-5',
-        name: 'Haiku 5.5',
-        providerId: 'claude',
-        promptLabel: 'Claude · Haiku 5.5',
-        role: 'exploration',
-        contextWindow: '200K',
-        speedTier: 'instant',
-        supportsVisionSketch: false,
-        recommendedFor: 'Short prose polishes',
+        recommendedFor: 'Structural edits',
       }),
     ],
   },
   {
     providerId: 'openai',
     name: 'OpenAI',
-    tagline: 'GPT models on an API key or ChatGPT subscription.',
+    tagline: 'GPT models via API key or subscription.',
     planName: 'Plus',
     connected: true,
     authMethod: 'api_key',
@@ -250,7 +210,7 @@ export const DEFAULT_SUBSCRIPTIONS: ManagedSubscription[] = [
         contextWindow: '256K',
         speedTier: 'deep',
         supportsVisionSketch: true,
-        recommendedFor: 'General semantic edits',
+        recommendedFor: 'General edits',
       }),
       model({
         id: 'o4-mini',
@@ -261,18 +221,7 @@ export const DEFAULT_SUBSCRIPTIONS: ManagedSubscription[] = [
         contextWindow: '128K',
         speedTier: 'fast',
         supportsVisionSketch: false,
-        recommendedFor: 'Short proofs and checks',
-      }),
-      model({
-        id: 'gpt-4.1',
-        name: 'GPT-4.1',
-        providerId: 'openai',
-        promptLabel: 'OpenAI · GPT-4.1',
-        role: 'exploration',
-        contextWindow: '128K',
-        speedTier: 'fast',
-        supportsVisionSketch: true,
-        recommendedFor: 'Everyday edits',
+        recommendedFor: 'Proofs and checks',
       }),
     ],
   },
@@ -403,12 +352,10 @@ export function SubscriptionModal({
 
   function saveKey() {
     if (!draftKey.trim()) {
-      setKeyMessage('Enter a key or token first.')
+      setKeyMessage('Enter a key first.')
       return
     }
-    setKeyMessage(
-      `Stored as ${maskSecret(draftKey)}. The raw value is not kept in the page.`,
-    )
+    setKeyMessage(`Saved ${maskSecret(draftKey)}.`)
     setDraftKey('')
     patchActive({
       authMethod: 'api_key',
@@ -419,9 +366,7 @@ export function SubscriptionModal({
   }
 
   function pingBridge() {
-    setBridgeMessage(
-      `Bridge answered at ${provider.endpointUrl}. Local CLI is the writer.`,
-    )
+    setBridgeMessage(`Connected to ${provider.endpointUrl}.`)
     patchActive({
       authMethod: 'cli_bridge',
       connected: true,
@@ -438,39 +383,30 @@ export function SubscriptionModal({
       aria-modal={variant === 'modal' ? true : undefined}
       aria-labelledby={titleId}
       className={cn(
-        'flex flex-col overflow-hidden border border-[var(--xd-border-strong)] bg-[var(--xd-canvas)] text-[var(--xd-ink)]',
+        'flex flex-col overflow-hidden border border-[var(--xd-border)] bg-[var(--xd-canvas)] text-[var(--xd-ink)]',
         variant === 'modal'
-          ? 'max-h-[min(860px,calc(100vh-32px))] w-[min(920px,calc(100vw-32px))] rounded-lg shadow-[0_24px_80px_rgba(0,0,0,0.35)]'
-          : 'min-h-[640px] w-full rounded-lg',
+          ? 'max-h-[min(760px,calc(100vh-32px))] w-[min(780px,calc(100vw-32px))] rounded-lg shadow-2xl'
+          : 'w-full rounded-md',
       )}
     >
-      <header className="flex items-start justify-between gap-3 border-b border-[var(--xd-border)] px-4 py-3">
-        <div>
-          <p className="text-[11px] font-medium tracking-wide text-[var(--xd-ink-muted)] uppercase">
-            AI subscriptions
-          </p>
-          <h2 id={titleId} className="mt-0.5 text-[15px] font-semibold">
-            Providers & default models
-          </h2>
-          <p className="mt-0.5 text-[12px] text-[var(--xd-ink-secondary)]">
-            Connected models show up in the prompt bar and the collaborator
-            sidebar.
-          </p>
-        </div>
+      <header className="flex items-center justify-between gap-3 border-b border-[var(--xd-border)] px-4 py-3">
+        <h2 id={titleId} className="text-[14px] font-semibold">
+          Models & Providers
+        </h2>
         {variant === 'modal' && (
           <button
             type="button"
             onClick={() => onOpenChange?.(false)}
-            className="inline-flex size-7 items-center justify-center rounded-md text-[var(--xd-ink-secondary)] hover:bg-[var(--xd-surface-hover)]"
-            aria-label="Close subscriptions"
+            className="inline-flex size-6 items-center justify-center rounded text-[var(--xd-ink-secondary)] hover:bg-[var(--xd-surface-hover)]"
+            aria-label="Close"
           >
-            <X className="size-4" />
+            <X className="size-3.5" />
           </button>
         )}
       </header>
 
-      <div className="grid min-h-0 flex-1 md:grid-cols-[240px_minmax(0,1fr)]">
-        <ul className="border-b border-[var(--xd-border)] bg-[var(--xd-rail)] md:border-r md:border-b-0">
+      <div className="grid min-h-0 flex-1 md:grid-cols-[200px_minmax(0,1fr)]">
+        <ul className="border-b border-[var(--xd-border)] bg-[var(--xd-rail)] p-1.5 md:border-r md:border-b-0">
           {subscriptions.map((subscription) => {
             const selected = subscription.providerId === active.providerId
             return (
@@ -484,24 +420,14 @@ export function SubscriptionModal({
                     setBridgeMessage(null)
                   }}
                   className={cn(
-                    'flex w-full items-center gap-2 px-3 py-2.5 text-left',
+                    'flex w-full items-center justify-between gap-2 rounded px-2.5 py-2 text-left text-[12px] transition-colors',
                     selected
-                      ? 'bg-[var(--xd-accent-soft)]'
-                      : 'hover:bg-[var(--xd-surface-hover)]',
+                      ? 'bg-[var(--xd-surface-active)] font-medium text-[var(--xd-ink)]'
+                      : 'text-[var(--xd-ink-secondary)] hover:bg-[var(--xd-surface-hover)] hover:text-[var(--xd-ink)]',
                   )}
                   aria-pressed={selected}
                 >
-                  <span className="inline-flex h-7 w-9 items-center justify-center rounded bg-[var(--xd-elevated)] text-[10px] font-semibold">
-                    {PROVIDER_MARK[subscription.providerId]}
-                  </span>
-                  <span className="min-w-0 flex-1">
-                    <span className="block truncate text-[12.5px] font-medium">
-                      {subscription.name}
-                    </span>
-                    <span className="block truncate text-[11px] text-[var(--xd-ink-muted)]">
-                      {subscription.planName}
-                    </span>
-                  </span>
+                  <span className="truncate">{subscription.name}</span>
                   <StatusDot
                     status={
                       subscription.connected
@@ -515,59 +441,38 @@ export function SubscriptionModal({
           })}
         </ul>
 
-        <div className="min-h-0 overflow-y-auto px-4 py-3">
-          <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="min-h-0 space-y-4 overflow-y-auto p-4">
+          <div className="flex items-start justify-between gap-3">
             <div>
-              <h3 className="text-[14px] font-semibold">{active.name}</h3>
-              <p className="mt-0.5 max-w-xl text-[12.5px] text-[var(--xd-ink-secondary)]">
+              <h3 className="text-[13.5px] font-semibold">{active.name}</h3>
+              <p className="mt-0.5 text-[12px] text-[var(--xd-ink-secondary)]">
                 {active.tagline}
               </p>
-              <p className="xd-mono mt-1 text-[11px] text-[var(--xd-ink-muted)]">
-                {active.endpointUrl}
-              </p>
             </div>
-            <label className="inline-flex items-center gap-2 text-[12.5px] font-medium">
+            <label className="inline-flex items-center gap-2 text-[12px] font-medium">
               <Switch
                 checked={active.connected}
                 onCheckedChange={setConnected}
                 aria-label={`Connect ${active.name}`}
               />
-              {active.connected ? 'Connected' : 'Disconnected'}
+              <span>{active.connected ? 'Connected' : 'Off'}</span>
             </label>
           </div>
 
           {active.status === 'rate_limited' && active.connected && (
-            <p className="mt-3 flex items-start gap-1.5 rounded-md border border-[var(--xd-sketch)]/40 bg-[var(--xd-sketch-soft)] px-2.5 py-2 text-[12px] text-[var(--xd-ink)]">
-              <AlertTriangle className="mt-0.5 size-3.5 shrink-0 text-[var(--xd-sketch)]" />
-              Minute cap reached on {active.planName}. Requests queue behind
-              this subscription. The models stay selectable.
+            <p className="flex items-center gap-1.5 rounded border border-[var(--xd-sketch)]/40 bg-[var(--xd-sketch-soft)] px-2.5 py-1.5 text-[11.5px] text-[var(--xd-sketch)]">
+              <AlertTriangle className="size-3.5 shrink-0" />
+              <span>Rate limit reached on {active.planName}.</span>
             </p>
           )}
 
-          <div className="mt-4 grid gap-3 sm:grid-cols-3">
-            <Metric
-              label="Ops this month"
-              value={active.usageThisMonth.opsGenerated.toLocaleString()}
-            />
-            <Metric
-              label="Apps built"
-              value={String(active.usageThisMonth.appsBuilt)}
-            />
-            <Metric
-              label="Quota used"
-              value={`${active.usageThisMonth.quotaPercent}%`}
-              bar={active.usageThisMonth.quotaPercent}
-            />
-          </div>
-
-          <fieldset className="mt-4">
-            <legend className="text-[12px] font-semibold">Auth mode</legend>
-            <div className="mt-1.5 flex flex-wrap gap-1">
+          <div className="space-y-2">
+            <div className="flex flex-wrap items-center gap-1">
               {(
                 [
-                  ['subscription_oauth', 'Subscription OAuth'],
+                  ['subscription_oauth', 'OAuth'],
                   ['api_key', 'API Key'],
-                  ['cli_bridge', 'Local CLI Bridge'],
+                  ['cli_bridge', 'CLI Bridge'],
                 ] as const
               ).map(([method, label]) => (
                 <button
@@ -576,158 +481,111 @@ export function SubscriptionModal({
                   aria-pressed={active.authMethod === method}
                   onClick={() => patchActive({ authMethod: method })}
                   className={cn(
-                    'rounded-md border px-2 py-1 text-[12px]',
+                    'rounded border px-2.5 py-1 text-[11.5px] transition-colors',
                     active.authMethod === method
-                      ? 'border-[var(--xd-accent-border)] bg-[var(--xd-accent-soft)]'
-                      : 'border-[var(--xd-border)] hover:bg-[var(--xd-surface-hover)]',
+                      ? 'border-[var(--xd-accent-border)] bg-[var(--xd-accent-soft)] font-medium text-[var(--xd-accent)]'
+                      : 'border-[var(--xd-border)] text-[var(--xd-ink-secondary)] hover:bg-[var(--xd-surface-hover)]',
                   )}
                 >
                   {label}
                 </button>
               ))}
             </div>
-          </fieldset>
 
-          {active.authMethod === 'subscription_oauth' && (
-            <div className="mt-3 rounded-md border border-[var(--xd-border)] bg-[var(--xd-rail)] px-3 py-2.5">
-              <p className="text-[12.5px]">
-                Sign in with the {active.name} subscription. No API key is
-                stored.
-              </p>
-              <button
-                type="button"
-                onClick={() =>
-                  patchActive({
-                    connected: true,
-                    status: 'active',
-                    authMethod: 'subscription_oauth',
-                    maskedCredential: undefined,
-                  })
-                }
-                className="mt-2 inline-flex h-8 items-center gap-1.5 rounded-md bg-[var(--xd-accent)] px-2.5 text-[12px] font-medium text-white"
-              >
-                <KeyRound className="size-3.5" />
-                {active.connected
-                  ? 'Reconnect OAuth'
-                  : 'Connect with subscription'}
-              </button>
-            </div>
-          )}
-
-          {active.authMethod === 'api_key' && (
-            <form
-              className="mt-3 rounded-md border border-[var(--xd-border)] bg-[var(--xd-rail)] px-3 py-2.5"
-              onSubmit={(event) => {
-                event.preventDefault()
-                saveKey()
-              }}
-            >
-              <label
-                className="block text-[12px] font-medium"
-                htmlFor={`${active.providerId}-key`}
-              >
-                API key or token
-              </label>
-              <div className="mt-1.5 flex flex-wrap gap-2">
-                <input
-                  id={`${active.providerId}-key`}
-                  type="password"
-                  autoComplete="off"
-                  value={draftKey}
-                  onChange={(event) => setDraftKey(event.target.value)}
-                  placeholder={active.maskedCredential ?? 'Paste a key'}
-                  className="h-8 min-w-[200px] flex-1 rounded-md border border-[var(--xd-border)] bg-[var(--xd-canvas)] px-2 text-[12.5px] outline-none focus-visible:border-[var(--xd-accent)]"
-                />
+            {active.authMethod === 'subscription_oauth' && (
+              <div className="flex items-center justify-between rounded border border-[var(--xd-border)] bg-[var(--xd-rail)] px-3 py-2 text-[12px]">
+                <span className="text-[var(--xd-ink-secondary)]">
+                  Authenticate with your {active.name} account
+                </span>
                 <button
-                  type="submit"
-                  className="inline-flex h-8 items-center rounded-md border border-[var(--xd-border)] bg-[var(--xd-elevated)] px-2.5 text-[12px] font-medium"
+                  type="button"
+                  onClick={() =>
+                    patchActive({
+                      connected: true,
+                      status: 'active',
+                      authMethod: 'subscription_oauth',
+                      maskedCredential: undefined,
+                    })
+                  }
+                  className="inline-flex h-7 items-center gap-1.5 rounded bg-[var(--xd-accent)] px-2.5 text-[11.5px] font-medium text-white"
                 >
-                  Save key
+                  <KeyRound className="size-3" />
+                  <span>{active.connected ? 'Reconnect' : 'Connect'}</span>
                 </button>
               </div>
-              {active.maskedCredential && (
-                <p className="xd-mono mt-1.5 text-[11px] text-[var(--xd-ink-muted)]">
-                  Current credential {active.maskedCredential}
-                </p>
-              )}
-              {keyMessage && (
-                <p className="mt-1.5 text-[12px] text-[var(--xd-ink-secondary)]">
-                  {keyMessage}
-                </p>
-              )}
-            </form>
-          )}
+            )}
 
-          {active.authMethod === 'cli_bridge' && (
-            <div className="mt-3 rounded-md border border-[var(--xd-border)] bg-[var(--xd-rail)] px-3 py-2.5">
-              <p className="flex items-center gap-1.5 text-[12.5px]">
-                <Terminal className="size-3.5" />
-                Local CLI bridge
-              </p>
-              <p className="xd-mono mt-1 text-[11.5px] text-[var(--xd-ink-secondary)]">
-                marble-cli://local · {active.endpointUrl}
-              </p>
-              <button
-                type="button"
-                onClick={pingBridge}
-                className="mt-2 inline-flex h-8 items-center rounded-md border border-[var(--xd-border)] bg-[var(--xd-elevated)] px-2.5 text-[12px] font-medium"
+            {active.authMethod === 'api_key' && (
+              <form
+                className="space-y-1.5 rounded border border-[var(--xd-border)] bg-[var(--xd-rail)] p-2.5"
+                onSubmit={(event) => {
+                  event.preventDefault()
+                  saveKey()
+                }}
               >
-                Detect CLI
-              </button>
-              {bridgeMessage && (
-                <p className="mt-1.5 text-[12px] text-[var(--xd-commit)]">
-                  {bridgeMessage}
-                </p>
-              )}
-            </div>
-          )}
+                <div className="flex items-center gap-1.5">
+                  <input
+                    id={`${active.providerId}-key`}
+                    type="password"
+                    autoComplete="off"
+                    aria-label="API key or token"
+                    value={draftKey}
+                    onChange={(event) => setDraftKey(event.target.value)}
+                    placeholder={active.maskedCredential ?? 'Paste API key...'}
+                    className="h-7 min-w-0 flex-1 rounded border border-[var(--xd-border)] bg-[var(--xd-canvas)] px-2 text-[12px] outline-none focus-visible:border-[var(--xd-accent)]"
+                  />
+                  <button
+                    type="submit"
+                    className="inline-flex h-7 items-center rounded border border-[var(--xd-border)] bg-[var(--xd-elevated)] px-2.5 text-[11.5px] font-medium"
+                  >
+                    Save
+                  </button>
+                </div>
+                {keyMessage && (
+                  <p className="text-[11px] text-[var(--xd-ink-secondary)]">
+                    {keyMessage}
+                  </p>
+                )}
+              </form>
+            )}
 
-          <div className="mt-4">
-            <div className="flex items-center justify-between gap-2">
-              <h4 className="text-[12px] font-semibold">Models</h4>
-              <label className="flex items-center gap-2 text-[12px] text-[var(--xd-ink-secondary)]">
-                Provider default
-                <select
-                  aria-label={`${active.name} default model`}
-                  value={active.defaultModelId}
-                  onChange={(event) =>
-                    patchActive({ defaultModelId: event.target.value })
-                  }
-                  className="h-7 rounded-md border border-[var(--xd-border)] bg-[var(--xd-canvas)] px-1.5 text-[12px]"
+            {active.authMethod === 'cli_bridge' && (
+              <div className="flex items-center justify-between rounded border border-[var(--xd-border)] bg-[var(--xd-rail)] px-3 py-2 text-[12px]">
+                <span className="xd-mono flex items-center gap-1.5 text-[11.5px] text-[var(--xd-ink-secondary)]">
+                  <Terminal className="size-3.5" />
+                  <span>{active.endpointUrl}</span>
+                </span>
+                <button
+                  type="button"
+                  onClick={pingBridge}
+                  className="inline-flex h-7 items-center rounded border border-[var(--xd-border)] bg-[var(--xd-elevated)] px-2.5 text-[11.5px] font-medium"
                 >
-                  {active.models.map((item) => (
-                    <option key={item.id} value={item.id}>
-                      {item.name}
-                    </option>
-                  ))}
-                </select>
-              </label>
-            </div>
-            <ul className="mt-2 divide-y divide-[var(--xd-border)] rounded-md border border-[var(--xd-border)]">
+                  Detect CLI
+                </button>
+              </div>
+            )}
+            {bridgeMessage && (
+              <p className="text-[11px] text-[var(--xd-commit)]">
+                {bridgeMessage}
+              </p>
+            )}
+          </div>
+
+          {/* Models list */}
+          <div>
+            <h4 className="mb-1.5 text-[11.5px] font-medium text-[var(--xd-ink-muted)]">
+              Available models
+            </h4>
+            <ul className="divide-y divide-[var(--xd-border)] rounded border border-[var(--xd-border)]">
               {active.models.map((item) => (
                 <li
                   key={item.id}
-                  className="flex flex-wrap items-center gap-2 px-2.5 py-2"
+                  className="flex items-center justify-between gap-2 px-2.5 py-1.5 text-[12px]"
                 >
-                  <div className="min-w-[180px] flex-1">
-                    <p className="text-[12.5px] font-medium">
-                      {item.promptLabel}
-                    </p>
-                    <p className="xd-mono text-[10.5px] text-[var(--xd-ink-muted)]">
-                      {item.id}
-                    </p>
-                  </div>
-                  <span className="rounded border border-[var(--xd-border)] px-1.5 py-0.5 text-[10.5px] text-[var(--xd-ink-secondary)]">
-                    {item.role}
+                  <span className="font-medium">{item.name}</span>
+                  <span className="xd-mono text-[11px] text-[var(--xd-ink-muted)]">
+                    {item.contextWindow} · {item.role}
                   </span>
-                  <span className="xd-tabular text-[11px] text-[var(--xd-ink-muted)]">
-                    {item.contextWindow} · {item.speedTier}
-                  </span>
-                  {item.supportsVisionSketch && (
-                    <span className="text-[10.5px] text-[var(--xd-sketch)]">
-                      vision
-                    </span>
-                  )}
                 </li>
               ))}
             </ul>
@@ -735,24 +593,17 @@ export function SubscriptionModal({
         </div>
       </div>
 
-      <div className="border-t border-[var(--xd-border)] px-4 py-3">
-        <h3 className="text-[12px] font-semibold">Default model per role</h3>
-        <div className="mt-2 grid gap-2 md:grid-cols-2">
+      {/* Role assignments */}
+      <div className="border-t border-[var(--xd-border)] bg-[var(--xd-rail)]/40 px-4 py-3">
+        <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
           {ROLE_FIELDS.map((field) => {
             const selected = connectedModels.find(
               (item) => item.id === roles[field.key],
             )
-            const stale = !selected
             return (
-              <label
-                key={field.key}
-                className="rounded-md border border-[var(--xd-border)] bg-[var(--xd-rail)] px-2.5 py-2"
-              >
-                <span className="block text-[12px] font-medium">
+              <label key={field.key} className="block">
+                <span className="block text-[11px] font-medium text-[var(--xd-ink-secondary)]">
                   {field.label}
-                </span>
-                <span className="block text-[11px] text-[var(--xd-ink-muted)]">
-                  {field.hint}
                 </span>
                 <select
                   aria-label={field.label}
@@ -763,24 +614,19 @@ export function SubscriptionModal({
                       [field.key]: event.target.value,
                     })
                   }
-                  className="mt-1.5 h-8 w-full rounded-md border border-[var(--xd-border)] bg-[var(--xd-canvas)] px-2 text-[12px]"
+                  className="mt-1 h-7 w-full rounded border border-[var(--xd-border)] bg-[var(--xd-canvas)] px-1.5 text-[11.5px]"
                 >
                   {connectedModels.map((item) => (
                     <option key={item.id} value={item.id}>
-                      {item.label}
+                      {item.modelName}
                     </option>
                   ))}
-                  {stale && (
+                  {!selected && (
                     <option value={roles[field.key]}>
-                      {roles[field.key]} (disconnected)
+                      {roles[field.key]} (off)
                     </option>
                   )}
                 </select>
-                {stale && (
-                  <span className="mt-1 block text-[11px] text-[var(--xd-sketch)]">
-                    That model’s provider is disconnected.
-                  </span>
-                )}
               </label>
             )
           })}
@@ -811,42 +657,5 @@ function StatusDot({ status }: { status: AISubscription['status'] }) {
       : status === 'rate_limited'
         ? 'bg-[var(--xd-sketch)]'
         : 'bg-[var(--xd-ink-subtle)]'
-  const label =
-    status === 'active'
-      ? 'Active'
-      : status === 'rate_limited'
-        ? 'Rate limited'
-        : 'Disconnected'
-  return (
-    <span
-      className={cn('size-2 rounded-full', color)}
-      title={label}
-      aria-label={label}
-    />
-  )
-}
-
-function Metric({
-  label,
-  value,
-  bar,
-}: {
-  label: string
-  value: string
-  bar?: number
-}) {
-  return (
-    <div className="rounded-md border border-[var(--xd-border)] bg-[var(--xd-rail)] px-2.5 py-2">
-      <p className="text-[11px] text-[var(--xd-ink-muted)]">{label}</p>
-      <p className="xd-tabular text-[16px] font-semibold">{value}</p>
-      {bar !== undefined && (
-        <span className="mt-1 block h-1 overflow-hidden rounded-full bg-[var(--xd-surface-active)]">
-          <span
-            className="block h-full bg-[var(--xd-accent)]"
-            style={{ width: `${Math.max(0, Math.min(100, bar))}%` }}
-          />
-        </span>
-      )}
-    </div>
-  )
+  return <span className={cn('size-1.5 rounded-full', color)} aria-hidden />
 }

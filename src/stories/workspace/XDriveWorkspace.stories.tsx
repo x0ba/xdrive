@@ -2,7 +2,7 @@ import type { Meta, StoryObj } from '@storybook/tanstack-react'
 import { XDriveWorkspace } from '#/components/workspace'
 
 const meta = {
-  title: 'xDrive Workspace/Research Workspace',
+  title: 'xDrive Workspace/Workspace',
   component: XDriveWorkspace,
   parameters: { layout: 'fullscreen' },
   tags: ['autodocs'],
@@ -11,8 +11,8 @@ const meta = {
 export default meta
 type Story = StoryObj<typeof meta>
 
-export const DriveHomeDefault: Story = {
-  name: 'Drive Home · Obsidian Studio',
+export const DriveFiles: Story = {
+  name: 'Drive Files',
   args: {
     initialTheme: 'dark',
     initialNav: 'drive',
@@ -21,19 +21,19 @@ export const DriveHomeDefault: Story = {
   },
 }
 
-export const LiveLatexStudioApp: Story = {
-  name: 'Live LaTeX Paper & Theorem Studio',
+export const LiveLatexDocument: Story = {
+  name: 'LaTeX Manuscript',
   args: {
     initialTheme: 'dark',
     initialActiveTabId: 'tpl-latex-studio',
     initialOpenDocIds: ['tpl-latex-studio', 'ws-qec-threshold'],
     initialMode: 'direct',
-    initialAiSidebarOpen: true,
+    initialAiSidebarOpen: false,
   },
 }
 
-export const LiveMultiNoteNotebookApp: Story = {
-  name: 'Live Multi-Note Lab Notebook',
+export const LiveNotebookWithCollaborator: Story = {
+  name: 'Lab Notebook + AI Sidebar',
   args: {
     initialTheme: 'dark',
     initialActiveTabId: 'tpl-research-notebook',
@@ -48,7 +48,7 @@ export const SketchAndAnnotateMode: Story = {
   args: {
     initialTheme: 'dark',
     initialActiveTabId: 'tpl-latex-studio',
-    initialOpenDocIds: ['tpl-latex-studio', 'tpl-research-notebook'],
+    initialOpenDocIds: ['tpl-latex-studio'],
     initialMode: 'sketch',
     initialAiSidebarOpen: true,
     initialSelectedIds: ['sec-abstract'],
