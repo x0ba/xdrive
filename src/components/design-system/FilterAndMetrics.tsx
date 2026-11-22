@@ -238,6 +238,11 @@ export function MarbleAppCard({
               {getCategoryIcon(doc.category, 'h-3.5 w-3.5')}
             </span>
             <span className="xd-mono truncate">{doc.fileName}</span>
+            {doc.isEvergreen && (
+              <span className="xd-mono shrink-0 rounded border border-[var(--xd-accent-border)] bg-[var(--xd-accent-soft)] px-1.5 py-0.5 text-[10px] font-medium leading-none text-[var(--xd-accent)]">
+                Evergreen · AI Ref
+              </span>
+            )}
           </div>
 
           <div

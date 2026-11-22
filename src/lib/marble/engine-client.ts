@@ -1064,7 +1064,7 @@ function bridgeStyle(): string {
   return `<style data-xdrive-bridge="1">
 html[data-xdrive-theme="dark"] { color-scheme: dark; }
 html[data-xdrive-theme="light"] { color-scheme: light; }
-.marble-grip, .marble-btn, .marble-alts, .marble-handle { font: 600 11px/1 ui-monospace, SFMono-Regular, Menlo, monospace; }
+.marble-grip, .marble-btn, .marble-alts, .marble-handle { font: 500 11px/1 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace; }
 .marble-item { position: relative; }
 .marble-grip {
   position: absolute; left: -1.35rem; top: .35rem; z-index: 3;
@@ -1074,25 +1074,25 @@ html[data-xdrive-theme="light"] { color-scheme: light; }
 .marble-item:hover > .marble-grip, .marble-item:focus-within > .marble-grip, .marble-grip:focus-visible { opacity: 1; }
 .marble-btn {
   position: absolute; right: .35rem; top: .35rem; z-index: 3;
-  width: 1.25rem; height: 1.25rem; border: 0; border-radius: 999px;
-  background: transparent; color: var(--danger, #9d2c2c); cursor: pointer; opacity: 0;
+  width: 1.25rem; height: 1.25rem; border: 0; border-radius: 4px;
+  background: transparent; color: var(--danger, #e5484d); cursor: pointer; opacity: 0;
 }
 .marble-item:hover > .marble-btn, .marble-item:focus-within > .marble-btn, .marble-btn:focus-visible { opacity: 1; }
 .marble-alts { display: inline-flex; gap: .25rem; margin: .35rem 0 0; }
 .marble-alts button {
-  border: 1px solid var(--line, #ccc); background: transparent; color: inherit;
-  border-radius: 999px; padding: .1rem .45rem; cursor: pointer;
+  border: 1px solid var(--line, #22252e); background: var(--panel, transparent); color: var(--muted, inherit);
+  border-radius: 4px; padding: .15rem .45rem; cursor: pointer;
 }
-.marble-alts button[aria-pressed="true"] { background: var(--accent, #1f4b99); color: white; border-color: transparent; }
+.marble-alts button[aria-pressed="true"] { background: var(--accent, #5e6ad2); color: #ffffff; border-color: transparent; }
 marble-alt > [data-marble-alt] { display: none; }
 marble-alt > .marble-alt-shown { display: block; }
-.xdrive-hover { outline: 1.5px dashed #1f4fd8; outline-offset: 3px; }
-.xdrive-selected { outline: 2px dashed #1f4fd8; outline-offset: 3px; background: color-mix(in srgb, #1f4fd8 10%, transparent); }
-.xdrive-proposed { outline: 2px dashed #c47b12; outline-offset: 5px; }
+.xdrive-hover { outline: 1.5px dashed var(--accent, #5e6ad2); outline-offset: 3px; }
+.xdrive-selected { outline: 2px dashed var(--accent, #5e6ad2); outline-offset: 3px; background: color-mix(in srgb, var(--accent, #5e6ad2) 10%, transparent); }
+.xdrive-proposed { outline: 2px dashed var(--warn, #e59934); outline-offset: 5px; }
 html[data-xdrive-locked="1"] [data-marble-add] { opacity: .45; }
 .marble-handle {
   position: absolute; right: -6px; bottom: -6px; width: 12px; height: 12px;
-  border: 0; border-radius: 2px; background: var(--accent, #1f4b99); cursor: nwse-resize;
+  border: 0; border-radius: 2px; background: var(--accent, #5e6ad2); cursor: nwse-resize;
 }
 [data-marble-resizable] { position: relative; }
 </style>`

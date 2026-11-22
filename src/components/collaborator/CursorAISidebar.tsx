@@ -6,6 +6,7 @@ import type {
 import { Lock, X } from 'lucide-react'
 import type {
   AIMessage,
+  EvergreenDocRef,
   MarbleCheckpoint,
   MarbleOp,
   MarbleOpProposal,
@@ -75,6 +76,21 @@ const STAGE_PLANS: Record<MarbleIntentKind, string[]> = {
   ],
 }
 
+export const DEFAULT_EVERGREEN_REFS: EvergreenDocRef[] = [
+  {
+    slug: 'document-design-system',
+    fileName: 'document-design-system.mrbl',
+    title: 'xDrive Document Design System',
+    ruleCount: 11,
+  },
+  {
+    slug: 'document-donts-system',
+    fileName: 'document-donts-system.mrbl',
+    title: 'Document Don’ts — Anti-Slop Guardrails',
+    ruleCount: 5,
+  },
+]
+
 const DEMO_PROPOSAL: MarbleOpProposal = {
   id: 'prop-lattice',
   note: 'Stage 4 of 4: Finish with a small inserted stylesheet',
@@ -86,6 +102,7 @@ const DEMO_PROPOSAL: MarbleOpProposal = {
   createdAt: Date.parse('2026-11-22T14:05:00Z'),
   status: 'proposed',
   targetIds: ['sec-method', 'eq-bell'],
+  referencedEvergreenDocs: DEFAULT_EVERGREEN_REFS,
   ops: [
     {
       type: 'insert',
@@ -233,6 +250,8 @@ export interface CursorAISidebarProps {
   modelId?: string
   onModelChange?: (modelId: string) => void
   permission?: SharePermissionLevel
+  evergreenRefs?: EvergreenDocRef[]
+  onOpenEvergreenDoc?: (slug: string) => void
   onRemoveElement?: (id: string) => void
   onRemoveSketch?: (id: string) => void
   onSend?: (text: string) => void
@@ -425,6 +444,7 @@ function draftFromIntent(
       return { type: 'remove' as const, id: op.id ?? 'pending-inverse' }
     }),
     sketchAnnotations: request.sketches,
+    referencedEvergreenDocs: DEFAULT_EVERGREEN_REFS,
   }
   const user: AIMessage = {
     id: uid('msg'),
@@ -467,6 +487,8 @@ export function CursorAISidebar({
   modelId: modelIdProp,
   onModelChange,
   permission = 'edit_with_ai_shared',
+  evergreenRefs = DEFAULT_EVERGREEN_REFS,
+  onOpenEvergreenDoc,
   onRemoveElement,
   onRemoveSketch,
   onSend,
@@ -736,6 +758,25 @@ export function CursorAISidebar({
         />
       </header>
 
+      <div
+        data-component="evergreen-ai-references"
+        className="flex flex-wrap items-center gap-1 border-b border-[var(--xd-border)] bg-[var(--xd-canvas)]/60 px-2.5 py-1.5 text-[10.5px]"
+      >
+        <span className="text-[var(--xd-ink-muted)]">Always referenced:</span>
+        {evergreenRefs.map((ref) => (
+          <button
+            key={ref.slug}
+            type="button"
+            title={`${ref.title} (${ref.ruleCount} rules active)`}
+            onClick={() => onOpenEvergreenDoc?.(ref.slug)}
+            className="xd-mono inline-flex items-center gap-1 rounded border border-[var(--xd-border)] bg-[var(--xd-rail)] px-1.5 py-0.5 text-[10px] text-[var(--xd-ink-secondary)] transition-colors hover:border-[var(--xd-accent-border)] hover:text-[var(--xd-ink)]"
+          >
+            <span className="size-1.5 rounded-full bg-[var(--xd-commit)]" />
+            <span>{ref.fileName}</span>
+          </button>
+        ))}
+      </div>
+
       {hasContext && (
         <div className="flex flex-wrap gap-1 border-b border-[var(--xd-border)] px-2.5 py-1.5">
           {visibleElements.map((element) => (
@@ -1002,6 +1043,8 @@ export function OpReviewCard({
 }) {
   const settled =
     proposal.status === 'committed' || proposal.status === 'discarded'
+  const evergreenRefs =
+    proposal.referencedEvergreenDocs ?? DEFAULT_EVERGREEN_REFS
   return (
     <article className="mt-1.5 rounded border border-[var(--xd-border)] bg-[var(--xd-canvas)] p-2">
       <header className="flex items-start justify-between gap-2">
@@ -1010,6 +1053,17 @@ export function OpReviewCard({
           {proposal.status}
         </span>
       </header>
+      <div className="mt-1 flex flex-wrap items-center gap-1 text-[10px] text-[var(--xd-ink-muted)]">
+        <span>Checked against</span>
+        {evergreenRefs.map((ref) => (
+          <span
+            key={ref.slug}
+            className="xd-mono rounded border border-[var(--xd-border)] bg-[var(--xd-rail)] px-1 py-0.2 text-[var(--xd-ink-secondary)]"
+          >
+            {ref.fileName}
+          </span>
+        ))}
+      </div>
       <ul className="mt-1.5 space-y-1">
         {proposal.ops.map((op, index) => (
           <li

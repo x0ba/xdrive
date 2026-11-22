@@ -7,29 +7,51 @@ import {
   escapeText,
 } from './engine-client'
 
-const LIGHT =
-  '--ink:#1c1915;--muted:#6d655c;--faint:#8d8478;--line:#e4dcd2;--paper:#f3efe7;--panel:#fffdf9;--panel-2:#f4efe6;--accent:#1f4b99;--accent-2:#1f7a4d;--accent-soft:#e6eefb;--good:#1e7a46;--warn:#9a5b12;--danger:#9d2c2c;--shadow:0 18px 40px rgba(48,36,22,.08);--serif:"Iowan Old Style",Palatino,"Palatino Linotype",Georgia,serif;--sans:"Avenir Next","Segoe UI",system-ui,sans-serif;--mono:"IBM Plex Mono",ui-monospace,SFMono-Regular,Menlo,monospace;'
+export const DOCUMENT_DESIGN_SYSTEM_ID = 'ws-document-design-system'
+export const DOCUMENT_DESIGN_SYSTEM_SLUG = 'document-design-system'
+export const DOCUMENT_DONTS_SYSTEM_ID = 'ws-document-donts-system'
+export const DOCUMENT_DONTS_SYSTEM_SLUG = 'document-donts-system'
 
-const DARK =
-  '--ink:#efeae3;--muted:#b7aea2;--faint:#8f867b;--line:#34302b;--paper:#131210;--panel:#1c1a17;--panel-2:#26231f;--accent:#9db6ff;--accent-2:#8ed0b0;--accent-soft:#243156;--good:#8ed0b0;--warn:#e2b56a;--danger:#f0a3a3;--shadow:0 18px 40px rgba(0,0,0,.35);'
+export const MARBLE_LIGHT_TOKENS =
+  '--xd-canvas:#ffffff;--xd-rail:#f7f8fa;--xd-elevated:#f1f3f7;--xd-surface-hover:#eaeef4;--xd-surface-active:#e2e7f0;--xd-ink:#0f131a;--xd-ink-secondary:#4a5568;--xd-ink-muted:#718096;--xd-border:#e3e8ee;--xd-border-strong:#cbd5e1;--xd-accent:#5e6ad2;--xd-accent-hover:#4e5ac0;--xd-accent-soft:rgba(94,106,210,0.12);--xd-accent-border:rgba(94,106,210,0.35);--xd-commit:#1f9d6b;--xd-commit-soft:rgba(31,157,107,0.12);--xd-sketch:#d9822b;--xd-sketch-soft:rgba(217,130,43,0.14);--xd-danger:#e5484d;--xd-danger-soft:rgba(229,72,77,0.12);--ink:#0f131a;--muted:#4a5568;--faint:#718096;--line:#e3e8ee;--line-strong:#cbd5e1;--paper:#ffffff;--panel:#f7f8fa;--panel-2:#f1f3f7;--accent:#5e6ad2;--accent-2:#1f9d6b;--accent-soft:rgba(94,106,210,0.12);--good:#1f9d6b;--warn:#d9822b;--danger:#e5484d;--radius:6px;--shadow:none;--serif:"Newsreader",Georgia,Cambria,"Times New Roman",serif;--sans:"Inter",-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;--mono:"JetBrains Mono",ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace;'
 
-const BASE_CSS = `
-:root { ${LIGHT} }
-@media (prefers-color-scheme: dark) { :root { ${DARK} } }
-html[data-xdrive-theme="light"] { ${LIGHT} color-scheme: light; }
-html[data-xdrive-theme="dark"] { ${DARK} color-scheme: dark; }
+export const MARBLE_DARK_TOKENS =
+  '--xd-canvas:#0b0c0e;--xd-rail:#101216;--xd-elevated:#161920;--xd-surface-hover:#1c2029;--xd-surface-active:#232834;--xd-ink:#f3f5f8;--xd-ink-secondary:#a2abb8;--xd-ink-muted:#6e7785;--xd-border:#22252e;--xd-border-strong:#313644;--xd-accent:#5e6ad2;--xd-accent-hover:#6e7ae2;--xd-accent-soft:rgba(94,106,210,0.16);--xd-accent-border:rgba(94,106,210,0.45);--xd-commit:#2ea071;--xd-commit-soft:rgba(46,160,113,0.16);--xd-sketch:#e59934;--xd-sketch-soft:rgba(229,153,52,0.18);--xd-danger:#e5484d;--xd-danger-soft:rgba(229,72,77,0.16);--ink:#f3f5f8;--muted:#a2abb8;--faint:#6e7785;--line:#22252e;--line-strong:#313644;--paper:#0b0c0e;--panel:#101216;--panel-2:#161920;--accent:#5e6ad2;--accent-2:#2ea071;--accent-soft:rgba(94,106,210,0.16);--good:#2ea071;--warn:#e59934;--danger:#e5484d;--radius:6px;--shadow:none;'
+
+export const MARBLE_BASE_CSS = `
+:root { ${MARBLE_LIGHT_TOKENS} }
+@media (prefers-color-scheme: dark) { :root { ${MARBLE_DARK_TOKENS} } }
+html[data-xdrive-theme="light"] { ${MARBLE_LIGHT_TOKENS} color-scheme: light; }
+html[data-xdrive-theme="dark"] { ${MARBLE_DARK_TOKENS} color-scheme: dark; }
 * { box-sizing: border-box; }
 html, body { margin: 0; min-height: 100%; }
-body { background: var(--paper); color: var(--ink); font: 16px/1.55 var(--sans); -webkit-font-smoothing: antialiased; }
-button, input { font: inherit; color: inherit; }
+body {
+  background: var(--paper); color: var(--ink);
+  font: 14.5px/1.6 var(--sans); letter-spacing: -0.006em;
+  -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale;
+}
+button, input, select, textarea { font: inherit; color: inherit; }
 button { cursor: pointer; }
-:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+:focus-visible { outline: 1.5px solid var(--accent); outline-offset: 2px; }
 [data-marble-editable]:focus { outline: none; box-shadow: inset 0 -1.5px 0 var(--accent); }
-.kicker { margin: 0 0 .35rem; color: var(--accent); font: 600 .72rem/1 var(--mono); letter-spacing: .14em; text-transform: uppercase; }
-h1 { font-family: var(--serif); font-weight: 560; letter-spacing: -.03em; line-height: 1.05; margin: 0; }
-h2 { font-family: var(--serif); font-size: 1.35rem; font-weight: 560; letter-spacing: -.02em; margin: 0 0 .4rem; }
-p { margin: 0; }
-.lede { color: var(--muted); max-width: 40rem; }
+.kicker {
+  margin: 0 0 .3rem; color: var(--muted);
+  font: 500 .78rem/1.4 var(--sans); letter-spacing: -0.004em; text-transform: none;
+}
+h1 {
+  font-family: var(--serif); font-size: 2rem; font-weight: 500;
+  letter-spacing: -0.024em; line-height: 1.12; margin: 0; color: var(--ink);
+}
+h2 {
+  font-family: var(--serif); font-size: 1.25rem; font-weight: 500;
+  letter-spacing: -0.016em; line-height: 1.24; margin: 0 0 .4rem; color: var(--ink);
+}
+h3 {
+  font-family: var(--sans); font-size: .92rem; font-weight: 600;
+  letter-spacing: -0.01em; line-height: 1.35; margin: 0 0 .3rem; color: var(--ink);
+}
+p { margin: 0; max-width: 68ch; }
+.lede { color: var(--muted); max-width: 62ch; font-size: .96rem; line-height: 1.6; }
 marble-alt { display: block; }
 marble-alt > [data-marble-alt] { display: none; }
 marble-alt[data-marble-active="v1"] > [data-marble-alt="v1"],
@@ -41,15 +63,20 @@ marble-alt[data-marble-active="v6"] > [data-marble-alt="v6"] { display: block; }
 marble-alt:not([data-marble-active]) > [data-marble-alt]:first-child { display: block; }
 [data-marble-sortable] { padding-left: 1.4rem; }
 .pill, .choose button, .tex-edit, .add {
-  border: 1px solid var(--line); background: var(--panel); border-radius: 999px;
-  padding: .18rem .65rem; font: 600 .75rem/1.4 var(--sans);
+  border: 1px solid var(--line); background: var(--panel); border-radius: 4px;
+  padding: .2rem .55rem; font: 500 .76rem/1.35 var(--sans); color: var(--muted);
+  transition: border-color 120ms ease, color 120ms ease, background-color 120ms ease;
 }
-.choose { display: inline-flex; gap: .25rem; flex-wrap: wrap; }
-.choose button[aria-pressed="true"] { background: var(--accent); color: #fff; border-color: transparent; }
+.pill:hover, .choose button:hover, .tex-edit:hover, .add:hover {
+  border-color: var(--line-strong); color: var(--ink);
+}
+.choose { display: inline-flex; gap: .2rem; flex-wrap: wrap; padding: 2px; border: 1px solid var(--line); border-radius: 6px; background: var(--panel); }
+.choose button { border-color: transparent; background: transparent; }
+.choose button[aria-pressed="true"] { background: var(--paper); color: var(--ink); border-color: var(--line); }
 .add { border-style: dashed; color: var(--accent); background: transparent; }
 .card, section.block {
-  background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 1rem 1.1rem;
-  box-shadow: var(--shadow);
+  background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius);
+  padding: .95rem 1.1rem; box-shadow: none;
 }
 `
 
@@ -65,8 +92,9 @@ function page(
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="marble:capabilities" content="storage; net=none">
+<meta name="marble:design-system" content="${DOCUMENT_DESIGN_SYSTEM_SLUG}.mrbl,${DOCUMENT_DONTS_SYSTEM_SLUG}.mrbl">
 <title>${escapeText(title)}</title>
-<style>${BASE_CSS}
+<style>${MARBLE_BASE_CSS}
 ${css}</style>
 </head>
 <body>
@@ -107,27 +135,371 @@ const BOOT_OPEN = `(function () {
 const BOOT_CLOSE = `  });
 })();`
 
+function designSystemSource(): string {
+  const css = `
+  .ds-shell { max-width: 68rem; margin: 0 auto; padding: 2rem 1.5rem 4rem; display: grid; grid-template-columns: 14rem 1fr; gap: 1.75rem; }
+  .ds-head { grid-column: 1 / -1; display: flex; flex-wrap: wrap; justify-content: space-between; align-items: flex-end; gap: 1rem; padding-bottom: 1.1rem; border-bottom: 1px solid var(--line); }
+  .ds-meta { display: flex; align-items: center; gap: .5rem; font: 500 .76rem/1.4 var(--mono); color: var(--faint); margin-top: .35rem; }
+  .ds-badge { display: inline-flex; align-items: center; gap: .35rem; border: 1px solid var(--xd-accent-border); background: var(--accent-soft); color: var(--accent); border-radius: 4px; padding: .15rem .5rem; font: 500 .74rem/1.3 var(--mono); }
+  .ds-nav { position: sticky; top: 1rem; align-self: start; display: flex; flex-direction: column; gap: .5rem; border-right: 1px solid var(--line); padding-right: 1rem; }
+  .ds-nav-title { font: 600 .78rem/1.4 var(--sans); color: var(--ink); margin-bottom: .15rem; }
+  .ds-nav-note { font-size: .78rem; color: var(--muted); line-height: 1.5; }
+  .ds-main { display: flex; flex-direction: column; gap: 1.5rem; min-width: 0; }
+  .ds-section { border-top: 1px solid var(--line); padding-top: 1.15rem; }
+  .ds-section:first-child { border-top: 0; padding-top: 0; }
+  .swatch-table { width: 100%; border-collapse: collapse; margin-top: .75rem; border: 1px solid var(--line); border-radius: var(--radius); overflow: hidden; background: var(--panel); font-size: .82rem; }
+  .swatch-table th, .swatch-table td { text-align: left; padding: .5rem .65rem; border-bottom: 1px solid var(--line); vertical-align: middle; }
+  .swatch-table th { font-weight: 500; color: var(--muted); background: var(--panel-2); font-size: .76rem; }
+  .swatch-chip { display: inline-block; width: 1.35rem; height: .9rem; border-radius: 3px; border: 1px solid var(--line-strong); vertical-align: middle; margin-right: .45rem; }
+  .tok { font: 500 .76rem/1.35 var(--mono); color: var(--ink); }
+  .hex { font: 400 .75rem/1.35 var(--mono); color: var(--muted); font-variant-numeric: tabular-nums; }
+  .specimen-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: .75rem; margin-top: .75rem; }
+  .specimen { border: 1px solid var(--line); border-radius: var(--radius); background: var(--panel); padding: .85rem .95rem; display: flex; flex-direction: column; gap: .35rem; }
+  .specimen-role { font: 500 .75rem/1.3 var(--mono); color: var(--accent); }
+  .specimen-sample-serif { font: 500 1.35rem/1.18 var(--serif); letter-spacing: -0.02em; }
+  .specimen-sample-sans { font: 400 .9rem/1.55 var(--sans); }
+  .specimen-sample-mono { font: 500 .82rem/1.5 var(--mono); font-variant-numeric: tabular-nums; }
+  .specimen-spec { font-size: .76rem; color: var(--muted); }
+  .rule-list { list-style: none; margin: .75rem 0 0; padding: 0; display: flex; flex-direction: column; gap: .5rem; }
+  .rule-item { border: 1px solid var(--line); border-radius: var(--radius); background: var(--panel); padding: .75rem .95rem; display: grid; grid-template-columns: 11rem 1fr; gap: .75rem; align-items: baseline; }
+  .rule-key { font: 500 .78rem/1.4 var(--mono); color: var(--accent); }
+  .rule-body { font-size: .86rem; color: var(--ink); }
+  [data-density="compact"] .rule-item { padding: .48rem .75rem; }
+  [data-density="compact"] .swatch-table th, [data-density="compact"] .swatch-table td { padding: .35rem .5rem; }
+  @media (max-width: 860px) {
+    .ds-shell { grid-template-columns: 1fr; }
+    .ds-nav { border-right: 0; border-bottom: 1px solid var(--line); padding-right: 0; padding-bottom: .85rem; position: static; }
+    .specimen-grid { grid-template-columns: 1fr; }
+    .rule-item { grid-template-columns: 1fr; gap: .25rem; }
+  }
+  `
+  const body = `<article data-marble-id="ds-shell" class="ds-shell" data-density="comfortable" data-evergreen="design-system">
+  <header data-marble-id="ds-head" class="ds-head">
+    <div data-marble-id="ds-head-copy">
+      <span data-marble-id="ds-badge" class="ds-badge">Evergreen system · AI reference</span>
+      <h1 data-marble-id="ds-title" data-marble-editable style="margin-top:.45rem">xDrive Document Design System</h1>
+      <p data-marble-id="ds-lede" class="lede" data-marble-editable style="margin-top:.35rem">Every .mrbl document in xDrive shares the workspace’s Obsidian Studio dark palette, Alabaster Lab light palette, Newsreader + Inter + JetBrains Mono typography, and 1px hairline layout grammar.</p>
+      <div data-marble-id="ds-meta" class="ds-meta">
+        <span data-marble-id="ds-slug">document-design-system.mrbl</span>
+        <span>·</span>
+        <span data-marble-id="ds-binding" data-marble-editable>Loaded before every AI edit and new app synthesis</span>
+      </div>
+    </div>
+    <div data-marble-id="ds-controls">
+      <span data-marble-id="ds-density-choose" class="choose" data-marble-choose="data-density" data-marble-of="[data-marble-id=ds-shell]">
+        <button data-marble-id="ds-density-comfort" type="button" data-marble-value="comfortable">Comfortable</button>
+        <button data-marble-id="ds-density-compact" type="button" data-marble-value="compact">Compact</button>
+      </span>
+    </div>
+  </header>
+
+  <aside data-marble-id="ds-nav" class="ds-nav">
+    <p data-marble-id="ds-nav-title" class="ds-nav-title" data-marble-editable>How the AI uses this file</p>
+    <p data-marble-id="ds-nav-note" class="ds-nav-note" data-marble-editable>When you prompt the collaborator or build a new .mrbl document, xDrive reads the tokens, type roles, and structural contracts defined here so documents match the application shell.</p>
+    <p data-marble-id="ds-nav-pair" class="ds-nav-note" data-marble-editable style="margin-top:.4rem">Paired with <code class="tok">document-donts-system.mrbl</code> to reject generic AI slop.</p>
+  </aside>
+
+  <div data-marble-id="ds-main" class="ds-main">
+    <section data-marble-id="sec-ds-tokens" class="ds-section" data-marble-selectable>
+      <h2 data-marble-id="sec-ds-tokens-h" data-marble-editable>Dual-Mode Color &amp; Surface Tokens</h2>
+      <p data-marble-id="sec-ds-tokens-p" class="lede" data-marble-editable>Documents inherit the active theme from html[data-xdrive-theme]. Never hardcode warm cream or off-brand accents; bind surfaces to --paper, --panel, --panel-2, and --line.</p>
+      <table data-marble-id="ds-token-table" class="swatch-table">
+        <thead data-marble-id="ds-token-thead">
+          <tr data-marble-id="ds-token-hrow">
+            <th data-marble-id="th-ds-token">Token</th>
+            <th data-marble-id="th-ds-role">App Mirror</th>
+            <th data-marble-id="th-ds-dark">Obsidian Studio (Dark)</th>
+            <th data-marble-id="th-ds-light">Alabaster Lab (Light)</th>
+            <th data-marble-id="th-ds-use">Document Role</th>
+          </tr>
+        </thead>
+        <tbody data-marble-id="ds-token-tbody">
+          <tr data-marble-id="tok-row-paper">
+            <td data-marble-id="tok-paper-name" class="tok"><span class="swatch-chip" style="background:var(--paper)"></span>--paper</td>
+            <td data-marble-id="tok-paper-alias" class="hex">--xd-canvas</td>
+            <td data-marble-id="tok-paper-dark" class="hex" data-marble-editable>#0B0C0E</td>
+            <td data-marble-id="tok-paper-light" class="hex" data-marble-editable>#FFFFFF</td>
+            <td data-marble-id="tok-paper-use" data-marble-editable>Primary document stage and reading background</td>
+          </tr>
+          <tr data-marble-id="tok-row-panel">
+            <td data-marble-id="tok-panel-name" class="tok"><span class="swatch-chip" style="background:var(--panel)"></span>--panel</td>
+            <td data-marble-id="tok-panel-alias" class="hex">--xd-rail</td>
+            <td data-marble-id="tok-panel-dark" class="hex" data-marble-editable>#101216</td>
+            <td data-marble-id="tok-panel-light" class="hex" data-marble-editable>#F7F8FA</td>
+            <td data-marble-id="tok-panel-use" data-marble-editable>Section containers, sidebars, and data tables</td>
+          </tr>
+          <tr data-marble-id="tok-row-panel2">
+            <td data-marble-id="tok-panel2-name" class="tok"><span class="swatch-chip" style="background:var(--panel-2)"></span>--panel-2</td>
+            <td data-marble-id="tok-panel2-alias" class="hex">--xd-elevated</td>
+            <td data-marble-id="tok-panel2-dark" class="hex" data-marble-editable>#161920</td>
+            <td data-marble-id="tok-panel2-light" class="hex" data-marble-editable>#F1F3F7</td>
+            <td data-marble-id="tok-panel2-use" data-marble-editable>Equation wells, interactive toolbars, and code trays</td>
+          </tr>
+          <tr data-marble-id="tok-row-ink">
+            <td data-marble-id="tok-ink-name" class="tok"><span class="swatch-chip" style="background:var(--ink)"></span>--ink</td>
+            <td data-marble-id="tok-ink-alias" class="hex">--xd-ink</td>
+            <td data-marble-id="tok-ink-dark" class="hex" data-marble-editable>#F3F5F8</td>
+            <td data-marble-id="tok-ink-light" class="hex" data-marble-editable>#0F131A</td>
+            <td data-marble-id="tok-ink-use" data-marble-editable>Headings, primary prose, and active values</td>
+          </tr>
+          <tr data-marble-id="tok-row-line">
+            <td data-marble-id="tok-line-name" class="tok"><span class="swatch-chip" style="background:var(--line)"></span>--line</td>
+            <td data-marble-id="tok-line-alias" class="hex">--xd-border</td>
+            <td data-marble-id="tok-line-dark" class="hex" data-marble-editable>#22252E</td>
+            <td data-marble-id="tok-line-light" class="hex" data-marble-editable>#E3E8EE</td>
+            <td data-marble-id="tok-line-use" data-marble-editable>1px structural hairlines and table cell dividers</td>
+          </tr>
+          <tr data-marble-id="tok-row-accent">
+            <td data-marble-id="tok-accent-name" class="tok"><span class="swatch-chip" style="background:var(--accent)"></span>--accent</td>
+            <td data-marble-id="tok-accent-alias" class="hex">--xd-accent</td>
+            <td data-marble-id="tok-accent-dark" class="hex" data-marble-editable>#5E6AD2</td>
+            <td data-marble-id="tok-accent-light" class="hex" data-marble-editable>#5E6AD2</td>
+            <td data-marble-id="tok-accent-use" data-marble-editable>Interactive focus, active selections, and primary chart series</td>
+          </tr>
+          <tr data-marble-id="tok-row-good">
+            <td data-marble-id="tok-good-name" class="tok"><span class="swatch-chip" style="background:var(--good)"></span>--good / --warn / --danger</td>
+            <td data-marble-id="tok-good-alias" class="hex">--xd-commit / sketch / danger</td>
+            <td data-marble-id="tok-good-dark" class="hex" data-marble-editable>#2EA071 · #E59934 · #E5484D</td>
+            <td data-marble-id="tok-good-light" class="hex" data-marble-editable>#1F9D6B · #D9822B · #E5484D</td>
+            <td data-marble-id="tok-good-use" data-marble-editable>Verified results, pending proposals/warnings, and dropped runs</td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section data-marble-id="sec-ds-type" class="ds-section" data-marble-selectable>
+      <h2 data-marble-id="sec-ds-type-h" data-marble-editable>Typography &amp; Measure</h2>
+      <p data-marble-id="sec-ds-type-p" class="lede" data-marble-editable>Three purposeful type families match the xDrive workspace. Body measure never exceeds 68 characters; numerical tables always enable tabular-nums.</p>
+      <div data-marble-id="ds-specimens" class="specimen-grid">
+        <div data-marble-id="spec-serif" class="specimen">
+          <span data-marble-id="spec-serif-role" class="specimen-role">--serif · Newsreader</span>
+          <p data-marble-id="spec-serif-sample" class="specimen-sample-serif" data-marble-editable>Fault-Tolerant Logical Memory</p>
+          <p data-marble-id="spec-serif-desc" class="specimen-spec" data-marble-editable>Weight 500, tracking -0.024em, line-height 1.12–1.24. Used for h1, h2, theorem statements, and display equations.</p>
+        </div>
+        <div data-marble-id="spec-sans" class="specimen">
+          <span data-marble-id="spec-sans-role" class="specimen-role">--sans · Inter</span>
+          <p data-marble-id="spec-sans-sample" class="specimen-sample-sans" data-marble-editable>At distance 7, the logical failure rate per round drops below 10⁻³ under circuit-level noise.</p>
+          <p data-marble-id="spec-sans-desc" class="specimen-spec" data-marble-editable>14.5px / 1.6 body prose, sentence-case controls, table cells, and margin annotations.</p>
+        </div>
+        <div data-marble-id="spec-mono" class="specimen">
+          <span data-marble-id="spec-mono-role" class="specimen-role">--mono · JetBrains Mono</span>
+          <p data-marble-id="spec-mono-sample" class="specimen-sample-mono" data-marble-editable>P_L ≤ C (p / p_th)^((d+1)/2) · 0.914</p>
+          <p data-marble-id="spec-mono-desc" class="specimen-spec" data-marble-editable>12.5px / 1.5 with tabular-nums. Reserved for TeX source, citation keys, node IDs, and metrics.</p>
+        </div>
+      </div>
+    </section>
+
+    <section data-marble-id="sec-ds-rules" class="ds-section" data-marble-selectable>
+      <h2 data-marble-id="sec-ds-rules-h" data-marble-editable>Structural &amp; Layout Contracts</h2>
+      <p data-marble-id="sec-ds-rules-p" class="lede" data-marble-editable>Add or edit rules below. The AI collaborator inspects this list on every prompt and applies each contract to generated HTML and CSS.</p>
+      <ul data-marble-id="ds-rule-list" id="ds-rule-list" class="rule-list" data-marble-sortable="rules">
+        <li data-marble-id="ds-rule-hairline" class="rule-item" data-marble-removable>
+          <span data-marble-id="ds-rule-hairline-k" class="rule-key" data-marble-editable>1px hairline borders</span>
+          <span data-marble-id="ds-rule-hairline-v" class="rule-body" data-marble-editable>Separate sections, rails, and tables with 1px solid var(--line) and a 6px border-radius (--radius). Never use drop shadows.</span>
+        </li>
+        <li data-marble-id="ds-rule-measure" class="rule-item" data-marble-removable>
+          <span data-marble-id="ds-rule-measure-k" class="rule-key" data-marble-editable>Left-aligned 68ch flow</span>
+          <span data-marble-id="ds-rule-measure-v" class="rule-body" data-marble-editable>Keep prose left-aligned within a 68-character maximum measure. Pair wide stages with a 14rem outline or margin-note rail.</span>
+        </li>
+        <li data-marble-id="ds-rule-controls" class="rule-item" data-marble-removable>
+          <span data-marble-id="ds-rule-controls-k" class="rule-key" data-marble-editable>Segmented switchers</span>
+          <span data-marble-id="ds-rule-controls-v" class="rule-body" data-marble-editable>Group data-marble-choose buttons inside a 1px solid var(--line) tray on var(--panel) with active items highlighted on var(--paper).</span>
+        </li>
+        <li data-marble-id="ds-rule-affordances" class="rule-item" data-marble-removable>
+          <span data-marble-id="ds-rule-affordances-k" class="rule-key" data-marble-editable>Addressable Marble DOM</span>
+          <span data-marble-id="ds-rule-affordances-v" class="rule-body" data-marble-editable>Every heading, claim, table cell, and figure carries a stable data-marble-id and explicit data-marble-editable or data-marble-sortable affordances.</span>
+        </li>
+      </ul>
+      <button data-marble-id="ds-add-rule" class="add" type="button" style="margin-top:.75rem" data-marble-add="#tpl-ds-rule" data-marble-into="#ds-rule-list">+ Add design contract</button>
+      <template data-marble-id="tpl-ds-rule" id="tpl-ds-rule">
+        <li class="rule-item" data-marble-removable>
+          <span class="rule-key" data-marble-editable>new-contract</span>
+          <span class="rule-body" data-marble-editable>Specify the token, measurement, or structural rule the AI must follow.</span>
+        </li>
+      </template>
+    </section>
+  </div>
+</article>`
+  const script = `${BOOT_OPEN}
+    marble.register(function () {});
+  ${BOOT_CLOSE}`
+  return page('xDrive Document Design System', css, body, script)
+}
+
+function dontsSystemSource(): string {
+  const css = `
+  .donts-shell { max-width: 68rem; margin: 0 auto; padding: 2rem 1.5rem 4rem; display: flex; flex-direction: column; gap: 1.4rem; }
+  .donts-head { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: flex-end; gap: 1rem; padding-bottom: 1.1rem; border-bottom: 1px solid var(--line); }
+  .donts-badge { display: inline-flex; align-items: center; gap: .35rem; border: 1px solid color-mix(in srgb, var(--danger) 40%, var(--line)); background: color-mix(in srgb, var(--danger) 12%, transparent); color: var(--danger); border-radius: 4px; padding: .15rem .5rem; font: 500 .74rem/1.3 var(--mono); }
+  .donts-meta { display: flex; align-items: center; gap: .5rem; font: 500 .76rem/1.4 var(--mono); color: var(--faint); margin-top: .35rem; }
+  .donts-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: .9rem; }
+  .dont-card { border: 1px solid var(--line); border-radius: var(--radius); background: var(--panel); padding: 1rem 1.15rem; display: flex; flex-direction: column; gap: .75rem; }
+  .dont-top { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: baseline; gap: .5rem; }
+  .dont-tag { font: 500 .74rem/1.3 var(--mono); color: var(--danger); }
+  .compare-grid { display: grid; grid-template-columns: 1fr 1fr; gap: .75rem; }
+  .sample-dont, .sample-do { border: 1px solid var(--line); border-radius: 5px; padding: .75rem .9rem; background: var(--paper); display: flex; flex-direction: column; gap: .35rem; }
+  .sample-dont { border-left: 2.5px solid var(--danger); }
+  .sample-do { border-left: 2.5px solid var(--good); }
+  .sample-label-dont { font: 500 .73rem/1.3 var(--mono); color: var(--danger); }
+  .sample-label-do { font: 500 .73rem/1.3 var(--mono); color: var(--good); }
+  .sample-code { font: 400 .78rem/1.5 var(--mono); color: var(--muted); white-space: pre-wrap; }
+  [data-view="dont-only"] .sample-do { display: none; }
+  [data-view="dont-only"] .compare-grid { grid-template-columns: 1fr; }
+  [data-view="do-only"] .sample-dont { display: none; }
+  [data-view="do-only"] .compare-grid { grid-template-columns: 1fr; }
+  @media (max-width: 820px) { .compare-grid { grid-template-columns: 1fr; } }
+  `
+  const body = `<main data-marble-id="donts-shell" class="donts-shell" data-view="compare" data-evergreen="donts-system">
+  <header data-marble-id="donts-head" class="donts-head">
+    <div data-marble-id="donts-head-copy">
+      <span data-marble-id="donts-badge" class="donts-badge">Evergreen guardrails · Anti-slop filter</span>
+      <h1 data-marble-id="donts-title" data-marble-editable style="margin-top:.45rem">Document Don’ts — Anti-Slop Guardrails</h1>
+      <p data-marble-id="donts-lede" class="lede" data-marble-editable style="margin-top:.35rem">Hard negative constraints referenced by the AI collaborator on every edit and app build. Prevents generic AI-generated aesthetics, warm-cream clichés, SaaS card soup, and decorative template chrome.</p>
+      <div data-marble-id="donts-meta" class="donts-meta">
+        <span data-marble-id="donts-slug">document-donts-system.mrbl</span>
+        <span>·</span>
+        <span data-marble-id="donts-status" data-marble-editable>Active pre-flight &amp; post-synthesis filter</span>
+      </div>
+    </div>
+    <div data-marble-id="donts-toolbar">
+      <span data-marble-id="donts-view-choose" class="choose" data-marble-choose="data-view" data-marble-of="[data-marble-id=donts-shell]">
+        <button data-marble-id="view-compare" type="button" data-marble-value="compare">Side-by-side</button>
+        <button data-marble-id="view-do" type="button" data-marble-value="do-only">xDrive standard</button>
+        <button data-marble-id="view-dont" type="button" data-marble-value="dont-only">Banned slop</button>
+      </span>
+    </div>
+  </header>
+
+  <ul data-marble-id="donts-list" id="donts-list" class="donts-list" data-marble-sortable="donts">
+    <li data-marble-id="dont-palette" class="dont-card" data-marble-removable data-marble-selectable>
+      <div data-marble-id="dont-palette-top" class="dont-top">
+        <h2 data-marble-id="dont-palette-h" data-marble-editable>Never use warm-cream backgrounds or terracotta / off-brand accents</h2>
+        <span data-marble-id="dont-palette-tag" class="dont-tag" data-marble-editable>ban: #F4F1EA · #F3EFE7 · #D97757 · #1F4B99</span>
+      </div>
+      <p data-marble-id="dont-palette-p" data-marble-editable>AI generators default to warm cream paper (#F4F1EA / #F3EFE7) with clay/terracotta (#D97757) or generic royal blue (#1F4B99). Every xDrive document must use the workspace’s Obsidian Studio (#0B0C0E) and Alabaster Lab (#FFFFFF) tokens with #5E6AD2 indigo.</p>
+      <div data-marble-id="dont-palette-grid" class="compare-grid">
+        <div data-marble-id="dont-palette-bad" class="sample-dont">
+          <span data-marble-id="dont-palette-bad-lbl" class="sample-label-dont">Don’t (AI slop tell)</span>
+          <code data-marble-id="dont-palette-bad-code" class="sample-code" data-marble-editable>--paper: #f4f1ea; --panel: #fffdf9; --accent: #d97757;</code>
+        </div>
+        <div data-marble-id="dont-palette-good" class="sample-do">
+          <span data-marble-id="dont-palette-good-lbl" class="sample-label-do">Do (xDrive token parity)</span>
+          <code data-marble-id="dont-palette-good-code" class="sample-code" data-marble-editable>--paper: var(--xd-canvas); --panel: var(--xd-rail); --accent: #5e6ad2;</code>
+        </div>
+      </div>
+    </li>
+
+    <li data-marble-id="dont-cards" class="dont-card" data-marble-removable data-marble-selectable>
+      <div data-marble-id="dont-cards-top" class="dont-top">
+        <h2 data-marble-id="dont-cards-h" data-marble-editable>Never chop documents into rounded SaaS cards with soft drop shadows</h2>
+        <span data-marble-id="dont-cards-tag" class="dont-tag" data-marble-editable>ban: border-radius 14px+ · box-shadow soup</span>
+      </div>
+      <p data-marble-id="dont-cards-p" data-marble-editable>Do not wrap every paragraph in a 14px–16px rounded card floating over a drop shadow (0 18px 40px rgba(0,0,0,.08)) or decorative gradient wash. Use flat panels, 1px solid var(--line) hairlines, and 6px corners.</p>
+      <div data-marble-id="dont-cards-grid" class="compare-grid">
+        <div data-marble-id="dont-cards-bad" class="sample-dont">
+          <span data-marble-id="dont-cards-bad-lbl" class="sample-label-dont">Don’t (SaaS card kit)</span>
+          <code data-marble-id="dont-cards-bad-code" class="sample-code" data-marble-editable>border-radius: 16px; box-shadow: 0 18px 40px rgba(0,0,0,.1);</code>
+        </div>
+        <div data-marble-id="dont-cards-good" class="sample-do">
+          <span data-marble-id="dont-cards-good-lbl" class="sample-label-do">Do (1px hairline geometry)</span>
+          <code data-marble-id="dont-cards-good-code" class="sample-code" data-marble-editable>border: 1px solid var(--line); border-radius: 6px; box-shadow: none;</code>
+        </div>
+      </div>
+    </li>
+
+    <li data-marble-id="dont-eyebrows" class="dont-card" data-marble-removable data-marble-selectable>
+      <div data-marble-id="dont-eyebrows-top" class="dont-top">
+        <h2 data-marble-id="dont-eyebrows-h" data-marble-editable>Never put tracked-out ALL-CAPS monospace kickers above headings</h2>
+        <span data-marble-id="dont-eyebrows-tag" class="dont-tag" data-marble-editable>ban: uppercase eyebrows · single-word italic accents</span>
+      </div>
+      <p data-marble-id="dont-eyebrows-p" data-marble-editable>Skip unnecessary eyebrow labels above headings. When section metadata is genuinely needed, set it in sentence-case Inter (--sans) with normal tracking, and never italicize or color a single word inside a heading.</p>
+      <div data-marble-id="dont-eyebrows-grid" class="compare-grid">
+        <div data-marble-id="dont-eyebrows-bad" class="sample-dont">
+          <span data-marble-id="dont-eyebrows-bad-lbl" class="sample-label-dont">Don’t (template eyebrow tell)</span>
+          <code data-marble-id="dont-eyebrows-bad-code" class="sample-code" data-marble-editable>font: 600 .72rem var(--mono); letter-spacing: .14em; text-transform: uppercase;</code>
+        </div>
+        <div data-marble-id="dont-eyebrows-good" class="sample-do">
+          <span data-marble-id="dont-eyebrows-good-lbl" class="sample-label-do">Do (quiet sentence-case meta)</span>
+          <code data-marble-id="dont-eyebrows-good-code" class="sample-code" data-marble-editable>font: 500 .78rem/1.4 var(--sans); color: var(--muted); text-transform: none;</code>
+        </div>
+      </div>
+    </li>
+
+    <li data-marble-id="dont-chrome" class="dont-card" data-marble-removable data-marble-selectable>
+      <div data-marble-id="dont-chrome-top" class="dont-top">
+        <h2 data-marble-id="dont-chrome-h" data-marble-editable>Never add decorative 01 / 02 / 03 numbering, em-dash labels, or trailing arrows</h2>
+        <span data-marble-id="dont-chrome-tag" class="dont-tag" data-marble-editable>ban: 01/02/03 · WORD — fragment · CTA →</span>
+      </div>
+      <p data-marble-id="dont-chrome-p" data-marble-editable>Only number items when the content is an actual sequence or stepped protocol. Do not build headings as “WORD — fragment”, join decorative meta strings with middle dots, or append “→” to buttons and links.</p>
+      <div data-marble-id="dont-chrome-grid" class="compare-grid">
+        <div data-marble-id="dont-chrome-bad" class="sample-dont">
+          <span data-marble-id="dont-chrome-bad-lbl" class="sample-label-dont">Don’t (generated chrome)</span>
+          <code data-marble-id="dont-chrome-bad-code" class="sample-code" data-marble-editable>01 / OVERVIEW — Quantum Memory · Explore Results →</code>
+        </div>
+        <div data-marble-id="dont-chrome-good" class="sample-do">
+          <span data-marble-id="dont-chrome-good-lbl" class="sample-label-do">Do (direct research signage)</span>
+          <code data-marble-id="dont-chrome-good-code" class="sample-code" data-marble-editable>Fault-Tolerant Logical Memory · Freeze decoder seed</code>
+        </div>
+      </div>
+    </li>
+
+    <li data-marble-id="dont-copy" class="dont-card" data-marble-removable data-marble-selectable>
+      <div data-marble-id="dont-copy-top" class="dont-top">
+        <h2 data-marble-id="dont-copy-h" data-marble-editable>Never write marketing filler, vague placeholders, or scattered entrance animations</h2>
+        <span data-marble-id="dont-copy-tag" class="dont-tag" data-marble-editable>ban: fade-up cards · marketing copy</span>
+      </div>
+      <p data-marble-id="dont-copy-p" data-marble-editable>Every sentence in an xDrive document states a concrete claim, assumption, measurement, or falsifiable bound. Motion is reserved for user-triggered state changes (editing TeX, filtering rows, switching notes).</p>
+      <div data-marble-id="dont-copy-grid" class="compare-grid">
+        <div data-marble-id="dont-copy-bad" class="sample-dont">
+          <span data-marble-id="dont-copy-bad-lbl" class="sample-label-dont">Don’t (filler copy)</span>
+          <code data-marble-id="dont-copy-bad-code" class="sample-code" data-marble-editable>Unlock next-generation insights with our seamless quantum workflow.</code>
+        </div>
+        <div data-marble-id="dont-copy-good" class="sample-do">
+          <span data-marble-id="dont-copy-good-lbl" class="sample-label-do">Do (falsifiable prose)</span>
+          <code data-marble-id="dont-copy-good-code" class="sample-code" data-marble-editable>At distance 7 and p = 0.5 p_th, logical error per round stays below 10⁻³.</code>
+        </div>
+      </div>
+    </li>
+  </ul>
+
+  <button data-marble-id="add-dont" class="add" type="button" style="align-self:flex-start" data-marble-add="#tpl-dont" data-marble-into="#donts-list">+ Add anti-slop guardrail</button>
+  <template data-marble-id="tpl-dont" id="tpl-dont">
+    <li class="dont-card" data-marble-removable data-marble-selectable>
+      <div class="dont-top">
+        <h2 data-marble-editable>New anti-slop guardrail</h2>
+        <span class="dont-tag" data-marble-editable>ban: pattern</span>
+      </div>
+      <p data-marble-editable>State the templated AI tell to reject and the xDrive design-system behavior required instead.</p>
+    </li>
+  </template>
+</main>`
+  const script = `${BOOT_OPEN}
+    marble.register(function () {});
+  ${BOOT_CLOSE}`
+  return page('Document Don’ts — Anti-Slop Guardrails', css, body, script)
+}
+
 function latexSource(): string {
   const css = `
-  main { max-width: 52rem; margin: 0 auto; padding: 2.5rem 1.4rem 4rem; }
-  header.paper-head { margin-bottom: 1.6rem; }
-  .authors { color: var(--muted); margin-top: .7rem; }
-  .venue { color: var(--faint); font: .8rem/1.4 var(--mono); margin-top: .25rem; }
-  .stack { display: flex; flex-direction: column; gap: .8rem; }
-  .eq { margin: .8rem 0 0; padding: .8rem 1rem; border-radius: 12px; background: var(--panel-2); border: 1px solid var(--line); }
-  .eq-top { display: flex; justify-content: space-between; align-items: center; gap: .5rem; margin-bottom: .45rem; }
-  .eq-label { font: 600 .72rem/1 var(--mono); letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
-  .eq-render { font-family: var(--serif); font-size: 1.35rem; text-align: center; padding: .4rem 0 .2rem; }
+  main { max-width: 52rem; margin: 0 auto; padding: 2.2rem 1.5rem 4rem; }
+  header.paper-head { margin-bottom: 1.5rem; padding-bottom: 1.1rem; border-bottom: 1px solid var(--line); }
+  .authors { color: var(--muted); margin-top: .55rem; font-size: .9rem; }
+  .venue { color: var(--faint); font: .78rem/1.4 var(--mono); margin-top: .2rem; }
+  .stack { display: flex; flex-direction: column; gap: .75rem; }
+  .eq { margin: .75rem 0 0; padding: .75rem .95rem; border-radius: var(--radius); background: var(--panel-2); border: 1px solid var(--line); }
+  .eq-top { display: flex; justify-content: space-between; align-items: center; gap: .5rem; margin-bottom: .35rem; }
+  .eq-label { font: 500 .75rem/1.2 var(--mono); color: var(--muted); }
+  .eq-render { font-family: var(--serif); font-size: 1.3rem; text-align: center; padding: .35rem 0 .15rem; }
   .eq:not([data-editing="on"]) .eq-src { display: none; }
   .eq[data-editing="on"] .eq-render { display: none; }
-  .eq-src { display: block; font: .95rem/1.5 var(--mono); white-space: pre-wrap; }
+  .eq-src { display: block; font: .88rem/1.5 var(--mono); white-space: pre-wrap; }
   .frac { display: inline-flex; flex-direction: column; vertical-align: middle; text-align: center; font-size: .82em; margin: 0 .15em; }
   .frac i, .frac b { font-style: normal; font-weight: 500; padding: 0 .25em; }
   .frac b { border-top: 1px solid currentColor; }
   .cal { font-family: var(--serif); font-style: italic; }
-  .bib { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: .45rem; }
-  .bib li { display: grid; grid-template-columns: 9rem 1fr; gap: .6rem; padding: .45rem .2rem; border-top: 1px solid var(--line); }
-  .key { font: 600 .78rem/1.4 var(--mono); color: var(--accent); }
+  .bib { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: .35rem; }
+  .bib li { display: grid; grid-template-columns: 8.5rem 1fr; gap: .6rem; padding: .45rem .2rem; border-top: 1px solid var(--line); font-size: .88rem; }
+  .key { font: 500 .76rem/1.4 var(--mono); color: var(--accent); }
   .actions { display: flex; gap: .5rem; margin-top: 1rem; }
   `
   const body = String.raw`<main>
@@ -139,7 +511,7 @@ function latexSource(): string {
       <h1 data-marble-id="paper-title-v3" data-marble-alt="v3" data-marble-editable>Thresholds, Decoders, and the Cost of a Logical Gate</h1>
     </marble-alt>
     <p data-marble-id="paper-authors" class="authors" data-marble-editable>A. Okonkwo, M. Chen, and the Lattice Lab</p>
-    <p data-marble-id="paper-venue" class="venue" data-marble-editable>Draft · QEC 2026 · circuit-level depolarizing noise</p>
+    <p data-marble-id="paper-venue" class="venue" data-marble-editable>QEC 2026 manuscript · circuit-level depolarizing noise</p>
   </header>
   <div data-marble-id="sections" id="sections" class="stack" data-marble-sortable="sections">
     <section data-marble-id="sec-abstract" class="block" data-marble-removable data-marble-selectable>
@@ -154,11 +526,11 @@ function latexSource(): string {
       <h2 data-marble-id="sec-theorem-h" data-marble-editable>Formal Theorem &amp; Proof</h2>
       <p data-marble-id="thm-name" class="kicker" data-marble-editable>Theorem 1</p>
       <p data-marble-id="thm-statement" data-marble-editable>For odd distance d and physical error p below threshold, the logical error rate is at most C (p / p_th) raised to (d + 1) / 2.</p>
-      <p data-marble-id="thm-proof-h" class="kicker" data-marble-editable>Proof sketch</p>
+      <p data-marble-id="thm-proof-h" class="kicker" data-marble-editable style="margin-top:.55rem">Proof sketch</p>
       <p data-marble-id="thm-proof" data-marble-editable>Union bound over the shortest logical string, then a Chernoff bound on the matching weight. The constant C absorbs the number of homology classes on the torus.</p>
       <figure data-marble-id="eq-1" class="eq" data-editing="off">
         <div data-marble-id="eq-1-top" class="eq-top">
-          <span data-marble-id="eq-1-label" class="eq-label">Eq. 1 · channel</span>
+          <span data-marble-id="eq-1-label" class="eq-label">Eq. 1 (channel)</span>
           <button data-marble-id="eq-1-edit" class="tex-edit" type="button">Edit TeX</button>
         </div>
         <div data-marble-id="eq-1-render" class="eq-render"><span class="cal">E</span>(ρ) = (1 − p) ρ + p XρX</div>
@@ -166,7 +538,7 @@ function latexSource(): string {
       </figure>
       <figure data-marble-id="eq-2" class="eq" data-editing="off">
         <div data-marble-id="eq-2-top" class="eq-top">
-          <span data-marble-id="eq-2-label" class="eq-label">Eq. 2 · threshold</span>
+          <span data-marble-id="eq-2-label" class="eq-label">Eq. 2 (threshold)</span>
           <button data-marble-id="eq-2-edit" class="tex-edit" type="button">Edit TeX</button>
         </div>
         <div data-marble-id="eq-2-render" class="eq-render">p / p<sub>th</sub> ≤ 1</div>
@@ -174,7 +546,7 @@ function latexSource(): string {
       </figure>
       <figure data-marble-id="eq-3" class="eq" data-editing="off">
         <div data-marble-id="eq-3-top" class="eq-top">
-          <span data-marble-id="eq-3-label" class="eq-label">Eq. 3 · scaling</span>
+          <span data-marble-id="eq-3-label" class="eq-label">Eq. 3 (scaling)</span>
           <button data-marble-id="eq-3-edit" class="tex-edit" type="button">Edit TeX</button>
         </div>
         <div data-marble-id="eq-3-render" class="eq-render">P<sub>L</sub> ≤ C (p / p<sub>th</sub>)<sup>(d+1)/2</sup></div>
@@ -208,7 +580,7 @@ function latexSource(): string {
     <button data-marble-id="add-citation" class="add" type="button" data-marble-add="#tpl-citation" data-marble-into="#bib-list">+ Add citation</button>
   </div>
   <template data-marble-id="tpl-theorem" id="tpl-theorem">
-    <section data-marble-removable data-marble-selectable>
+    <section class="block" data-marble-removable data-marble-selectable>
       <h2 data-marble-editable>New theorem</h2>
       <p data-marble-editable>State the claim, the assumption it needs, and the bound.</p>
     </section>
@@ -264,26 +636,28 @@ function latexSource(): string {
 
 function notebookSource(): string {
   const css = `
-  .notebook { display: grid; grid-template-columns: 16.5rem 1fr; min-height: 100vh; }
-  .rail { border-right: 1px solid var(--line); padding: 1.2rem 1rem 2rem; background: var(--panel-2); }
-  .rail h1 { font-size: 1.35rem; margin-bottom: .8rem; }
-  .note-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: .35rem; }
-  .note-list li { padding: .55rem .7rem; border-radius: 10px; background: transparent; }
-  .note-list li.marble-on, .notebook:not(.marble-derived) .note-list li:first-child { background: var(--panel); box-shadow: var(--shadow); }
-  .stage { padding: 1.6rem 1.8rem 3rem; }
+  .notebook { display: grid; grid-template-columns: 16rem 1fr; min-height: 100vh; }
+  .rail { border-right: 1px solid var(--line); padding: 1.15rem .95rem 2rem; background: var(--panel); }
+  .rail h1 { font-size: 1.25rem; margin-bottom: .75rem; }
+  .note-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: .25rem; }
+  .note-list li { padding: .45rem .65rem; border-radius: 5px; border: 1px solid transparent; background: transparent; font-size: .86rem; color: var(--muted); }
+  .note-list li.marble-on, .notebook:not(.marble-derived) .note-list li:first-child { background: var(--panel-2); border-color: var(--line); color: var(--ink); font-weight: 500; }
+  .stage { padding: 1.6rem 1.8rem 3rem; background: var(--paper); }
   .notebook.marble-derived [data-note] { display: none; }
   .notebook.marble-derived [data-note].marble-on { display: block; }
   .notebook:not(.marble-derived) [data-note] { display: none; }
   .notebook:not(.marble-derived) [data-note="note-hypothesis"] { display: block; }
-  .checks { list-style: none; margin: .8rem 0; padding: 0; display: flex; flex-direction: column; gap: .4rem; }
-  .checks li { display: flex; gap: .6rem; align-items: center; padding: .4rem .2rem; }
+  .checks { list-style: none; margin: .8rem 0; padding: 0; display: flex; flex-direction: column; gap: .35rem; }
+  .checks li { display: flex; gap: .6rem; align-items: center; padding: .4rem .55rem; border: 1px solid var(--line); border-radius: 5px; background: var(--panel); }
+  .checks li button { border: 1px solid var(--line); background: var(--panel-2); border-radius: 4px; padding: .12rem .45rem; font-size: .74rem; color: var(--muted); }
   [data-done="yes"] [data-marble-editable] { text-decoration: line-through; color: var(--muted); }
-  .steps { display: flex; flex-wrap: wrap; gap: .6rem; margin-top: .8rem; }
-  .stepper { display: flex; align-items: center; gap: .35rem; padding: .35rem .5rem; border: 1px solid var(--line); border-radius: 999px; background: var(--panel); }
-  .stepper button { width: 1.5rem; height: 1.5rem; border-radius: 999px; border: 1px solid var(--line); background: var(--panel-2); }
-  .probes { display: grid; grid-template-columns: 1fr 1fr; gap: .7rem; margin-top: .8rem; }
+  .steps { display: flex; flex-wrap: wrap; gap: .55rem; margin-top: .85rem; }
+  .stepper { display: flex; align-items: center; gap: .35rem; padding: .3rem .55rem; border: 1px solid var(--line); border-radius: 5px; background: var(--panel); font-size: .82rem; font-variant-numeric: tabular-nums; }
+  .stepper button { width: 1.4rem; height: 1.4rem; border-radius: 4px; border: 1px solid var(--line); background: var(--panel-2); }
+  .probes { display: grid; grid-template-columns: 1fr 1fr; gap: .7rem; margin-top: .85rem; }
   .queue { list-style: none; margin: .6rem 0 0; padding: 0; display: flex; flex-direction: column; gap: .4rem; }
-  .add { margin-top: .8rem; }
+  .queue li { padding: .5rem .65rem; border: 1px solid var(--line); border-radius: 5px; background: var(--panel); }
+  .add { margin-top: .75rem; }
   @media (max-width: 800px) { .notebook { grid-template-columns: 1fr; } .probes { grid-template-columns: 1fr; } }
   `
   const body = `<div data-marble-id="notebook-shell" id="notebook-shell" class="notebook" data-active-note="note-hypothesis">
@@ -357,17 +731,17 @@ function notebookSource(): string {
     <article data-marble-id="pane-spike" data-note="note-spike">
       <h2 data-marble-id="pane-spike-h" data-marble-editable>Loss Spike Postmortem</h2>
       <p data-marble-id="pane-spike-p" data-marble-editable>Step 48,200. Loss 2.1 to 6.4 in forty steps, then a stall. The data order hash did not match the logged run.</p>
-      <p data-marble-id="spike-when" class="kicker" data-marble-editable>When</p>
+      <p data-marble-id="spike-when" class="kicker" data-marble-editable style="margin-top:.75rem">Timing</p>
       <p data-marble-id="spike-when-p" data-marble-editable>Just after the learning-rate decay, on the shard that was reshuffled by hand.</p>
-      <p data-marble-id="spike-cause" class="kicker" data-marble-editable>Cause</p>
+      <p data-marble-id="spike-cause" class="kicker" data-marble-editable style="margin-top:.75rem">Root cause</p>
       <p data-marble-id="spike-cause-p" data-marble-editable>Not the ablation. The spike reproduces with every head intact if the shard hash differs.</p>
     </article>
     <article data-marble-id="pane-queue" data-note="note-queue">
       <h2 data-marble-id="pane-queue-h" data-marble-editable>Reading Queue</h2>
       <ol data-marble-id="queue-list" class="queue" data-marble-sortable="queue">
-        <li data-marble-id="q-1" data-marble-removable><p data-marble-id="q-1-t" data-marble-editable>Olsson et al. — In-context learning and induction heads</p></li>
-        <li data-marble-id="q-2" data-marble-removable><p data-marble-id="q-2-t" data-marble-editable>Elhage et al. — A mathematical framework for transformer circuits</p></li>
-        <li data-marble-id="q-3" data-marble-removable><p data-marble-id="q-3-t" data-marble-editable>Power et al. — Grokking: generalization beyond overfitting</p></li>
+        <li data-marble-id="q-1" data-marble-removable><p data-marble-id="q-1-t" data-marble-editable>Olsson et al. (2022): In-context learning and induction heads</p></li>
+        <li data-marble-id="q-2" data-marble-removable><p data-marble-id="q-2-t" data-marble-editable>Elhage et al. (2021): A mathematical framework for transformer circuits</p></li>
+        <li data-marble-id="q-3" data-marble-removable><p data-marble-id="q-3-t" data-marble-editable>Power et al. (2022): Grokking and generalization beyond overfitting</p></li>
       </ol>
     </article>
   </div>
@@ -429,28 +803,29 @@ function notebookSource(): string {
 
 function documentSource(): string {
   const css = `
-  .doc { max-width: 68rem; margin: 0 auto; padding: 1.4rem 1.2rem 4rem; display: grid; grid-template-columns: 14rem 1fr; gap: 1.2rem; }
+  .doc { max-width: 68rem; margin: 0 auto; padding: 1.4rem 1.4rem 4rem; display: grid; grid-template-columns: 13.5rem 1fr; gap: 1.4rem; }
   .toolbar { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: .8rem 1rem; align-items: center; padding-bottom: .8rem; border-bottom: 1px solid var(--line); }
   .tool { display: flex; align-items: center; gap: .4rem; color: var(--muted); font-size: .78rem; }
-  .outline { position: sticky; top: 1rem; display: flex; flex-direction: column; gap: .25rem; }
-  .outline button { text-align: left; border: 0; background: transparent; padding: .3rem .4rem; border-radius: 8px; color: var(--muted); }
+  .outline { position: sticky; top: 1rem; align-self: start; display: flex; flex-direction: column; gap: .25rem; border-right: 1px solid var(--line); padding-right: .9rem; }
+  .outline [data-marble-choose] { display: flex; flex-direction: column; gap: .15rem; }
+  .outline button { text-align: left; border: 0; background: transparent; padding: .35rem .5rem; border-radius: 5px; color: var(--muted); font-size: .83rem; }
   [data-active-section="problem"] [data-outline="problem"],
   [data-active-section="method"] [data-outline="method"],
   [data-active-section="eval"] [data-outline="eval"],
-  [data-active-section="risks"] [data-outline="risks"] { background: var(--accent-soft); color: var(--accent); }
-  .doc-title { font-size: 2.4rem; margin: .2rem 0 .8rem; }
-  .sections { display: flex; flex-direction: column; gap: .8rem; }
-  .doc-section { display: grid; grid-template-columns: 1fr 12rem; gap: 1rem; }
-  [data-density="compact"] .doc-section { padding: .7rem .9rem; }
-  [data-density="comfortable"] .doc-section { padding: 1.15rem 1.2rem; }
-  [data-level="1"] .doc-section h2 { font-size: 1.7rem; }
-  [data-level="2"] .doc-section h2 { font-size: 1.3rem; }
-  [data-level="3"] .doc-section h2 { font-size: 1.05rem; }
-  .margin { color: var(--muted); font-size: .82rem; }
-  .callout { border-left: 3px solid var(--accent); background: var(--accent-soft); padding: .7rem .85rem; border-radius: 0 10px 10px 0; }
+  [data-active-section="risks"] [data-outline="risks"] { background: var(--accent-soft); color: var(--accent); font-weight: 500; }
+  .doc-title { font-size: 2.15rem; margin: .15rem 0 .65rem; }
+  .sections { display: flex; flex-direction: column; gap: .75rem; margin-top: 1.1rem; }
+  .doc-section { display: grid; grid-template-columns: 1fr 12.5rem; gap: 1rem; }
+  [data-density="compact"] .doc-section { padding: .65rem .85rem; }
+  [data-density="comfortable"] .doc-section { padding: 1rem 1.15rem; }
+  [data-level="1"] .doc-section h2 { font-size: 1.55rem; }
+  [data-level="2"] .doc-section h2 { font-size: 1.22rem; }
+  [data-level="3"] .doc-section h2 { font-size: 1rem; }
+  .margin { color: var(--muted); font-size: .8rem; border-left: 1px solid var(--line); padding-left: .75rem; }
+  .callout { margin-top: .65rem; border-left: 2.5px solid var(--accent); background: var(--accent-soft); padding: .6rem .8rem; border-radius: 0 5px 5px 0; }
   [data-callout="warning"] .callout { border-left-color: var(--warn); background: color-mix(in srgb, var(--warn) 14%, var(--panel)); }
   [data-callout="result"] .callout { border-left-color: var(--good); background: color-mix(in srgb, var(--good) 14%, var(--panel)); }
-  @media (max-width: 860px) { .doc { grid-template-columns: 1fr; } .doc-section { grid-template-columns: 1fr; } }
+  @media (max-width: 860px) { .doc { grid-template-columns: 1fr; } .outline { border-right: 0; border-bottom: 1px solid var(--line); padding-bottom: .75rem; } .doc-section { grid-template-columns: 1fr; } }
   `
   const body = `<article data-marble-id="doc-shell" class="doc" data-density="comfortable" data-callout="insight" data-level="2" data-active-section="problem">
   <div data-marble-id="doc-toolbar" class="toolbar">
@@ -551,26 +926,26 @@ function documentSource(): string {
 
 function slidesSource(): string {
   const css = `
-  .deck { display: grid; grid-template-columns: 13rem 1fr; min-height: 100vh; }
-  .film { background: var(--panel-2); border-right: 1px solid var(--line); padding: 1rem .8rem 2rem; }
+  .deck { display: grid; grid-template-columns: 14rem 1fr; min-height: 100vh; }
+  .film { background: var(--panel); border-right: 1px solid var(--line); padding: 1.15rem .9rem 2rem; }
   .film h1 { font-size: 1.15rem; margin: .2rem 0 .8rem; }
-  .filmstrip { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: .35rem; }
-  .filmstrip li { padding: .5rem .6rem; border-radius: 10px; background: transparent; }
-  .filmstrip li.marble-on, .deck:not(.marble-derived) .filmstrip li:first-child { background: var(--panel); box-shadow: var(--shadow); }
-  .stage-wrap { padding: 1.2rem; background: #221e1a; }
+  .filmstrip { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: .25rem; }
+  .filmstrip li { padding: .45rem .6rem; border-radius: 5px; border: 1px solid transparent; background: transparent; font-size: .85rem; color: var(--muted); }
+  .filmstrip li.marble-on, .deck:not(.marble-derived) .filmstrip li:first-child { background: var(--panel-2); border-color: var(--line); color: var(--ink); font-weight: 500; }
+  .stage-wrap { padding: 1.5rem; background: var(--paper); }
   .slide { display: none; }
-  .deck.marble-derived .slide.marble-on { display: block; }
+  .deck.marble-derived .slide.marble-on { display: flex; }
   .deck:not(.marble-derived) .slide { display: none; }
-  .deck:not(.marble-derived) .slide[data-slide="slide-title"] { display: block; }
-  .card { background: #f7f3ec; color: #1c1915; border-radius: 16px; min-height: 26rem; padding: 1.8rem 1.8rem 1rem; display: flex; flex-direction: column; }
-  .card h1, .card h2 { color: #1c1915; }
-  .card .speaker { margin-top: auto; padding-top: .8rem; border-top: 1px solid #e4dcd2; color: #6d655c; font-size: .85rem; }
-  .pane-title:has(marble-alt[data-marble-active="v1"]) h1 { text-align: center; font-size: 2.6rem; margin-top: 4rem; }
+  .deck:not(.marble-derived) .slide[data-slide="slide-title"] { display: flex; }
+  .card { background: var(--panel); color: var(--ink); border: 1px solid var(--line); border-radius: var(--radius); min-height: 26rem; padding: 2rem 2rem 1.2rem; flex-direction: column; box-shadow: none; }
+  .card h1, .card h2 { color: var(--ink); }
+  .card .speaker { margin-top: auto; padding-top: .8rem; border-top: 1px solid var(--line); color: var(--muted); font-size: .84rem; }
+  .pane-title:has(marble-alt[data-marble-active="v1"]) h2 { font-size: 2.1rem; margin-top: 1.5rem; }
   .pane-title:has(marble-alt[data-marble-active="v2"]) { display: grid; grid-template-columns: 1.2fr .8fr; gap: 1rem; align-items: end; }
-  .pane-title:has(marble-alt[data-marble-active="v3"]) h1 { font-size: 1.7rem; }
-  .arch { display: grid; grid-template-columns: repeat(3, 1fr); gap: .6rem; margin-top: 1rem; }
-  .arch section { background: #fff; border: 1px solid #e4dcd2; border-radius: 12px; padding: .8rem; color: #1c1915; }
-  .nexts { margin: .8rem 0 0; padding-left: 1.1rem; }
+  .pane-title:has(marble-alt[data-marble-active="v3"]) h2 { font-size: 1.65rem; }
+  .arch { display: grid; grid-template-columns: repeat(3, 1fr); gap: .65rem; margin-top: 1rem; }
+  .arch section { background: var(--paper); border: 1px solid var(--line); border-radius: 5px; padding: .85rem; color: var(--ink); }
+  .nexts { margin: .8rem 0 0; padding-left: 1.1rem; display: flex; flex-direction: column; gap: .35rem; }
   .add { margin-top: .8rem; }
   @media (max-width: 800px) { .deck { grid-template-columns: 1fr; } .arch { grid-template-columns: 1fr; } }
   `
@@ -593,12 +968,12 @@ function slidesSource(): string {
   <div data-marble-id="slide-stage" id="slide-stage" class="stage-wrap">
     <section data-marble-id="pane-title" class="slide card pane-title" data-slide="slide-title">
       <marble-alt data-marble-id="title-layout" data-marble-active="v1">
-        <p data-marble-id="layout-v1" data-marble-alt="v1" class="kicker" data-marble-editable>Centered</p>
-        <p data-marble-id="layout-v2" data-marble-alt="v2" class="kicker" data-marble-editable>Split</p>
-        <p data-marble-id="layout-v3" data-marble-alt="v3" class="kicker" data-marble-editable>Kicker</p>
+        <p data-marble-id="layout-v1" data-marble-alt="v1" class="kicker" data-marble-editable>Layout: focus</p>
+        <p data-marble-id="layout-v2" data-marble-alt="v2" class="kicker" data-marble-editable>Layout: split</p>
+        <p data-marble-id="layout-v3" data-marble-alt="v3" class="kicker" data-marble-editable>Layout: compact</p>
       </marble-alt>
       <h2 data-marble-id="slide-hero" data-marble-editable>A logical memory you can check</h2>
-      <p data-marble-id="slide-sub" data-marble-editable>Threshold, scaling, and the decoder we froze before the sweep.</p>
+      <p data-marble-id="slide-sub" class="lede" data-marble-editable>Threshold, scaling, and the decoder we froze before the sweep.</p>
       <p data-marble-id="notes-title" class="speaker" data-marble-editable>Open on the claim, not the architecture. The layout pills only change where the eye lands.</p>
     </section>
     <section data-marble-id="pane-arch" class="slide card" data-slide="slide-arch">
@@ -622,20 +997,20 @@ function slidesSource(): string {
     <section data-marble-id="pane-bench" class="slide card" data-slide="slide-bench">
       <h2 data-marble-id="bench-h" data-marble-editable>Benchmark</h2>
       <svg data-marble-id="bench-svg" viewBox="0 0 520 180" width="100%" height="180" role="img" aria-label="Logical error by distance">
-        <line x1="40" y1="150" x2="490" y2="150" stroke="#1c1915" opacity="0.3"/>
-        <rect x="70" y="70" width="48" height="80" rx="6" fill="#1f4b99"/>
-        <rect x="180" y="46" width="48" height="104" rx="6" fill="#1f4b99"/>
-        <rect x="290" y="28" width="48" height="122" rx="6" fill="#1f7a4d"/>
-        <text x="94" y="168" text-anchor="middle" font-size="12" fill="#1c1915">d=3</text>
-        <text x="204" y="168" text-anchor="middle" font-size="12" fill="#1c1915">d=5</text>
-        <text x="314" y="168" text-anchor="middle" font-size="12" fill="#1c1915">d=7</text>
+        <line x1="40" y1="150" x2="490" y2="150" stroke="currentColor" opacity="0.25"/>
+        <rect x="70" y="70" width="48" height="80" rx="4" fill="var(--accent)"/>
+        <rect x="180" y="46" width="48" height="104" rx="4" fill="var(--accent)"/>
+        <rect x="290" y="28" width="48" height="122" rx="4" fill="var(--good)"/>
+        <text x="94" y="168" text-anchor="middle" font-size="12" fill="currentColor">d=3</text>
+        <text x="204" y="168" text-anchor="middle" font-size="12" fill="currentColor">d=5</text>
+        <text x="314" y="168" text-anchor="middle" font-size="12" fill="currentColor">d=7</text>
       </svg>
       <p data-marble-id="bench-caption" data-marble-editable>Logical error per round falls with distance once p is half the threshold. The green bar is the operating point.</p>
       <p data-marble-id="notes-bench" class="speaker" data-marble-editable>Do not read the y-axis aloud. Say “below 10⁻³ at distance 7” and stop.</p>
     </section>
     <section data-marble-id="pane-eq" class="slide card" data-slide="slide-eq">
       <h2 data-marble-id="eqs-h" data-marble-editable>Key equations</h2>
-      <p data-marble-id="eqs-1" data-marble-editable>P_L ≤ C (p / p_th)^((d+1)/2)</p>
+      <p data-marble-id="eqs-1" style="font-family:var(--mono);margin-bottom:.4rem" data-marble-editable>P_L ≤ C (p / p_th)^((d+1)/2)</p>
       <p data-marble-id="eqs-2" data-marble-editable>The constant C counts homology classes, not fit parameters.</p>
       <p data-marble-id="notes-eq" class="speaker" data-marble-editable>If someone asks where C comes from, go back to the proof slide you have not written yet. Say so.</p>
     </section>
@@ -697,20 +1072,20 @@ function slidesSource(): string {
 
 function matrixSource(): string {
   const css = `
-  main { max-width: 68rem; margin: 0 auto; padding: 2rem 1.2rem 4rem; }
-  h1 { font-size: 2.2rem; margin-bottom: .4rem; }
+  main { max-width: 68rem; margin: 0 auto; padding: 2rem 1.4rem 4rem; }
+  h1 { font-size: 2rem; margin-bottom: .35rem; }
   .filters { margin: 1rem 0; }
-  table { width: 100%; border-collapse: collapse; background: var(--panel); border-radius: 14px; overflow: hidden; }
-  th, td { text-align: left; padding: .65rem .7rem; border-bottom: 1px solid var(--line); vertical-align: top; font-size: .92rem; }
-  th { font: 600 .72rem/1.3 var(--mono); letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+  table { width: 100%; border-collapse: collapse; background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); overflow: hidden; }
+  th, td { text-align: left; padding: .6rem .75rem; border-bottom: 1px solid var(--line); vertical-align: top; font-size: .88rem; }
+  th { font: 500 .76rem/1.3 var(--sans); color: var(--muted); background: var(--panel-2); }
   tr[data-status="keep"] { --mark: var(--good); }
   tr[data-status="reading"] { --mark: var(--accent); }
   tr[data-status="drop"] { --mark: var(--danger); }
-  tbody tr { box-shadow: inset 3px 0 0 var(--mark, var(--line)); }
+  tbody tr { box-shadow: inset 2.5px 0 0 var(--mark, var(--line)); }
   .matrix.marble-derived tr.marble-dim { display: none; }
   .take { color: var(--ink); }
-  .add { margin-top: 1rem; }
-  .foot { margin-top: 1rem; color: var(--muted); font-size: .9rem; }
+  .add { margin-top: .85rem; }
+  .foot { margin-top: .85rem; color: var(--muted); font-size: .84rem; }
   `
   const row = (
     id: string,
@@ -795,17 +1170,17 @@ function matrixSource(): string {
 
 function sandboxSource(): string {
   const css = `
-  main { max-width: 68rem; margin: 0 auto; padding: 2rem 1.2rem 4rem; display: grid; grid-template-columns: 1.2fr .8fr; gap: 1rem; }
-  .span { grid-column: 1 / -1; }
-  h1 { font-size: 2.2rem; }
-  .chart-card, .table-card { background: var(--panel); border: 1px solid var(--line); border-radius: 16px; padding: 1rem; }
+  main { max-width: 68rem; margin: 0 auto; padding: 2rem 1.4rem 4rem; display: grid; grid-template-columns: 1.2fr .8fr; gap: 1rem; }
+  .span { grid-column: 1 / -1; padding-bottom: .9rem; border-bottom: 1px solid var(--line); }
+  h1 { font-size: 2rem; }
+  .chart-card, .table-card { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 1rem; }
   svg { width: 100%; height: auto; display: block; }
   table { width: 100%; border-collapse: collapse; }
-  th, td { text-align: left; padding: .45rem .35rem; border-bottom: 1px solid var(--line); }
-  th { font: 600 .72rem/1.3 var(--mono); letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+  th, td { text-align: left; padding: .48rem .45rem; border-bottom: 1px solid var(--line); font-size: .86rem; }
+  th { font: 500 .76rem/1.3 var(--sans); color: var(--muted); }
   td { font-variant-numeric: tabular-nums; }
-  .stepper { display: inline-flex; align-items: center; gap: .35rem; margin-top: .8rem; }
-  .stepper button { width: 1.6rem; height: 1.6rem; border-radius: 999px; border: 1px solid var(--line); background: var(--panel-2); }
+  .stepper { display: inline-flex; align-items: center; gap: .35rem; margin-top: .8rem; font-size: .82rem; font-variant-numeric: tabular-nums; }
+  .stepper button { width: 1.5rem; height: 1.5rem; border-radius: 4px; border: 1px solid var(--line); background: var(--panel-2); }
   .add { margin-top: .8rem; }
   @media (max-width: 860px) { main { grid-template-columns: 1fr; } }
   `
@@ -817,12 +1192,12 @@ function sandboxSource(): string {
   </header>
   <section data-marble-id="chart-card" class="chart-card">
     <svg data-marble-id="bench-chart" viewBox="0 0 640 280" role="img" aria-label="Loss by model">
-      <line x1="40" y1="210" x2="600" y2="210" stroke="currentColor" opacity="0.3"/>
-      <rect x="64" y="118" width="52" height="92" rx="6" fill="var(--accent)"/>
-      <rect x="184" y="105" width="52" height="105" rx="6" fill="var(--accent)"/>
-      <rect x="304" y="87" width="52" height="123" rx="6" fill="var(--accent)"/>
-      <rect x="424" y="129" width="52" height="81" rx="6" fill="var(--accent)"/>
-      <polyline points="90,120 210,107 330,89 450,131" fill="none" stroke="var(--accent-2)" stroke-width="2.5"/>
+      <line x1="40" y1="210" x2="600" y2="210" stroke="currentColor" opacity="0.25"/>
+      <rect x="64" y="118" width="52" height="92" rx="4" fill="var(--accent)"/>
+      <rect x="184" y="105" width="52" height="105" rx="4" fill="var(--accent)"/>
+      <rect x="304" y="87" width="52" height="123" rx="4" fill="var(--accent)"/>
+      <rect x="424" y="129" width="52" height="81" rx="4" fill="var(--accent)"/>
+      <polyline points="90,120 210,107 330,89 450,131" fill="none" stroke="var(--accent-2)" stroke-width="2"/>
       <text x="90" y="232" text-anchor="middle" font-size="12" fill="currentColor">Argon</text>
       <text x="210" y="232" text-anchor="middle" font-size="12" fill="currentColor">Flash</text>
       <text x="330" y="232" text-anchor="middle" font-size="12" fill="currentColor">Haiku</text>
@@ -889,7 +1264,7 @@ function sandboxSource(): string {
     function chartInner() {
       var list = [].slice.call(document.querySelectorAll('#bench-body > tr'));
       var smooth = Math.max(1, Number(shell.getAttribute('data-smooth') || '1'));
-      var parts = ['<line x1="40" y1="210" x2="600" y2="210" stroke="currentColor" opacity="0.3"/>'];
+      var parts = ['<line x1="40" y1="210" x2="600" y2="210" stroke="currentColor" opacity="0.25"/>'];
       var points = [];
       for (var i = 0; i < list.length; i++) {
         var cells = list[i].children;
@@ -899,11 +1274,11 @@ function sandboxSource(): string {
         var y = 210 - h;
         var name = ((cells[0] && cells[0].textContent) || '').trim().replace(/</g, '');
         var nudge = Math.round((smooth - 1) * 2);
-        parts.push('<rect x="' + x + '" y="' + y + '" width="52" height="' + h + '" rx="6" fill="var(--accent)"/>');
+        parts.push('<rect x="' + x + '" y="' + y + '" width="52" height="' + h + '" rx="4" fill="var(--accent)"/>');
         parts.push('<text x="' + (x + 26) + '" y="232" text-anchor="middle" font-size="12" fill="currentColor">' + name + '</text>');
         points.push((x + 26) + ',' + Math.max(16, y + nudge));
       }
-      parts.push('<polyline points="' + points.join(' ') + '" fill="none" stroke="var(--accent-2)" stroke-width="2.5"/>');
+      parts.push('<polyline points="' + points.join(' ') + '" fill="none" stroke="var(--accent-2)" stroke-width="2"/>');
       return parts.join('');
     }
     function paint(file) {
@@ -976,6 +1351,87 @@ function template(
     intentHistory: [],
   }
 }
+
+function evergreenDoc(
+  doc: Omit<
+    MarbleDocumentFile,
+    | 'nodeCount'
+    | 'byteSize'
+    | 'version'
+    | 'syncState'
+    | 'checkpoints'
+    | 'intentHistory'
+    | 'createdBy'
+    | 'lastEditedBy'
+    | 'share'
+    | 'isTemplate'
+    | 'isEvergreen'
+  >,
+): MarbleDocumentFile {
+  return {
+    ...doc,
+    isTemplate: false,
+    isEvergreen: true,
+    source: doc.source,
+    nodeCount: countMarbleNodes(doc.source),
+    byteSize: byteSizeOf(doc.source),
+    version: 1,
+    syncState: 'saved',
+    createdBy: STUDIO,
+    lastEditedBy: STUDIO,
+    share: shareFor(doc.slug, {
+      isPublicLinkEnabled: true,
+      publicPermission: 'view_only',
+    }),
+    checkpoints: [
+      {
+        sha: `evergreen-${doc.slug}`,
+        label: 'Evergreen system baseline',
+        timestamp: Date.parse(doc.updatedAt),
+        author: STUDIO.name,
+        opsCount: 0,
+        source: doc.source,
+        note: 'Referenced automatically by the AI collaborator on every edit and app build.',
+      },
+    ],
+    intentHistory: [],
+  }
+}
+
+export const EVERGREEN_WORKSPACE_DOCS: MarbleDocumentFile[] = [
+  evergreenDoc({
+    id: DOCUMENT_DESIGN_SYSTEM_ID,
+    slug: DOCUMENT_DESIGN_SYSTEM_SLUG,
+    fileName: `${DOCUMENT_DESIGN_SYSTEM_SLUG}.mrbl`,
+    title: 'xDrive Document Design System',
+    description:
+      'Evergreen specification of xDrive’s dual-mode Obsidian Studio & Alabaster Lab tokens, Newsreader + Inter + JetBrains Mono type scale, and 1px hairline grammar. Referenced by AI on every edit.',
+    category: 'document',
+    source: designSystemSource(),
+    createdAt: '2026-11-01T09:00:00.000Z',
+    updatedAt: '2026-11-22T09:00:00.000Z',
+    starred: true,
+    pinned: true,
+    tags: ['evergreen', 'design-system', 'tokens', 'ai-reference'],
+    folder: 'Evergreen',
+  }),
+  evergreenDoc({
+    id: DOCUMENT_DONTS_SYSTEM_ID,
+    slug: DOCUMENT_DONTS_SYSTEM_SLUG,
+    fileName: `${DOCUMENT_DONTS_SYSTEM_SLUG}.mrbl`,
+    title: 'Document Don’ts — Anti-Slop Guardrails',
+    description:
+      'Evergreen anti-slop contract forbidding warm-cream defaults, SaaS drop-shadow card kits, tracked-out uppercase kickers, and decorative chrome. Enforced by AI on every operation.',
+    category: 'document',
+    source: dontsSystemSource(),
+    createdAt: '2026-11-01T09:05:00.000Z',
+    updatedAt: '2026-11-22T09:05:00.000Z',
+    starred: true,
+    pinned: true,
+    tags: ['evergreen', 'donts', 'anti-slop', 'ai-reference'],
+    folder: 'Evergreen',
+  }),
+]
 
 export const PREDEFINED_MARBLE_TEMPLATES: MarbleDocumentFile[] = [
   template({
@@ -1106,12 +1562,17 @@ const slides = () => PREDEFINED_MARBLE_TEMPLATES[3]
 const sandbox = () => PREDEFINED_MARBLE_TEMPLATES[5]
 
 export const INITIAL_WORKSPACE_DOCS: MarbleDocumentFile[] = [
+  ...EVERGREEN_WORKSPACE_DOCS,
   workspaceFrom(
     latex(),
     'Threshold of the Rotated Surface Code',
     '2026-11-02T14:10:00.000Z',
     [
-      { type: 'setText', id: 'paper-authors', text: 'Mira Chen · Lattice Lab' },
+      {
+        type: 'setText',
+        id: 'paper-authors',
+        text: 'Mira Chen, Lattice Lab',
+      },
       {
         type: 'setText',
         id: 'sec-abstract-p',
@@ -1133,7 +1594,7 @@ export const INITIAL_WORKSPACE_DOCS: MarbleDocumentFile[] = [
   ),
   workspaceFrom(
     notebook(),
-    'Week 12 — Head Ablations',
+    'Week 12: Head Ablations',
     '2026-11-08T11:05:00.000Z',
     [
       {
@@ -1158,13 +1619,13 @@ export const INITIAL_WORKSPACE_DOCS: MarbleDocumentFile[] = [
   ),
   workspaceFrom(
     slides(),
-    'Group Meeting · 22 Nov',
+    'Group Meeting (22 Nov)',
     '2026-11-18T09:30:00.000Z',
     [
       {
         type: 'setText',
         id: 'slide-hero',
-        text: 'Group meeting · the threshold moved, the decoder did not',
+        text: 'Group meeting: the threshold moved, the decoder did not',
       },
       {
         type: 'setText',
@@ -1192,7 +1653,7 @@ export const INITIAL_WORKSPACE_DOCS: MarbleDocumentFile[] = [
             name: 'Jordan Hale',
             email: 'jordan@lattice-lab.example',
             avatarInitials: 'JH',
-            avatarColor: '#1f4b99',
+            avatarColor: '#5e6ad2',
             permission: 'comment_annotate',
             addedAt: '2026-11-18T15:00:00.000Z',
             lastActive: '2026-11-21T18:12:00.000Z',
@@ -1203,7 +1664,7 @@ export const INITIAL_WORKSPACE_DOCS: MarbleDocumentFile[] = [
   ),
   workspaceFrom(
     sandbox(),
-    'Scaling Bench · Argon vs Flash',
+    'Scaling Bench: Argon vs Flash',
     '2026-11-20T16:45:00.000Z',
     [
       { type: 'setText', id: 'row-argon-loss', text: '1.71' },
@@ -1215,7 +1676,7 @@ export const INITIAL_WORKSPACE_DOCS: MarbleDocumentFile[] = [
       {
         type: 'setInner',
         id: 'bench-chart',
-        html: '<line x1="40" y1="210" x2="600" y2="210" stroke="currentColor" opacity="0.3"/><rect x="64" y="125" width="52" height="85" rx="6" fill="var(--accent)"/><text x="90" y="232" text-anchor="middle" font-size="12" fill="currentColor">Argon</text><rect x="184" y="105" width="52" height="105" rx="6" fill="var(--accent)"/><text x="210" y="232" text-anchor="middle" font-size="12" fill="currentColor">Flash</text><rect x="304" y="87" width="52" height="123" rx="6" fill="var(--accent)"/><text x="330" y="232" text-anchor="middle" font-size="12" fill="currentColor">Haiku</text><rect x="424" y="129" width="52" height="81" rx="6" fill="var(--accent)"/><text x="450" y="232" text-anchor="middle" font-size="12" fill="currentColor">Opus</text><polyline points="90,127 210,107 330,89 450,131" fill="none" stroke="var(--accent-2)" stroke-width="2.5"/>',
+        html: '<line x1="40" y1="210" x2="600" y2="210" stroke="currentColor" opacity="0.25"/><rect x="64" y="125" width="52" height="85" rx="4" fill="var(--accent)"/><text x="90" y="232" text-anchor="middle" font-size="12" fill="currentColor">Argon</text><rect x="184" y="105" width="52" height="105" rx="4" fill="var(--accent)"/><text x="210" y="232" text-anchor="middle" font-size="12" fill="currentColor">Flash</text><rect x="304" y="87" width="52" height="123" rx="4" fill="var(--accent)"/><text x="330" y="232" text-anchor="middle" font-size="12" fill="currentColor">Haiku</text><rect x="424" y="129" width="52" height="81" rx="4" fill="var(--accent)"/><text x="450" y="232" text-anchor="middle" font-size="12" fill="currentColor">Opus</text><polyline points="90,127 210,107 330,89 450,131" fill="none" stroke="var(--accent-2)" stroke-width="2"/>',
       },
     ],
     {

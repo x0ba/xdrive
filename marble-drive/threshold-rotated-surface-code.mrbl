@@ -4,24 +4,42 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="marble:capabilities" content="storage; net=none">
+<meta name="marble:design-system" content="document-design-system.mrbl,document-donts-system.mrbl">
 <title>Threshold of the Rotated Surface Code</title>
 <style>
-:root { --ink:#1c1915;--muted:#6d655c;--faint:#8d8478;--line:#e4dcd2;--paper:#f3efe7;--panel:#fffdf9;--panel-2:#f4efe6;--accent:#1f4b99;--accent-2:#1f7a4d;--accent-soft:#e6eefb;--good:#1e7a46;--warn:#9a5b12;--danger:#9d2c2c;--shadow:0 18px 40px rgba(48,36,22,.08);--serif:"Iowan Old Style",Palatino,"Palatino Linotype",Georgia,serif;--sans:"Avenir Next","Segoe UI",system-ui,sans-serif;--mono:"IBM Plex Mono",ui-monospace,SFMono-Regular,Menlo,monospace; }
-@media (prefers-color-scheme: dark) { :root { --ink:#efeae3;--muted:#b7aea2;--faint:#8f867b;--line:#34302b;--paper:#131210;--panel:#1c1a17;--panel-2:#26231f;--accent:#9db6ff;--accent-2:#8ed0b0;--accent-soft:#243156;--good:#8ed0b0;--warn:#e2b56a;--danger:#f0a3a3;--shadow:0 18px 40px rgba(0,0,0,.35); } }
-html[data-xdrive-theme="light"] { --ink:#1c1915;--muted:#6d655c;--faint:#8d8478;--line:#e4dcd2;--paper:#f3efe7;--panel:#fffdf9;--panel-2:#f4efe6;--accent:#1f4b99;--accent-2:#1f7a4d;--accent-soft:#e6eefb;--good:#1e7a46;--warn:#9a5b12;--danger:#9d2c2c;--shadow:0 18px 40px rgba(48,36,22,.08);--serif:"Iowan Old Style",Palatino,"Palatino Linotype",Georgia,serif;--sans:"Avenir Next","Segoe UI",system-ui,sans-serif;--mono:"IBM Plex Mono",ui-monospace,SFMono-Regular,Menlo,monospace; color-scheme: light; }
-html[data-xdrive-theme="dark"] { --ink:#efeae3;--muted:#b7aea2;--faint:#8f867b;--line:#34302b;--paper:#131210;--panel:#1c1a17;--panel-2:#26231f;--accent:#9db6ff;--accent-2:#8ed0b0;--accent-soft:#243156;--good:#8ed0b0;--warn:#e2b56a;--danger:#f0a3a3;--shadow:0 18px 40px rgba(0,0,0,.35); color-scheme: dark; }
+:root { --xd-canvas:#ffffff;--xd-rail:#f7f8fa;--xd-elevated:#f1f3f7;--xd-surface-hover:#eaeef4;--xd-surface-active:#e2e7f0;--xd-ink:#0f131a;--xd-ink-secondary:#4a5568;--xd-ink-muted:#718096;--xd-border:#e3e8ee;--xd-border-strong:#cbd5e1;--xd-accent:#5e6ad2;--xd-accent-hover:#4e5ac0;--xd-accent-soft:rgba(94,106,210,0.12);--xd-accent-border:rgba(94,106,210,0.35);--xd-commit:#1f9d6b;--xd-commit-soft:rgba(31,157,107,0.12);--xd-sketch:#d9822b;--xd-sketch-soft:rgba(217,130,43,0.14);--xd-danger:#e5484d;--xd-danger-soft:rgba(229,72,77,0.12);--ink:#0f131a;--muted:#4a5568;--faint:#718096;--line:#e3e8ee;--line-strong:#cbd5e1;--paper:#ffffff;--panel:#f7f8fa;--panel-2:#f1f3f7;--accent:#5e6ad2;--accent-2:#1f9d6b;--accent-soft:rgba(94,106,210,0.12);--good:#1f9d6b;--warn:#d9822b;--danger:#e5484d;--radius:6px;--shadow:none;--serif:"Newsreader",Georgia,Cambria,"Times New Roman",serif;--sans:"Inter",-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;--mono:"JetBrains Mono",ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace; }
+@media (prefers-color-scheme: dark) { :root { --xd-canvas:#0b0c0e;--xd-rail:#101216;--xd-elevated:#161920;--xd-surface-hover:#1c2029;--xd-surface-active:#232834;--xd-ink:#f3f5f8;--xd-ink-secondary:#a2abb8;--xd-ink-muted:#6e7785;--xd-border:#22252e;--xd-border-strong:#313644;--xd-accent:#5e6ad2;--xd-accent-hover:#6e7ae2;--xd-accent-soft:rgba(94,106,210,0.16);--xd-accent-border:rgba(94,106,210,0.45);--xd-commit:#2ea071;--xd-commit-soft:rgba(46,160,113,0.16);--xd-sketch:#e59934;--xd-sketch-soft:rgba(229,153,52,0.18);--xd-danger:#e5484d;--xd-danger-soft:rgba(229,72,77,0.16);--ink:#f3f5f8;--muted:#a2abb8;--faint:#6e7785;--line:#22252e;--line-strong:#313644;--paper:#0b0c0e;--panel:#101216;--panel-2:#161920;--accent:#5e6ad2;--accent-2:#2ea071;--accent-soft:rgba(94,106,210,0.16);--good:#2ea071;--warn:#e59934;--danger:#e5484d;--radius:6px;--shadow:none; } }
+html[data-xdrive-theme="light"] { --xd-canvas:#ffffff;--xd-rail:#f7f8fa;--xd-elevated:#f1f3f7;--xd-surface-hover:#eaeef4;--xd-surface-active:#e2e7f0;--xd-ink:#0f131a;--xd-ink-secondary:#4a5568;--xd-ink-muted:#718096;--xd-border:#e3e8ee;--xd-border-strong:#cbd5e1;--xd-accent:#5e6ad2;--xd-accent-hover:#4e5ac0;--xd-accent-soft:rgba(94,106,210,0.12);--xd-accent-border:rgba(94,106,210,0.35);--xd-commit:#1f9d6b;--xd-commit-soft:rgba(31,157,107,0.12);--xd-sketch:#d9822b;--xd-sketch-soft:rgba(217,130,43,0.14);--xd-danger:#e5484d;--xd-danger-soft:rgba(229,72,77,0.12);--ink:#0f131a;--muted:#4a5568;--faint:#718096;--line:#e3e8ee;--line-strong:#cbd5e1;--paper:#ffffff;--panel:#f7f8fa;--panel-2:#f1f3f7;--accent:#5e6ad2;--accent-2:#1f9d6b;--accent-soft:rgba(94,106,210,0.12);--good:#1f9d6b;--warn:#d9822b;--danger:#e5484d;--radius:6px;--shadow:none;--serif:"Newsreader",Georgia,Cambria,"Times New Roman",serif;--sans:"Inter",-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;--mono:"JetBrains Mono",ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace; color-scheme: light; }
+html[data-xdrive-theme="dark"] { --xd-canvas:#0b0c0e;--xd-rail:#101216;--xd-elevated:#161920;--xd-surface-hover:#1c2029;--xd-surface-active:#232834;--xd-ink:#f3f5f8;--xd-ink-secondary:#a2abb8;--xd-ink-muted:#6e7785;--xd-border:#22252e;--xd-border-strong:#313644;--xd-accent:#5e6ad2;--xd-accent-hover:#6e7ae2;--xd-accent-soft:rgba(94,106,210,0.16);--xd-accent-border:rgba(94,106,210,0.45);--xd-commit:#2ea071;--xd-commit-soft:rgba(46,160,113,0.16);--xd-sketch:#e59934;--xd-sketch-soft:rgba(229,153,52,0.18);--xd-danger:#e5484d;--xd-danger-soft:rgba(229,72,77,0.16);--ink:#f3f5f8;--muted:#a2abb8;--faint:#6e7785;--line:#22252e;--line-strong:#313644;--paper:#0b0c0e;--panel:#101216;--panel-2:#161920;--accent:#5e6ad2;--accent-2:#2ea071;--accent-soft:rgba(94,106,210,0.16);--good:#2ea071;--warn:#e59934;--danger:#e5484d;--radius:6px;--shadow:none; color-scheme: dark; }
 * { box-sizing: border-box; }
 html, body { margin: 0; min-height: 100%; }
-body { background: var(--paper); color: var(--ink); font: 16px/1.55 var(--sans); -webkit-font-smoothing: antialiased; }
-button, input { font: inherit; color: inherit; }
+body {
+  background: var(--paper); color: var(--ink);
+  font: 14.5px/1.6 var(--sans); letter-spacing: -0.006em;
+  -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale;
+}
+button, input, select, textarea { font: inherit; color: inherit; }
 button { cursor: pointer; }
-:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+:focus-visible { outline: 1.5px solid var(--accent); outline-offset: 2px; }
 [data-marble-editable]:focus { outline: none; box-shadow: inset 0 -1.5px 0 var(--accent); }
-.kicker { margin: 0 0 .35rem; color: var(--accent); font: 600 .72rem/1 var(--mono); letter-spacing: .14em; text-transform: uppercase; }
-h1 { font-family: var(--serif); font-weight: 560; letter-spacing: -.03em; line-height: 1.05; margin: 0; }
-h2 { font-family: var(--serif); font-size: 1.35rem; font-weight: 560; letter-spacing: -.02em; margin: 0 0 .4rem; }
-p { margin: 0; }
-.lede { color: var(--muted); max-width: 40rem; }
+.kicker {
+  margin: 0 0 .3rem; color: var(--muted);
+  font: 500 .78rem/1.4 var(--sans); letter-spacing: -0.004em; text-transform: none;
+}
+h1 {
+  font-family: var(--serif); font-size: 2rem; font-weight: 500;
+  letter-spacing: -0.024em; line-height: 1.12; margin: 0; color: var(--ink);
+}
+h2 {
+  font-family: var(--serif); font-size: 1.25rem; font-weight: 500;
+  letter-spacing: -0.016em; line-height: 1.24; margin: 0 0 .4rem; color: var(--ink);
+}
+h3 {
+  font-family: var(--sans); font-size: .92rem; font-weight: 600;
+  letter-spacing: -0.01em; line-height: 1.35; margin: 0 0 .3rem; color: var(--ink);
+}
+p { margin: 0; max-width: 68ch; }
+.lede { color: var(--muted); max-width: 62ch; font-size: .96rem; line-height: 1.6; }
 marble-alt { display: block; }
 marble-alt > [data-marble-alt] { display: none; }
 marble-alt[data-marble-active="v1"] > [data-marble-alt="v1"],
@@ -33,37 +51,42 @@ marble-alt[data-marble-active="v6"] > [data-marble-alt="v6"] { display: block; }
 marble-alt:not([data-marble-active]) > [data-marble-alt]:first-child { display: block; }
 [data-marble-sortable] { padding-left: 1.4rem; }
 .pill, .choose button, .tex-edit, .add {
-  border: 1px solid var(--line); background: var(--panel); border-radius: 999px;
-  padding: .18rem .65rem; font: 600 .75rem/1.4 var(--sans);
+  border: 1px solid var(--line); background: var(--panel); border-radius: 4px;
+  padding: .2rem .55rem; font: 500 .76rem/1.35 var(--sans); color: var(--muted);
+  transition: border-color 120ms ease, color 120ms ease, background-color 120ms ease;
 }
-.choose { display: inline-flex; gap: .25rem; flex-wrap: wrap; }
-.choose button[aria-pressed="true"] { background: var(--accent); color: #fff; border-color: transparent; }
+.pill:hover, .choose button:hover, .tex-edit:hover, .add:hover {
+  border-color: var(--line-strong); color: var(--ink);
+}
+.choose { display: inline-flex; gap: .2rem; flex-wrap: wrap; padding: 2px; border: 1px solid var(--line); border-radius: 6px; background: var(--panel); }
+.choose button { border-color: transparent; background: transparent; }
+.choose button[aria-pressed="true"] { background: var(--paper); color: var(--ink); border-color: var(--line); }
 .add { border-style: dashed; color: var(--accent); background: transparent; }
 .card, section.block {
-  background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 1rem 1.1rem;
-  box-shadow: var(--shadow);
+  background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius);
+  padding: .95rem 1.1rem; box-shadow: none;
 }
 
 
-  main { max-width: 52rem; margin: 0 auto; padding: 2.5rem 1.4rem 4rem; }
-  header.paper-head { margin-bottom: 1.6rem; }
-  .authors { color: var(--muted); margin-top: .7rem; }
-  .venue { color: var(--faint); font: .8rem/1.4 var(--mono); margin-top: .25rem; }
-  .stack { display: flex; flex-direction: column; gap: .8rem; }
-  .eq { margin: .8rem 0 0; padding: .8rem 1rem; border-radius: 12px; background: var(--panel-2); border: 1px solid var(--line); }
-  .eq-top { display: flex; justify-content: space-between; align-items: center; gap: .5rem; margin-bottom: .45rem; }
-  .eq-label { font: 600 .72rem/1 var(--mono); letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
-  .eq-render { font-family: var(--serif); font-size: 1.35rem; text-align: center; padding: .4rem 0 .2rem; }
+  main { max-width: 52rem; margin: 0 auto; padding: 2.2rem 1.5rem 4rem; }
+  header.paper-head { margin-bottom: 1.5rem; padding-bottom: 1.1rem; border-bottom: 1px solid var(--line); }
+  .authors { color: var(--muted); margin-top: .55rem; font-size: .9rem; }
+  .venue { color: var(--faint); font: .78rem/1.4 var(--mono); margin-top: .2rem; }
+  .stack { display: flex; flex-direction: column; gap: .75rem; }
+  .eq { margin: .75rem 0 0; padding: .75rem .95rem; border-radius: var(--radius); background: var(--panel-2); border: 1px solid var(--line); }
+  .eq-top { display: flex; justify-content: space-between; align-items: center; gap: .5rem; margin-bottom: .35rem; }
+  .eq-label { font: 500 .75rem/1.2 var(--mono); color: var(--muted); }
+  .eq-render { font-family: var(--serif); font-size: 1.3rem; text-align: center; padding: .35rem 0 .15rem; }
   .eq:not([data-editing="on"]) .eq-src { display: none; }
   .eq[data-editing="on"] .eq-render { display: none; }
-  .eq-src { display: block; font: .95rem/1.5 var(--mono); white-space: pre-wrap; }
+  .eq-src { display: block; font: .88rem/1.5 var(--mono); white-space: pre-wrap; }
   .frac { display: inline-flex; flex-direction: column; vertical-align: middle; text-align: center; font-size: .82em; margin: 0 .15em; }
   .frac i, .frac b { font-style: normal; font-weight: 500; padding: 0 .25em; }
   .frac b { border-top: 1px solid currentColor; }
   .cal { font-family: var(--serif); font-style: italic; }
-  .bib { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: .45rem; }
-  .bib li { display: grid; grid-template-columns: 9rem 1fr; gap: .6rem; padding: .45rem .2rem; border-top: 1px solid var(--line); }
-  .key { font: 600 .78rem/1.4 var(--mono); color: var(--accent); }
+  .bib { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: .35rem; }
+  .bib li { display: grid; grid-template-columns: 8.5rem 1fr; gap: .6rem; padding: .45rem .2rem; border-top: 1px solid var(--line); font-size: .88rem; }
+  .key { font: 500 .76rem/1.4 var(--mono); color: var(--accent); }
   .actions { display: flex; gap: .5rem; margin-top: 1rem; }
   </style>
 </head>
@@ -76,8 +99,8 @@ marble-alt:not([data-marble-active]) > [data-marble-alt]:first-child { display: 
       <h1 data-marble-id="paper-title-v2" data-marble-alt="v2" data-marble-editable>A Theorem Studio for Logical Qubit Lifetimes</h1>
       <h1 data-marble-id="paper-title-v3" data-marble-alt="v3" data-marble-editable>Thresholds, Decoders, and the Cost of a Logical Gate</h1>
     </marble-alt>
-    <p data-marble-id="paper-authors" class="authors" data-marble-editable>Mira Chen · Lattice Lab</p>
-    <p data-marble-id="paper-venue" class="venue" data-marble-editable>Draft · QEC 2026 · circuit-level depolarizing noise</p>
+    <p data-marble-id="paper-authors" class="authors" data-marble-editable>Mira Chen, Lattice Lab</p>
+    <p data-marble-id="paper-venue" class="venue" data-marble-editable>QEC 2026 manuscript · circuit-level depolarizing noise</p>
   </header>
   <div data-marble-id="sections" id="sections" class="stack" data-marble-sortable="sections">
     <section data-marble-id="sec-abstract" class="block" data-marble-removable data-marble-selectable>
@@ -92,11 +115,11 @@ marble-alt:not([data-marble-active]) > [data-marble-alt]:first-child { display: 
       <h2 data-marble-id="sec-theorem-h" data-marble-editable>Formal Theorem &amp; Proof</h2>
       <p data-marble-id="thm-name" class="kicker" data-marble-editable>Theorem 1</p>
       <p data-marble-id="thm-statement" data-marble-editable>For odd distance d and physical error p below threshold, the logical error rate is at most C (p / p_th) raised to (d + 1) / 2.</p>
-      <p data-marble-id="thm-proof-h" class="kicker" data-marble-editable>Proof sketch</p>
+      <p data-marble-id="thm-proof-h" class="kicker" data-marble-editable style="margin-top:.55rem">Proof sketch</p>
       <p data-marble-id="thm-proof" data-marble-editable>Union bound over the shortest logical string, then a Chernoff bound on the matching weight. The constant C absorbs the number of homology classes on the torus.</p>
       <figure data-marble-id="eq-1" class="eq" data-editing="off">
         <div data-marble-id="eq-1-top" class="eq-top">
-          <span data-marble-id="eq-1-label" class="eq-label">Eq. 1 · channel</span>
+          <span data-marble-id="eq-1-label" class="eq-label">Eq. 1 (channel)</span>
           <button data-marble-id="eq-1-edit" class="tex-edit" type="button">Edit TeX</button>
         </div>
         <div data-marble-id="eq-1-render" class="eq-render"><span class="cal">E</span>(ρ) = (1 − p) ρ + p XρX</div>
@@ -104,7 +127,7 @@ marble-alt:not([data-marble-active]) > [data-marble-alt]:first-child { display: 
       </figure>
       <figure data-marble-id="eq-2" class="eq" data-editing="off">
         <div data-marble-id="eq-2-top" class="eq-top">
-          <span data-marble-id="eq-2-label" class="eq-label">Eq. 2 · threshold</span>
+          <span data-marble-id="eq-2-label" class="eq-label">Eq. 2 (threshold)</span>
           <button data-marble-id="eq-2-edit" class="tex-edit" type="button">Edit TeX</button>
         </div>
         <div data-marble-id="eq-2-render" class="eq-render">p / p<sub>th</sub> ≤ 1</div>
@@ -112,7 +135,7 @@ marble-alt:not([data-marble-active]) > [data-marble-alt]:first-child { display: 
       </figure>
       <figure data-marble-id="eq-3" class="eq" data-editing="off">
         <div data-marble-id="eq-3-top" class="eq-top">
-          <span data-marble-id="eq-3-label" class="eq-label">Eq. 3 · scaling</span>
+          <span data-marble-id="eq-3-label" class="eq-label">Eq. 3 (scaling)</span>
           <button data-marble-id="eq-3-edit" class="tex-edit" type="button">Edit TeX</button>
         </div>
         <div data-marble-id="eq-3-render" class="eq-render">P<sub>L</sub> ≤ C (p / p<sub>th</sub>)<sup>(d+1)/2</sup></div>
@@ -146,7 +169,7 @@ marble-alt:not([data-marble-active]) > [data-marble-alt]:first-child { display: 
     <button data-marble-id="add-citation" class="add" type="button" data-marble-add="#tpl-citation" data-marble-into="#bib-list">+ Add citation</button>
   </div>
   <template data-marble-id="tpl-theorem" id="tpl-theorem">
-    <section data-marble-removable data-marble-selectable>
+    <section class="block" data-marble-removable data-marble-selectable>
       <h2 data-marble-editable>New theorem</h2>
       <p data-marble-editable>State the claim, the assumption it needs, and the bound.</p>
     </section>
@@ -166,8 +189,22 @@ marble-alt:not([data-marble-active]) > [data-marble-alt]:first-child { display: 
   }
   boot(function (marble) {
     var MID = 'data-marble-' + 'id';
-    var AFFORDANCES = ["data-marble-editable","data-marble-sortable","data-marble-canvas","data-marble-resizable","data-marble-removable","data-marble-add","data-marble-toggle","data-marble-choose","data-marble-expand","data-marble-step","data-marble-note"];
-    if (marble && marble.address) { marble.address(document.querySelectorAll(AFFORDANCES.map(function (a) { return "[" + a + "]"; }).join(","))); }
+    var AFFORDANCES = [
+      'data-marble-editable',
+      'data-marble-sortable',
+      'data-marble-canvas',
+      'data-marble-resizable',
+      'data-marble-removable',
+      'data-marble-add',
+      'data-marble-toggle',
+      'data-marble-choose',
+      'data-marble-expand',
+      'data-marble-step',
+      'data-marble-note'
+    ];
+    if (marble && marble.address) {
+      marble.address(document.querySelectorAll(AFFORDANCES.map(function (a) { return '[' + a + ']'; }).join(',')));
+    }
     function qMarble(id) { return document.querySelector('[' + MID + '="' + id + '"]'); }
     function renderTex(tex) {
       var s = String(tex || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');

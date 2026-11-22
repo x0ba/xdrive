@@ -43,6 +43,8 @@ import {
   MarbleSourceInspector,
 } from '#/components/workspace/MarbleSourceInspector'
 import {
+  DOCUMENT_DESIGN_SYSTEM_SLUG,
+  DOCUMENT_DONTS_SYSTEM_SLUG,
   INITIAL_AI_SUBSCRIPTIONS,
   INITIAL_WORKSPACE_DOCS,
   PREDEFINED_MARBLE_TEMPLATES,
@@ -53,6 +55,7 @@ import {
   duplicateMarbleTemplate,
   generateMarbleCollaboration,
   inspectMarbleNodes,
+  resolveEvergreenDesignContext,
 } from '#/lib/marble'
 import type { MarbleActionKind } from '#/lib/marble'
 import type {
@@ -434,6 +437,9 @@ function compareDocs(
   b: MarbleDocumentFile,
   sort: SortOption,
 ): number {
+  if (Boolean(a.isEvergreen) !== Boolean(b.isEvergreen)) {
+    return a.isEvergreen ? -1 : 1
+  }
   if (a.pinned !== b.pinned) return a.pinned ? -1 : 1
   if (sort === 'nodes') return b.nodeCount - a.nodeCount
   if (sort === 'size') return b.byteSize - a.byteSize
@@ -650,6 +656,20 @@ export function XDriveWorkspace({
 
   const sharedDocs = useMemo(() => docs.filter(isShared), [docs])
   const blueprints = useMemo(() => templates.map(toBlueprint), [templates])
+  const evergreenDocs = useMemo(
+    () =>
+      docs.filter(
+        (doc) =>
+          doc.isEvergreen ||
+          doc.slug === DOCUMENT_DESIGN_SYSTEM_SLUG ||
+          doc.slug === DOCUMENT_DONTS_SYSTEM_SLUG,
+      ),
+    [docs],
+  )
+  const evergreenRefs = useMemo(
+    () => resolveEvergreenDesignContext(evergreenDocs).refs,
+    [evergreenDocs],
+  )
 
   const recentProposals = useMemo(() => {
     return library
@@ -1070,6 +1090,12 @@ export function XDriveWorkspace({
     const threadId = input.doc?.id ?? 'drive'
     upsertThreadMessage(threadId, user)
     try {
+      const liveEvergreen = libraryRef.current.filter(
+        (item) =>
+          item.isEvergreen ||
+          item.slug === DOCUMENT_DESIGN_SYSTEM_SLUG ||
+          item.slug === DOCUMENT_DONTS_SYSTEM_SLUG,
+      )
       const result = await generateMarbleCollaboration({
         source: input.doc?.source ?? '',
         instruction,
@@ -1078,6 +1104,7 @@ export function XDriveWorkspace({
         action: input.action,
         selectedElements: input.selectedElements,
         sketchAnnotations: input.sketchAnnotations,
+        evergreenDocs: liveEvergreen,
       })
       if (result.newDocument) {
         const created = adoptDocument(result.newDocument, libraryRef.current)
@@ -1383,7 +1410,7 @@ export function XDriveWorkspace({
       title={frameTitle}
       srcDoc={frameDoc}
       onLoad={(event) => measureFrame(event.currentTarget)}
-      className="block h-full w-full border-0 bg-white"
+      className="block h-full w-full border-0 bg-[var(--xd-canvas)]"
     />
   )
 
@@ -1798,6 +1825,13 @@ export function XDriveWorkspace({
             modelId={modelId}
             onModelChange={setModelId}
             permission={permission}
+            evergreenRefs={evergreenRefs}
+            onOpenEvergreenDoc={(slug) => {
+              const target = libraryRef.current.find(
+                (item) => item.slug === slug,
+              )
+              if (target) openDocument(target.id)
+            }}
             onRemoveElement={(id) => {
               if (!activeDoc) return
               setDocSelection(

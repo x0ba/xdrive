@@ -54,3 +54,31 @@ export const SketchAndAnnotateMode: Story = {
     initialSelectedIds: ['sec-abstract'],
   },
 }
+
+export const EvergreenDesignSystem: Story = {
+  name: 'Evergreen · Document Design System',
+  args: {
+    initialTheme: 'dark',
+    initialActiveTabId: 'ws-document-design-system',
+    initialOpenDocIds: [
+      'ws-document-design-system',
+      'ws-document-donts-system',
+    ],
+    initialMode: 'direct',
+    initialAiSidebarOpen: true,
+  },
+}
+
+export const EvergreenDontsSystem: Story = {
+  name: 'Evergreen · Document Don’ts (Anti-Slop)',
+  args: {
+    initialTheme: 'dark',
+    initialActiveTabId: 'ws-document-donts-system',
+    initialOpenDocIds: [
+      'ws-document-design-system',
+      'ws-document-donts-system',
+    ],
+    initialMode: 'direct',
+    initialAiSidebarOpen: true,
+  },
+}

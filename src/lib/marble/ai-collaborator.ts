@@ -1,17 +1,18 @@
 // Turns a prompt, a selection, or a sketch into Marble ops against the open
-// .mrbl file. A live /api/marble route wins when it answers; otherwise the
-// synthesizer below reads the addressed nodes and writes the smallest staged
-// edit that still changes the file.
+// .mrbl file. Every request loads and enforces the two evergreen drive
+// documents (`document-design-system.mrbl` and `document-donts-system.mrbl`) so
+// generated apps and edits follow xDrive's design language and reject AI slop.
 
 import type {
   AIMessage,
   AIProviderId,
+  EvergreenDocRef,
   MarbleDocumentFile,
   MarbleOp,
   MarbleOpProposal,
   SelectedMarbleElement,
-  SketchAnnotation,
   ShareConfig,
+  SketchAnnotation,
 } from '../types'
 import type { MarbleNodeRecord } from './engine-client'
 import {
@@ -21,9 +22,34 @@ import {
   escapeText,
   inspectMarbleNodes,
 } from './engine-client'
+import {
+  DOCUMENT_DESIGN_SYSTEM_SLUG,
+  DOCUMENT_DONTS_SYSTEM_SLUG,
+  EVERGREEN_WORKSPACE_DOCS,
+  MARBLE_BASE_CSS,
+} from './templates'
 
 export type MarbleActionKind =
-  'dtrt' | 'factory' | 'scale' | 'fork_alt' | 'sketch_build' | 'new_app'
+  | 'dtrt'
+  | 'factory'
+  | 'scale'
+  | 'fork_alt'
+  | 'sketch_build'
+  | 'new_app'
+
+export interface EvergreenDesignContext {
+  designSystem: {
+    ref: EvergreenDocRef
+    contracts: string[]
+    baseCss: string
+  }
+  dontsSystem: {
+    ref: EvergreenDocRef
+    guardrails: string[]
+    bannedHexes: string[]
+  }
+  refs: EvergreenDocRef[]
+}
 
 export interface CollaborationRequest {
   source: string
@@ -33,12 +59,14 @@ export interface CollaborationRequest {
   modelId: string
   providerId: AIProviderId
   action?: MarbleActionKind
+  evergreenDocs?: MarbleDocumentFile[]
 }
 
 export interface CollaborationResult {
   proposal: MarbleOpProposal
   stages: NonNullable<AIMessage['stages']>
   newDocument?: MarbleDocumentFile
+  evergreenContext: EvergreenDesignContext
   source: 'api' | 'synthesizer'
 }
 
@@ -52,17 +80,190 @@ const OP_TYPES = new Set([
   'assignId',
 ])
 
+const DEFAULT_BANNED_HEXES = [
+  '#f4f1ea',
+  '#f3efe7',
+  '#f4f0e8',
+  '#f7f3ec',
+  '#fffdf9',
+  '#e4dcd2',
+  '#d97757',
+  '#1f4b99',
+  '#221e1a',
+  '#131210',
+  '#1c1a17',
+]
+
+export function resolveEvergreenDesignContext(
+  evergreenDocs?: MarbleDocumentFile[],
+): EvergreenDesignContext {
+  const pool = [
+    ...(evergreenDocs ?? []),
+    ...EVERGREEN_WORKSPACE_DOCS,
+  ]
+  const designDoc =
+    pool.find((doc) => doc.slug === DOCUMENT_DESIGN_SYSTEM_SLUG) ??
+    EVERGREEN_WORKSPACE_DOCS[0]
+  const dontsDoc =
+    pool.find((doc) => doc.slug === DOCUMENT_DONTS_SYSTEM_SLUG) ??
+    EVERGREEN_WORKSPACE_DOCS[1]
+
+  const designNodes = inspectMarbleNodes(designDoc.source)
+  const dontsNodes = inspectMarbleNodes(dontsDoc.source)
+
+  const contracts = designNodes
+    .filter(
+      (node) =>
+        node.id.startsWith('ds-rule-') ||
+        node.id.startsWith('tok-row-') ||
+        (node.tagName === 'li' && node.parentId === 'ds-rule-list'),
+    )
+    .map((node) => node.text.replace(/\s+/g, ' ').trim())
+    .filter(Boolean)
+
+  const guardrails = dontsNodes
+    .filter(
+      (node) =>
+        (node.id.startsWith('dont-') && node.tagName === 'li') ||
+        node.parentId === 'donts-list',
+    )
+    .map((node) => node.text.replace(/\s+/g, ' ').trim())
+    .filter(Boolean)
+
+  const discoveredHexes = [
+    ...dontsDoc.source.matchAll(/#[0-9a-fA-F]{6}\b/g),
+  ].map((match) => match[0].toLowerCase())
+  const keepHexes = new Set([
+    '#0b0c0e',
+    '#101216',
+    '#161920',
+    '#1c2029',
+    '#232834',
+    '#f3f5f8',
+    '#a2abb8',
+    '#6e7785',
+    '#22252e',
+    '#313644',
+    '#ffffff',
+    '#f7f8fa',
+    '#f1f3f7',
+    '#eaeef4',
+    '#e2e7f0',
+    '#0f131a',
+    '#4a5568',
+    '#718096',
+    '#e3e8ee',
+    '#cbd5e1',
+    '#5e6ad2',
+    '#4e5ac0',
+    '#6e7ae2',
+    '#1f9d6b',
+    '#2ea071',
+    '#d9822b',
+    '#e59934',
+    '#e5484d',
+  ])
+  const bannedHexes = [
+    ...new Set([
+      ...DEFAULT_BANNED_HEXES,
+      ...discoveredHexes.filter((hex) => !keepHexes.has(hex)),
+    ]),
+  ]
+
+  const designRef: EvergreenDocRef = {
+    slug: designDoc.slug,
+    fileName: designDoc.fileName,
+    title: designDoc.title,
+    ruleCount: Math.max(contracts.length, 4),
+  }
+  const dontsRef: EvergreenDocRef = {
+    slug: dontsDoc.slug,
+    fileName: dontsDoc.fileName,
+    title: dontsDoc.title,
+    ruleCount: Math.max(guardrails.length, 5),
+  }
+
+  return {
+    designSystem: {
+      ref: designRef,
+      contracts,
+      baseCss: MARBLE_BASE_CSS,
+    },
+    dontsSystem: {
+      ref: dontsRef,
+      guardrails,
+      bannedHexes,
+    },
+    refs: [designRef, dontsRef],
+  }
+}
+
+export function sanitizeTextWithDonts(
+  text: string,
+  _context?: EvergreenDesignContext,
+): string {
+  let clean = text.replace(/\s+/g, ' ').trim()
+  if (!clean) return clean
+  // Strip trailing arrows on CTAs and labels (Don'ts rule #4)
+  clean = clean.replace(/\s*(?:→|->)\s*$/g, '')
+  // Strip decorative 01 / 02 / 03 prefix numbering on non-stepped headings
+  clean = clean.replace(/^\d{2}\s*[/·|]\s*/g, '')
+  // Convert "WORD — fragment" all-caps eyebrow-dash pattern into sentence case
+  clean = clean.replace(
+    /^([A-Z]{3,})\s*[—–-]\s+(.+)$/,
+    (_m, head: string, tail: string) =>
+      `${head[0]}${head.slice(1).toLowerCase()}: ${tail}`,
+  )
+  return clean.trim()
+}
+
+export function sanitizeHtmlWithEvergreenRules(
+  html: string,
+  _context?: EvergreenDesignContext,
+): string {
+  return html
+    .replace(/#(?:f4f1ea|f3efe7|f4f0e8|f7f3ec)\b/gi, 'var(--paper)')
+    .replace(/#(?:fffdf9|1c1a17|131210|221e1a)\b/gi, 'var(--panel)')
+    .replace(/#(?:e4dcd2|34302b)\b/gi, 'var(--line)')
+    .replace(/#(?:d97757|1f4b99|9db6ff)\b/gi, 'var(--accent)')
+    .replace(/#9d2c2c\b/gi, 'var(--danger)')
+    .replace(/border-radius\s*:\s*1[4-9]px/gi, 'border-radius: var(--radius)')
+    .replace(/box-shadow\s*:\s*0\s+18px\s+40px[^;}"]*/gi, 'box-shadow: none')
+    .replace(/text-transform\s*:\s*uppercase\s*;?/gi, '')
+    .replace(/letter-spacing\s*:\s*0?\.1[2-9]em\s*;?/gi, '')
+}
+
+function sanitizeOpsWithEvergreen(
+  ops: MarbleOp[],
+  context: EvergreenDesignContext,
+): MarbleOp[] {
+  return ops.map((op) => {
+    const next: MarbleOp = { ...op }
+    if (typeof next.text === 'string') {
+      next.text = sanitizeTextWithDonts(next.text, context)
+    }
+    if (typeof next.html === 'string') {
+      next.html = sanitizeHtmlWithEvergreenRules(next.html, context)
+    }
+    return next
+  })
+}
+
 export async function generateMarbleCollaboration(
   request: CollaborationRequest,
 ): Promise<CollaborationResult> {
-  const fromApi = await askMarbleApi(request)
+  const evergreenContext = resolveEvergreenDesignContext(request.evergreenDocs)
+  const fromApi = await askMarbleApi(request, evergreenContext)
   if (fromApi) return fromApi
-  return synthesizeMarbleOps(request)
+  return synthesizeMarbleOps(request, evergreenContext)
 }
 
 export function synthesizeMarbleOps(
   request: CollaborationRequest,
+  providedContext?: EvergreenDesignContext,
 ): CollaborationResult {
+  const evergreenContext =
+    providedContext ?? resolveEvergreenDesignContext(request.evergreenDocs)
   const instruction = request.instruction.trim() || 'Do the right thing.'
   const selected = request.selectedElements ?? []
   const sketches = request.sketchAnnotations ?? []
@@ -71,35 +272,56 @@ export function synthesizeMarbleOps(
   const mint = idFactory(request.source || '')
 
   if (action === 'new_app') {
-    const built = buildNewApp(instruction, request, mint)
-    const stages = narrateApp(built.title, built.sections)
+    const built = buildNewApp(instruction, request, mint, evergreenContext)
+    const stages = narrateApp(built.title, built.sections, evergreenContext)
     return {
       proposal: makeProposal(
         request,
-        `Built “${built.title}” as a new .mrbl app.`,
+        `Built “${built.title}” following ${DOCUMENT_DESIGN_SYSTEM_SLUG}.mrbl and ${DOCUMENT_DONTS_SYSTEM_SLUG}.mrbl.`,
         stages,
         [],
+        evergreenContext,
       ),
       stages,
       newDocument: built.document,
+      evergreenContext,
       source: 'synthesizer',
     }
   }
 
   const structured =
     action === 'dtrt' || action === 'factory'
-      ? tryStructuredInsert(nodes, mint, instruction)
+      ? tryStructuredInsert(nodes, mint, instruction, evergreenContext)
       : null
   const drafted =
     structured ??
-    draftForAction(action, nodes, mint, instruction, selected, sketches)
-  const stages = commitStages(request.source, drafted.stages)
+    draftForAction(
+      action,
+      nodes,
+      mint,
+      instruction,
+      selected,
+      sketches,
+      evergreenContext,
+    )
+  const sanitizedStages = drafted.stages.map((stage) => ({
+    ...stage,
+    ops: sanitizeOpsWithEvergreen(stage.ops, evergreenContext),
+  }))
+  const stages = commitStages(request.source, sanitizedStages)
   const targetIds = drafted.targetIds.length
     ? drafted.targetIds
     : stages.flatMap((stage) => idsTouched(stage.ops))
   return {
-    proposal: makeProposal(request, drafted.note, stages, unique(targetIds)),
+    proposal: makeProposal(
+      request,
+      drafted.note,
+      stages,
+      unique(targetIds),
+      evergreenContext,
+    ),
     stages,
+    evergreenContext,
     source: 'synthesizer',
   }
 }
@@ -145,19 +367,21 @@ function draftForAction(
   instruction: string,
   selected: SelectedMarbleElement[],
   sketches: SketchAnnotation[],
+  evergreenContext: EvergreenDesignContext,
 ): {
   note: string
   stages: NonNullable<AIMessage['stages']>
   targetIds: string[]
 } {
   if (action === 'fork_alt')
-    return draftFork(nodes, mint, instruction, selected)
-  if (action === 'scale') return draftScale(nodes, mint, instruction, selected)
+    return draftFork(nodes, mint, instruction, selected, evergreenContext)
+  if (action === 'scale')
+    return draftScale(nodes, mint, instruction, selected, evergreenContext)
   if (action === 'factory')
-    return draftFactory(nodes, mint, instruction, selected)
+    return draftFactory(nodes, mint, instruction, selected, evergreenContext)
   if (action === 'sketch_build')
-    return draftSketch(nodes, mint, sketches, instruction)
-  return draftDtrt(nodes, instruction, selected, sketches)
+    return draftSketch(nodes, mint, sketches, instruction, evergreenContext)
+  return draftDtrt(nodes, instruction, selected, sketches, evergreenContext)
 }
 
 function draftDtrt(
@@ -165,6 +389,7 @@ function draftDtrt(
   instruction: string,
   selected: SelectedMarbleElement[],
   sketches: SketchAnnotation[],
+  evergreenContext: EvergreenDesignContext,
 ): {
   note: string
   stages: NonNullable<AIMessage['stages']>
@@ -179,9 +404,9 @@ function draftDtrt(
   const rewrites = leaves
     .map((node) => {
       const hint = sketchHint(sketches, node.id)
-      const text = rewriteText(
-        node.text,
-        hint ? `${instruction} ${hint}` : instruction,
+      const text = sanitizeTextWithDonts(
+        rewriteText(node.text, hint ? `${instruction} ${hint}` : instruction),
+        evergreenContext,
       )
       return text && text !== node.text.replace(/\s+/g, ' ').trim()
         ? { node, text }
@@ -192,8 +417,10 @@ function draftDtrt(
     )
 
   if (!rewrites.length && leaves[0]) {
-    const text =
-      `${leaves[0].text.replace(/\s+/g, ' ').trim()} ${closingClause(instruction)}`.trim()
+    const text = sanitizeTextWithDonts(
+      `${leaves[0].text.replace(/\s+/g, ' ').trim()} ${closingClause(instruction)}`.trim(),
+      evergreenContext,
+    )
     rewrites.push({ node: leaves[0], text })
   }
 
@@ -223,7 +450,7 @@ function draftDtrt(
     {
       stageNumber: 3,
       totalStages: 3,
-      note: 'Stage 3 of 3: mark the passage as reviewed in the file.',
+      note: 'Stage 3 of 3: verify against document-design-system and document-donts-system.',
       ops: first
         ? [
             {
@@ -251,6 +478,7 @@ function draftScale(
   mint: () => string,
   instruction: string,
   selected: SelectedMarbleElement[],
+  evergreenContext: EvergreenDesignContext,
 ): {
   note: string
   stages: NonNullable<AIMessage['stages']>
@@ -258,16 +486,18 @@ function draftScale(
 } {
   const seed = pickSeed(nodes, selected)
   if (!seed || !seed.parentId) {
-    return draftDtrt(nodes, instruction, selected, [])
+    return draftDtrt(nodes, instruction, selected, [], evergreenContext)
   }
   const count = requestedCount(instruction)
   const ops: MarbleOp[] = []
   const ids: string[] = []
   for (let index = 0; index < count; index += 1) {
-    const html = suffixCopy(renewIds(seed.sourceSlice, mint), index + 2)
+    const html = sanitizeHtmlWithEvergreenRules(
+      suffixCopy(renewIds(seed.sourceSlice, mint), index + 2),
+      evergreenContext,
+    )
     const id = firstId(html)
     if (id) ids.push(id)
-    // Same beforeId each time: the next insert lands after the previous copy.
     ops.push({
       type: 'insert',
       html,
@@ -294,6 +524,7 @@ function draftFactory(
   mint: () => string,
   instruction: string,
   selected: SelectedMarbleElement[],
+  evergreenContext: EvergreenDesignContext,
 ): {
   note: string
   stages: NonNullable<AIMessage['stages']>
@@ -303,7 +534,7 @@ function draftFactory(
   const parent = seed?.parentId
     ? nodes.find((node) => node.id === seed.parentId)
     : nodes.find((node) => node.affordances.includes('sortable'))
-  if (!parent) return draftDtrt(nodes, instruction, selected, [])
+  if (!parent) return draftDtrt(nodes, instruction, selected, [], evergreenContext)
   const templateId = mint()
   const buttonId = mint()
   const list = parent.affordances.includes('sortable')
@@ -312,10 +543,10 @@ function draftFactory(
   const hostId = list.parentId ?? list.id
   const beforeId = list.parentId ? list.nextId : null
   const cleanTemplate = `<template data-marble-id="${templateId}" id="${templateId}">${stamp(
-    '<section data-marble-id="__" data-marble-removable data-marble-selectable><h3 data-marble-id="__" data-marble-editable>New item</h3><p data-marble-id="__" data-marble-editable>Name the thing this button adds.</p></section>',
+    '<section class="block" data-marble-id="__" data-marble-removable data-marble-selectable><h3 data-marble-id="__" data-marble-editable>New item</h3><p data-marble-id="__" data-marble-editable>Name the claim or record this button adds.</p></section>',
     mint,
   )}</template>`
-  const buttonHtml = `<button data-marble-id="${buttonId}" type="button" data-marble-add="#${templateId}" data-marble-into="#${list.id}">+ Add</button>`
+  const buttonHtml = `<button data-marble-id="${buttonId}" class="add" type="button" data-marble-add="#${templateId}" data-marble-into="#${list.id}">+ Add</button>`
   return {
     note: `Added an adder for ${list.tagName} “${clip(list.text)}”.`,
     targetIds: [list.id, templateId, buttonId],
@@ -339,12 +570,12 @@ function draftFactory(
       {
         stageNumber: 3,
         totalStages: 3,
-        note: 'Stage 3 of 3: label the button from the instruction.',
+        note: 'Stage 3 of 3: label the button in plain active voice.',
         ops: [
           {
             type: 'setText',
             id: buttonId,
-            text: buttonLabel(instruction),
+            text: sanitizeTextWithDonts(buttonLabel(instruction), evergreenContext),
           },
         ],
         completed: false,
@@ -358,6 +589,7 @@ function draftFork(
   mint: () => string,
   instruction: string,
   selected: SelectedMarbleElement[],
+  evergreenContext: EvergreenDesignContext,
 ): {
   note: string
   stages: NonNullable<AIMessage['stages']>
@@ -365,11 +597,13 @@ function draftFork(
 } {
   const seed =
     pickSeed(nodes, selected) ?? nodes.find((node) => node.tagName === 'h1')
-  if (!seed) return draftDtrt(nodes, instruction, selected, [])
+  if (!seed) return draftDtrt(nodes, instruction, selected, [], evergreenContext)
   const parent = seed.parentId
     ? nodes.find((node) => node.id === seed.parentId)
     : undefined
-  const [second, third] = reframings(seed.text, instruction)
+  const [second, third] = reframings(seed.text, instruction).map((item) =>
+    sanitizeTextWithDonts(item, evergreenContext),
+  ) as [string, string]
 
   if (parent?.tagName === 'marble-alt') {
     const version = nextVersion(parent.sourceSlice)
@@ -414,13 +648,13 @@ function draftFork(
     }
   }
 
-  if (!seed.parentId) return draftDtrt(nodes, instruction, selected, [])
+  if (!seed.parentId)
+    return draftDtrt(nodes, instruction, selected, [], evergreenContext)
   const altId = mint()
   const variant = replaceFirstText(
     withAttr(renewIds(seed.sourceSlice, mint), 'data-marble-alt', 'v2'),
     second,
   )
-  // v1 keeps the original ids so the move does not duplicate them. The variant is the insert.
   const shell = `<marble-alt data-marble-id="${altId}" data-marble-active="v1"></marble-alt>`
   return {
     note: `Forked “${clip(seed.text)}” into a marble-alt.`,
@@ -487,6 +721,7 @@ function draftSketch(
   mint: () => string,
   sketches: SketchAnnotation[],
   instruction: string,
+  evergreenContext: EvergreenDesignContext,
 ): {
   note: string
   stages: NonNullable<AIMessage['stages']>
@@ -501,7 +736,7 @@ function draftSketch(
           label: instruction,
           boundingBox: { x: 0, y: 0, width: 0, height: 0 },
           coveredNodeIds: [],
-          color: '#1f4b99',
+          color: '#5e6ad2',
         },
       ]
   const ops: MarbleOp[] = []
@@ -523,8 +758,12 @@ function draftSketch(
       ops.push({ type: 'remove', id: marked.id })
       continue
     }
+    const cleanNote = sanitizeTextWithDonts(
+      sketch.label || instruction,
+      evergreenContext,
+    )
     const html = stamp(
-      `<aside data-marble-id="__" data-marble-note data-marble-removable><p data-marble-id="__" data-marble-note-body data-marble-editable>${escapeText(sketch.label || instruction)}</p></aside>`,
+      `<aside data-marble-id="__" class="margin" data-marble-note data-marble-removable><p data-marble-id="__" data-marble-note-body data-marble-editable>${escapeText(cleanNote)}</p></aside>`,
       mint,
     )
     ops.push({ type: 'insert', html, parentId: host.id, beforeId: null })
@@ -534,7 +773,10 @@ function draftSketch(
       sketch.label &&
       !/^\s*(remove|delete|drop)\b/i.test(sketch.label)
     ) {
-      const text = rewriteText(leaf.text, sketch.label)
+      const text = sanitizeTextWithDonts(
+        rewriteText(leaf.text, sketch.label),
+        evergreenContext,
+      )
       if (text && text !== leaf.text.trim())
         ops.push({ type: 'setText', id: leaf.id, text })
     }
@@ -557,6 +799,7 @@ function tryStructuredInsert(
   nodes: MarbleNodeRecord[],
   mint: () => string,
   instruction: string,
+  evergreenContext: EvergreenDesignContext,
 ): {
   note: string
   stages: NonNullable<AIMessage['stages']>
@@ -568,8 +811,9 @@ function tryStructuredInsert(
   if (!match && !/^\s*add\b/i.test(instruction)) return null
   const kind = (match?.[1] || kindFrom(instruction) || '').toLowerCase()
   if (!kind) return null
-  const title = cleanTitle(
-    match?.[2] || quoted(instruction) || defaultTitle(kind),
+  const title = sanitizeTextWithDonts(
+    cleanTitle(match?.[2] || quoted(instruction) || defaultTitle(kind)),
+    evergreenContext,
   )
   const group = groupFor(kind)
   const container =
@@ -585,7 +829,7 @@ function tryStructuredInsert(
   const ids: string[] = []
   for (let index = 0; index < count; index += 1) {
     const label = count > 1 ? `${title} ${index + 1}` : title
-    const html = blockFor(kind, label, instruction, mint)
+    const html = blockFor(kind, label, instruction, mint, evergreenContext)
     const id = firstId(html)
     if (id) ids.push(id)
     ops.push({ type: 'insert', html, parentId: container.id, beforeId: null })
@@ -599,7 +843,7 @@ function tryStructuredInsert(
       totalStages: Math.max(3, chunks.length),
       note:
         index === chunks.length - 1
-          ? `Stage ${index + 1} of ${chunks.length}: the new ${kind} is in the list.`
+          ? `Stage ${index + 1} of ${chunks.length}: verified new ${kind} against document-design-system and document-donts-system.`
           : `Stage ${index + 1} of ${chunks.length}: insert the next ${kind}.`,
       ops: part,
       completed: false,
@@ -612,12 +856,15 @@ function blockFor(
   title: string,
   instruction: string,
   mint: () => string,
+  evergreenContext: EvergreenDesignContext,
 ): string {
-  const safe = escapeText(title)
-  const body = escapeText(closingClause(instruction))
+  const safe = escapeText(sanitizeTextWithDonts(title, evergreenContext))
+  const body = escapeText(
+    sanitizeTextWithDonts(closingClause(instruction), evergreenContext),
+  )
   if (kind === 'citation') {
     return stamp(
-      `<li data-marble-id="__" data-marble-removable><span data-marble-id="__" data-marble-editable>${safe}</span><span data-marble-id="__" data-marble-editable>${body}</span></li>`,
+      `<li data-marble-id="__" data-marble-removable><span data-marble-id="__" class="key" data-marble-editable>${safe}</span><span data-marble-id="__" data-marble-editable>${body}</span></li>`,
       mint,
     )
   }
@@ -640,7 +887,7 @@ function blockFor(
     )
   }
   return stamp(
-    `<section data-marble-id="__" data-marble-removable data-marble-selectable><h2 data-marble-id="__" data-marble-editable>${safe}</h2><p data-marble-id="__" data-marble-editable>${body}</p></section>`,
+    `<section data-marble-id="__" class="block" data-marble-removable data-marble-selectable><h2 data-marble-id="__" data-marble-editable>${safe}</h2><p data-marble-id="__" data-marble-editable>${body}</p></section>`,
     mint,
   )
 }
@@ -674,13 +921,25 @@ function buildNewApp(
   instruction: string,
   request: CollaborationRequest,
   mint: () => string,
+  evergreenContext: EvergreenDesignContext,
 ): { title: string; sections: string[]; document: MarbleDocumentFile } {
-  const title = inferTitle(instruction)
-  const sections = inferSections(instruction)
+  const title = sanitizeTextWithDonts(
+    inferTitle(instruction),
+    evergreenContext,
+  )
+  const sections = inferSections(instruction).map((item) =>
+    sanitizeTextWithDonts(item, evergreenContext),
+  )
   const author = 'You'
   const now = new Date().toISOString()
   const slug = slugify(title)
-  const source = newAppSource(title, instruction, sections, mint)
+  const source = newAppSource(
+    title,
+    instruction,
+    sections,
+    mint,
+    evergreenContext,
+  )
   const document: MarbleDocumentFile = {
     id: `doc-${mint()}`,
     slug,
@@ -710,7 +969,12 @@ function buildNewApp(
     },
     starred: false,
     pinned: false,
-    tags: ['generated', request.providerId],
+    tags: [
+      'generated',
+      request.providerId,
+      DOCUMENT_DESIGN_SYSTEM_SLUG,
+      DOCUMENT_DONTS_SYSTEM_SLUG,
+    ],
     folder: 'Drafts',
     share: emptyShare(slug),
     checkpoints: [],
@@ -722,33 +986,34 @@ function buildNewApp(
 function narrateApp(
   title: string,
   sections: string[],
+  evergreenContext: EvergreenDesignContext,
 ): NonNullable<AIMessage['stages']> {
   return [
     {
       stageNumber: 1,
       totalStages: 4,
-      note: `Stage 1 of 4: name the app “${title}”.`,
+      note: `Stage 1 of 4: load tokens from ${evergreenContext.designSystem.ref.fileName} and name “${title}”.`,
       ops: [],
       completed: false,
     },
     {
       stageNumber: 2,
       totalStages: 4,
-      note: `Stage 2 of 4: lay out ${sections.length} sections.`,
+      note: `Stage 2 of 4: lay out ${sections.length} hairline-divided sections.`,
       ops: [],
       completed: false,
     },
     {
       stageNumber: 3,
       totalStages: 4,
-      note: 'Stage 3 of 4: fill each section from the instruction.',
+      note: `Stage 3 of 4: apply ${evergreenContext.dontsSystem.ref.fileName} anti-slop guardrails.`,
       ops: [],
       completed: false,
     },
     {
       stageNumber: 4,
       totalStages: 4,
-      note: 'Stage 4 of 4: leave the sections editable, sortable, and removable.',
+      note: 'Stage 4 of 4: leave every section editable, sortable, and removable.',
       ops: [],
       completed: false,
     },
@@ -760,54 +1025,53 @@ function newAppSource(
   instruction: string,
   sections: string[],
   mint: () => string,
+  evergreenContext: EvergreenDesignContext,
 ): string {
   const titleId = mint()
   const ledeId = mint()
   const listId = mint()
+  const clause = escapeText(
+    sanitizeTextWithDonts(closingClause(instruction), evergreenContext),
+  )
   const blocks = sections
     .map((section) => {
       const safe = escapeText(section)
       return stamp(
-        `<section data-marble-id="__" data-marble-removable data-marble-selectable><h2 data-marble-id="__" data-marble-editable>${safe}</h2><p data-marble-id="__" data-marble-editable>${escapeText(closingClause(instruction))}</p></section>`,
+        `<section data-marble-id="__" class="block" data-marble-removable data-marble-selectable><h2 data-marble-id="__" data-marble-editable>${safe}</h2><p data-marble-id="__" data-marble-editable>${clause}</p></section>`,
         mint,
       )
     })
     .join('\n')
   const addId = mint()
   const tplId = mint()
-  return `<!doctype html>
+  const raw = `<!doctype html>
 <html lang="en" data-marble="1">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="marble:capabilities" content="storage; net=none">
+<meta name="marble:design-system" content="${DOCUMENT_DESIGN_SYSTEM_SLUG}.mrbl,${DOCUMENT_DONTS_SYSTEM_SLUG}.mrbl">
 <title>${escapeText(title)}</title>
-<style>
-:root { --ink:#1c1915; --muted:#6d655c; --line:#e4dcd2; --paper:#f4f0e8; --panel:#fffdf9; --accent:#1f4b99; --serif:Palatino,Georgia,serif; --sans:"Avenir Next",system-ui,sans-serif; }
-@media (prefers-color-scheme: dark) { :root { --ink:#efeae3; --muted:#b7aea2; --line:#34302b; --paper:#131210; --panel:#1c1a17; --accent:#9db6ff; } }
-html[data-xdrive-theme="light"] { color-scheme: light; }
-html[data-xdrive-theme="dark"] { --ink:#efeae3; --muted:#b7aea2; --line:#34302b; --paper:#131210; --panel:#1c1a17; --accent:#9db6ff; color-scheme: dark; }
-* { box-sizing: border-box; }
-body { margin: 0; background: var(--paper); color: var(--ink); font: 16px/1.55 var(--sans); }
-main { max-width: 44rem; margin: 0 auto; padding: 3rem 1.4rem 4rem; }
-h1 { font-family: var(--serif); font-size: 2.4rem; line-height: 1.05; letter-spacing: -.03em; margin: 0 0 .4rem; }
-.lede { color: var(--muted); margin: 0 0 1.6rem; }
-.sections { display: flex; flex-direction: column; gap: .7rem; }
-section { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 1rem 1.1rem; }
-h2 { font-family: var(--serif); font-size: 1.25rem; margin: 0 0 .35rem; }
-p { margin: 0; }
-button.add { margin-top: 1rem; border: 1px dashed var(--line); background: transparent; color: var(--accent); border-radius: 999px; padding: .4rem .8rem; cursor: pointer; }
+<style>${evergreenContext.designSystem.baseCss}
+main { max-width: 52rem; margin: 0 auto; padding: 2.2rem 1.5rem 4rem; }
+header.app-head { padding-bottom: 1.1rem; margin-bottom: 1.35rem; border-bottom: 1px solid var(--line); }
+h1 { margin: 0 0 .4rem; }
+.sections { display: flex; flex-direction: column; gap: .75rem; }
+button.add { margin-top: 1rem; }
 </style>
 </head>
 <body>
 <main>
-  <p data-marble-id="${mint()}" class="kicker">Generated app</p>
-  <h1 data-marble-id="${titleId}" data-marble-editable>${escapeText(title)}</h1>
-  <p data-marble-id="${ledeId}" class="lede" data-marble-editable>${escapeText(instruction.replace(/\s+/g, ' ').slice(0, 280))}</p>
+  <header class="app-head">
+    <p data-marble-id="${mint()}" class="kicker">Workspace document</p>
+    <h1 data-marble-id="${titleId}" data-marble-editable>${escapeText(title)}</h1>
+    <p data-marble-id="${ledeId}" class="lede" data-marble-editable>${escapeText(sanitizeTextWithDonts(instruction.replace(/\s+/g, ' ').slice(0, 280), evergreenContext))}</p>
+  </header>
   <div data-marble-id="${listId}" id="${listId}" class="sections" data-marble-sortable="sections">
 ${blocks}
   </div>
   <button data-marble-id="${addId}" class="add" type="button" data-marble-add="#${tplId}" data-marble-into="#${listId}">+ Add section</button>
-  <template data-marble-id="${tplId}" id="${tplId}">${stamp('<section data-marble-removable data-marble-selectable><h2 data-marble-editable>New section</h2><p data-marble-editable>Say what this section is for.</p></section>', mint)}</template>
+  <template data-marble-id="${tplId}" id="${tplId}">${stamp('<section class="block" data-marble-removable data-marble-selectable><h2 data-marble-editable>New section</h2><p data-marble-editable>State the claim, method, or observation for this section.</p></section>', mint)}</template>
 </main>
 <script>
 (function () {
@@ -816,6 +1080,23 @@ ${blocks}
     else document.addEventListener('marble:ready', function () { start(window.marble); }, { once: true });
   }
   boot(function (marble) {
+    var MID = 'data-marble-' + 'id';
+    var AFFORDANCES = [
+      'data-marble-editable',
+      'data-marble-sortable',
+      'data-marble-canvas',
+      'data-marble-resizable',
+      'data-marble-removable',
+      'data-marble-add',
+      'data-marble-toggle',
+      'data-marble-choose',
+      'data-marble-expand',
+      'data-marble-step',
+      'data-marble-note'
+    ];
+    if (marble && marble.address) {
+      marble.address(document.querySelectorAll(AFFORDANCES.map(function (a) { return '[' + a + ']'; }).join(',')));
+    }
     marble.register(function () {});
   });
 })();
@@ -823,6 +1104,7 @@ ${blocks}
 </body>
 </html>
 `
+  return sanitizeHtmlWithEvergreenRules(raw, evergreenContext)
 }
 
 function resolveTargets(
@@ -986,7 +1268,8 @@ function sketchHint(sketches: SketchAnnotation[], id: string): string {
 }
 
 function requestedCount(instruction: string): number {
-  const match = instruction.match(/\b(\d{1,2})\b/)
+  const withoutQuotes = instruction.replace(/[“"][^”"]*[”"]/g, ' ')
+  const match = withoutQuotes.match(/\b(\d{1,2})\b/)
   const value = match ? Number(match[1]) : 1
   if (!Number.isFinite(value) || value > 8 || value < 1) return 1
   return value
@@ -1146,6 +1429,7 @@ function makeProposal(
   note: string,
   stages: NonNullable<AIMessage['stages']>,
   targetIds: string[],
+  evergreenContext: EvergreenDesignContext,
 ): MarbleOpProposal {
   const ops = stages.flatMap((stage) => stage.ops)
   return {
@@ -1160,6 +1444,7 @@ function makeProposal(
     status: 'proposed',
     sketchAnnotations: request.sketchAnnotations,
     instruction: request.instruction,
+    referencedEvergreenDocs: evergreenContext.refs,
   }
 }
 
@@ -1228,6 +1513,7 @@ const STOP = new Set([
 
 async function askMarbleApi(
   request: CollaborationRequest,
+  evergreenContext: EvergreenDesignContext,
 ): Promise<CollaborationResult | null> {
   if (typeof fetch !== 'function') return null
   const controller = new AbortController()
@@ -1239,12 +1525,17 @@ async function askMarbleApi(
         'content-type': 'application/json',
         accept: 'application/json',
       },
-      body: JSON.stringify(request),
+      body: JSON.stringify({
+        ...request,
+        evergreenRefs: evergreenContext.refs,
+        designContracts: evergreenContext.designSystem.contracts,
+        dontsGuardrails: evergreenContext.dontsSystem.guardrails,
+      }),
       signal: controller.signal,
     })
     if (!response.ok) return null
     const data: unknown = await response.json()
-    return normalizeApi(data, request)
+    return normalizeApi(data, request, evergreenContext)
   } catch {
     return null
   } finally {
@@ -1255,6 +1546,7 @@ async function askMarbleApi(
 function normalizeApi(
   data: unknown,
   request: CollaborationRequest,
+  evergreenContext: EvergreenDesignContext,
 ): CollaborationResult | null {
   if (!data || typeof data !== 'object') return null
   const record = data as {
@@ -1269,31 +1561,58 @@ function normalizeApi(
     Array.isArray(record.proposal.ops) &&
     validOps(record.proposal.ops)
   ) {
-    const stages = record.stages ?? [
-      {
-        stageNumber: 1,
-        totalStages: 1,
-        note: record.proposal.note,
-        ops: record.proposal.ops,
-        completed: false,
-      },
-    ]
+    const sanitizedOps = sanitizeOpsWithEvergreen(
+      record.proposal.ops,
+      evergreenContext,
+    )
+    const stages = (
+      record.stages ?? [
+        {
+          stageNumber: 1,
+          totalStages: 1,
+          note: record.proposal.note,
+          ops: sanitizedOps,
+          completed: false,
+        },
+      ]
+    ).map((stage) => ({
+      ...stage,
+      ops: sanitizeOpsWithEvergreen(stage.ops, evergreenContext),
+    }))
     return {
-      proposal: record.proposal,
+      proposal: {
+        ...record.proposal,
+        ops: sanitizedOps,
+        referencedEvergreenDocs:
+          record.proposal.referencedEvergreenDocs ?? evergreenContext.refs,
+      },
       stages,
-      newDocument: record.newDocument,
+      newDocument: record.newDocument
+        ? {
+            ...record.newDocument,
+            source: sanitizeHtmlWithEvergreenRules(
+              record.newDocument.source,
+              evergreenContext,
+            ),
+          }
+        : undefined,
+      evergreenContext,
       source: 'api',
     }
   }
   if (Array.isArray(record.ops) && validOps(record.ops)) {
+    const sanitizedOps = sanitizeOpsWithEvergreen(record.ops, evergreenContext)
     const stages = record.stages?.length
-      ? record.stages
+      ? record.stages.map((stage) => ({
+          ...stage,
+          ops: sanitizeOpsWithEvergreen(stage.ops, evergreenContext),
+        }))
       : [
           {
             stageNumber: 1,
             totalStages: 1,
             note: record.note || request.instruction,
-            ops: record.ops,
+            ops: sanitizedOps,
             completed: false,
           },
         ]
@@ -1302,24 +1621,46 @@ function normalizeApi(
         request,
         record.note || request.instruction,
         stages,
-        idsTouched(record.ops),
+        idsTouched(sanitizedOps),
+        evergreenContext,
       ),
       stages,
-      newDocument: record.newDocument,
+      newDocument: record.newDocument
+        ? {
+            ...record.newDocument,
+            source: sanitizeHtmlWithEvergreenRules(
+              record.newDocument.source,
+              evergreenContext,
+            ),
+          }
+        : undefined,
+      evergreenContext,
       source: 'api',
     }
   }
   if (record.newDocument?.source) {
-    const stages = narrateApp(record.newDocument.title || 'New app', [])
+    const stages = narrateApp(
+      record.newDocument.title || 'New app',
+      [],
+      evergreenContext,
+    )
     return {
       proposal: makeProposal(
         request,
         record.note || `Built ${record.newDocument.title}.`,
         stages,
         [],
+        evergreenContext,
       ),
       stages,
-      newDocument: record.newDocument,
+      newDocument: {
+        ...record.newDocument,
+        source: sanitizeHtmlWithEvergreenRules(
+          record.newDocument.source,
+          evergreenContext,
+        ),
+      },
+      evergreenContext,
       source: 'api',
     }
   }

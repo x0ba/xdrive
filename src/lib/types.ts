@@ -22,6 +22,13 @@ export interface MarbleOp {
   look?: boolean
 }
 
+export interface EvergreenDocRef {
+  slug: string
+  fileName: string
+  title: string
+  ruleCount: number
+}
+
 export interface MarbleOpProposal {
   id: string
   note: string
@@ -36,6 +43,7 @@ export interface MarbleOpProposal {
   sketchDataUrl?: string
   sketchAnnotations?: SketchAnnotation[]
   instruction: string
+  referencedEvergreenDocs?: EvergreenDocRef[]
 }
 
 export type MarbleAppCategory =
@@ -93,6 +101,7 @@ export interface MarbleDocumentFile {
   description: string
   category: MarbleAppCategory
   isTemplate: boolean
+  isEvergreen?: boolean
   templateId?: string
   source: string // Full valid .mrbl HTML5 source code
   nodeCount: number // Count of data-marble-id elements

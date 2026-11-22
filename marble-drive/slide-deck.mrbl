@@ -4,24 +4,42 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="marble:capabilities" content="storage; net=none">
+<meta name="marble:design-system" content="document-design-system.mrbl,document-donts-system.mrbl">
 <title>Interactive Research Slideshow</title>
 <style>
-:root { --ink:#1c1915;--muted:#6d655c;--faint:#8d8478;--line:#e4dcd2;--paper:#f3efe7;--panel:#fffdf9;--panel-2:#f4efe6;--accent:#1f4b99;--accent-2:#1f7a4d;--accent-soft:#e6eefb;--good:#1e7a46;--warn:#9a5b12;--danger:#9d2c2c;--shadow:0 18px 40px rgba(48,36,22,.08);--serif:"Iowan Old Style",Palatino,"Palatino Linotype",Georgia,serif;--sans:"Avenir Next","Segoe UI",system-ui,sans-serif;--mono:"IBM Plex Mono",ui-monospace,SFMono-Regular,Menlo,monospace; }
-@media (prefers-color-scheme: dark) { :root { --ink:#efeae3;--muted:#b7aea2;--faint:#8f867b;--line:#34302b;--paper:#131210;--panel:#1c1a17;--panel-2:#26231f;--accent:#9db6ff;--accent-2:#8ed0b0;--accent-soft:#243156;--good:#8ed0b0;--warn:#e2b56a;--danger:#f0a3a3;--shadow:0 18px 40px rgba(0,0,0,.35); } }
-html[data-xdrive-theme="light"] { --ink:#1c1915;--muted:#6d655c;--faint:#8d8478;--line:#e4dcd2;--paper:#f3efe7;--panel:#fffdf9;--panel-2:#f4efe6;--accent:#1f4b99;--accent-2:#1f7a4d;--accent-soft:#e6eefb;--good:#1e7a46;--warn:#9a5b12;--danger:#9d2c2c;--shadow:0 18px 40px rgba(48,36,22,.08);--serif:"Iowan Old Style",Palatino,"Palatino Linotype",Georgia,serif;--sans:"Avenir Next","Segoe UI",system-ui,sans-serif;--mono:"IBM Plex Mono",ui-monospace,SFMono-Regular,Menlo,monospace; color-scheme: light; }
-html[data-xdrive-theme="dark"] { --ink:#efeae3;--muted:#b7aea2;--faint:#8f867b;--line:#34302b;--paper:#131210;--panel:#1c1a17;--panel-2:#26231f;--accent:#9db6ff;--accent-2:#8ed0b0;--accent-soft:#243156;--good:#8ed0b0;--warn:#e2b56a;--danger:#f0a3a3;--shadow:0 18px 40px rgba(0,0,0,.35); color-scheme: dark; }
+:root { --xd-canvas:#ffffff;--xd-rail:#f7f8fa;--xd-elevated:#f1f3f7;--xd-surface-hover:#eaeef4;--xd-surface-active:#e2e7f0;--xd-ink:#0f131a;--xd-ink-secondary:#4a5568;--xd-ink-muted:#718096;--xd-border:#e3e8ee;--xd-border-strong:#cbd5e1;--xd-accent:#5e6ad2;--xd-accent-hover:#4e5ac0;--xd-accent-soft:rgba(94,106,210,0.12);--xd-accent-border:rgba(94,106,210,0.35);--xd-commit:#1f9d6b;--xd-commit-soft:rgba(31,157,107,0.12);--xd-sketch:#d9822b;--xd-sketch-soft:rgba(217,130,43,0.14);--xd-danger:#e5484d;--xd-danger-soft:rgba(229,72,77,0.12);--ink:#0f131a;--muted:#4a5568;--faint:#718096;--line:#e3e8ee;--line-strong:#cbd5e1;--paper:#ffffff;--panel:#f7f8fa;--panel-2:#f1f3f7;--accent:#5e6ad2;--accent-2:#1f9d6b;--accent-soft:rgba(94,106,210,0.12);--good:#1f9d6b;--warn:#d9822b;--danger:#e5484d;--radius:6px;--shadow:none;--serif:"Newsreader",Georgia,Cambria,"Times New Roman",serif;--sans:"Inter",-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;--mono:"JetBrains Mono",ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace; }
+@media (prefers-color-scheme: dark) { :root { --xd-canvas:#0b0c0e;--xd-rail:#101216;--xd-elevated:#161920;--xd-surface-hover:#1c2029;--xd-surface-active:#232834;--xd-ink:#f3f5f8;--xd-ink-secondary:#a2abb8;--xd-ink-muted:#6e7785;--xd-border:#22252e;--xd-border-strong:#313644;--xd-accent:#5e6ad2;--xd-accent-hover:#6e7ae2;--xd-accent-soft:rgba(94,106,210,0.16);--xd-accent-border:rgba(94,106,210,0.45);--xd-commit:#2ea071;--xd-commit-soft:rgba(46,160,113,0.16);--xd-sketch:#e59934;--xd-sketch-soft:rgba(229,153,52,0.18);--xd-danger:#e5484d;--xd-danger-soft:rgba(229,72,77,0.16);--ink:#f3f5f8;--muted:#a2abb8;--faint:#6e7785;--line:#22252e;--line-strong:#313644;--paper:#0b0c0e;--panel:#101216;--panel-2:#161920;--accent:#5e6ad2;--accent-2:#2ea071;--accent-soft:rgba(94,106,210,0.16);--good:#2ea071;--warn:#e59934;--danger:#e5484d;--radius:6px;--shadow:none; } }
+html[data-xdrive-theme="light"] { --xd-canvas:#ffffff;--xd-rail:#f7f8fa;--xd-elevated:#f1f3f7;--xd-surface-hover:#eaeef4;--xd-surface-active:#e2e7f0;--xd-ink:#0f131a;--xd-ink-secondary:#4a5568;--xd-ink-muted:#718096;--xd-border:#e3e8ee;--xd-border-strong:#cbd5e1;--xd-accent:#5e6ad2;--xd-accent-hover:#4e5ac0;--xd-accent-soft:rgba(94,106,210,0.12);--xd-accent-border:rgba(94,106,210,0.35);--xd-commit:#1f9d6b;--xd-commit-soft:rgba(31,157,107,0.12);--xd-sketch:#d9822b;--xd-sketch-soft:rgba(217,130,43,0.14);--xd-danger:#e5484d;--xd-danger-soft:rgba(229,72,77,0.12);--ink:#0f131a;--muted:#4a5568;--faint:#718096;--line:#e3e8ee;--line-strong:#cbd5e1;--paper:#ffffff;--panel:#f7f8fa;--panel-2:#f1f3f7;--accent:#5e6ad2;--accent-2:#1f9d6b;--accent-soft:rgba(94,106,210,0.12);--good:#1f9d6b;--warn:#d9822b;--danger:#e5484d;--radius:6px;--shadow:none;--serif:"Newsreader",Georgia,Cambria,"Times New Roman",serif;--sans:"Inter",-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;--mono:"JetBrains Mono",ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace; color-scheme: light; }
+html[data-xdrive-theme="dark"] { --xd-canvas:#0b0c0e;--xd-rail:#101216;--xd-elevated:#161920;--xd-surface-hover:#1c2029;--xd-surface-active:#232834;--xd-ink:#f3f5f8;--xd-ink-secondary:#a2abb8;--xd-ink-muted:#6e7785;--xd-border:#22252e;--xd-border-strong:#313644;--xd-accent:#5e6ad2;--xd-accent-hover:#6e7ae2;--xd-accent-soft:rgba(94,106,210,0.16);--xd-accent-border:rgba(94,106,210,0.45);--xd-commit:#2ea071;--xd-commit-soft:rgba(46,160,113,0.16);--xd-sketch:#e59934;--xd-sketch-soft:rgba(229,153,52,0.18);--xd-danger:#e5484d;--xd-danger-soft:rgba(229,72,77,0.16);--ink:#f3f5f8;--muted:#a2abb8;--faint:#6e7785;--line:#22252e;--line-strong:#313644;--paper:#0b0c0e;--panel:#101216;--panel-2:#161920;--accent:#5e6ad2;--accent-2:#2ea071;--accent-soft:rgba(94,106,210,0.16);--good:#2ea071;--warn:#e59934;--danger:#e5484d;--radius:6px;--shadow:none; color-scheme: dark; }
 * { box-sizing: border-box; }
 html, body { margin: 0; min-height: 100%; }
-body { background: var(--paper); color: var(--ink); font: 16px/1.55 var(--sans); -webkit-font-smoothing: antialiased; }
-button, input { font: inherit; color: inherit; }
+body {
+  background: var(--paper); color: var(--ink);
+  font: 14.5px/1.6 var(--sans); letter-spacing: -0.006em;
+  -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale;
+}
+button, input, select, textarea { font: inherit; color: inherit; }
 button { cursor: pointer; }
-:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+:focus-visible { outline: 1.5px solid var(--accent); outline-offset: 2px; }
 [data-marble-editable]:focus { outline: none; box-shadow: inset 0 -1.5px 0 var(--accent); }
-.kicker { margin: 0 0 .35rem; color: var(--accent); font: 600 .72rem/1 var(--mono); letter-spacing: .14em; text-transform: uppercase; }
-h1 { font-family: var(--serif); font-weight: 560; letter-spacing: -.03em; line-height: 1.05; margin: 0; }
-h2 { font-family: var(--serif); font-size: 1.35rem; font-weight: 560; letter-spacing: -.02em; margin: 0 0 .4rem; }
-p { margin: 0; }
-.lede { color: var(--muted); max-width: 40rem; }
+.kicker {
+  margin: 0 0 .3rem; color: var(--muted);
+  font: 500 .78rem/1.4 var(--sans); letter-spacing: -0.004em; text-transform: none;
+}
+h1 {
+  font-family: var(--serif); font-size: 2rem; font-weight: 500;
+  letter-spacing: -0.024em; line-height: 1.12; margin: 0; color: var(--ink);
+}
+h2 {
+  font-family: var(--serif); font-size: 1.25rem; font-weight: 500;
+  letter-spacing: -0.016em; line-height: 1.24; margin: 0 0 .4rem; color: var(--ink);
+}
+h3 {
+  font-family: var(--sans); font-size: .92rem; font-weight: 600;
+  letter-spacing: -0.01em; line-height: 1.35; margin: 0 0 .3rem; color: var(--ink);
+}
+p { margin: 0; max-width: 68ch; }
+.lede { color: var(--muted); max-width: 62ch; font-size: .96rem; line-height: 1.6; }
 marble-alt { display: block; }
 marble-alt > [data-marble-alt] { display: none; }
 marble-alt[data-marble-active="v1"] > [data-marble-alt="v1"],
@@ -33,38 +51,43 @@ marble-alt[data-marble-active="v6"] > [data-marble-alt="v6"] { display: block; }
 marble-alt:not([data-marble-active]) > [data-marble-alt]:first-child { display: block; }
 [data-marble-sortable] { padding-left: 1.4rem; }
 .pill, .choose button, .tex-edit, .add {
-  border: 1px solid var(--line); background: var(--panel); border-radius: 999px;
-  padding: .18rem .65rem; font: 600 .75rem/1.4 var(--sans);
+  border: 1px solid var(--line); background: var(--panel); border-radius: 4px;
+  padding: .2rem .55rem; font: 500 .76rem/1.35 var(--sans); color: var(--muted);
+  transition: border-color 120ms ease, color 120ms ease, background-color 120ms ease;
 }
-.choose { display: inline-flex; gap: .25rem; flex-wrap: wrap; }
-.choose button[aria-pressed="true"] { background: var(--accent); color: #fff; border-color: transparent; }
+.pill:hover, .choose button:hover, .tex-edit:hover, .add:hover {
+  border-color: var(--line-strong); color: var(--ink);
+}
+.choose { display: inline-flex; gap: .2rem; flex-wrap: wrap; padding: 2px; border: 1px solid var(--line); border-radius: 6px; background: var(--panel); }
+.choose button { border-color: transparent; background: transparent; }
+.choose button[aria-pressed="true"] { background: var(--paper); color: var(--ink); border-color: var(--line); }
 .add { border-style: dashed; color: var(--accent); background: transparent; }
 .card, section.block {
-  background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 1rem 1.1rem;
-  box-shadow: var(--shadow);
+  background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius);
+  padding: .95rem 1.1rem; box-shadow: none;
 }
 
 
-  .deck { display: grid; grid-template-columns: 13rem 1fr; min-height: 100vh; }
-  .film { background: var(--panel-2); border-right: 1px solid var(--line); padding: 1rem .8rem 2rem; }
+  .deck { display: grid; grid-template-columns: 14rem 1fr; min-height: 100vh; }
+  .film { background: var(--panel); border-right: 1px solid var(--line); padding: 1.15rem .9rem 2rem; }
   .film h1 { font-size: 1.15rem; margin: .2rem 0 .8rem; }
-  .filmstrip { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: .35rem; }
-  .filmstrip li { padding: .5rem .6rem; border-radius: 10px; background: transparent; }
-  .filmstrip li.marble-on, .deck:not(.marble-derived) .filmstrip li:first-child { background: var(--panel); box-shadow: var(--shadow); }
-  .stage-wrap { padding: 1.2rem; background: #221e1a; }
+  .filmstrip { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: .25rem; }
+  .filmstrip li { padding: .45rem .6rem; border-radius: 5px; border: 1px solid transparent; background: transparent; font-size: .85rem; color: var(--muted); }
+  .filmstrip li.marble-on, .deck:not(.marble-derived) .filmstrip li:first-child { background: var(--panel-2); border-color: var(--line); color: var(--ink); font-weight: 500; }
+  .stage-wrap { padding: 1.5rem; background: var(--paper); }
   .slide { display: none; }
-  .deck.marble-derived .slide.marble-on { display: block; }
+  .deck.marble-derived .slide.marble-on { display: flex; }
   .deck:not(.marble-derived) .slide { display: none; }
-  .deck:not(.marble-derived) .slide[data-slide="slide-title"] { display: block; }
-  .card { background: #f7f3ec; color: #1c1915; border-radius: 16px; min-height: 26rem; padding: 1.8rem 1.8rem 1rem; display: flex; flex-direction: column; }
-  .card h1, .card h2 { color: #1c1915; }
-  .card .speaker { margin-top: auto; padding-top: .8rem; border-top: 1px solid #e4dcd2; color: #6d655c; font-size: .85rem; }
-  .pane-title:has(marble-alt[data-marble-active="v1"]) h1 { text-align: center; font-size: 2.6rem; margin-top: 4rem; }
+  .deck:not(.marble-derived) .slide[data-slide="slide-title"] { display: flex; }
+  .card { background: var(--panel); color: var(--ink); border: 1px solid var(--line); border-radius: var(--radius); min-height: 26rem; padding: 2rem 2rem 1.2rem; flex-direction: column; box-shadow: none; }
+  .card h1, .card h2 { color: var(--ink); }
+  .card .speaker { margin-top: auto; padding-top: .8rem; border-top: 1px solid var(--line); color: var(--muted); font-size: .84rem; }
+  .pane-title:has(marble-alt[data-marble-active="v1"]) h2 { font-size: 2.1rem; margin-top: 1.5rem; }
   .pane-title:has(marble-alt[data-marble-active="v2"]) { display: grid; grid-template-columns: 1.2fr .8fr; gap: 1rem; align-items: end; }
-  .pane-title:has(marble-alt[data-marble-active="v3"]) h1 { font-size: 1.7rem; }
-  .arch { display: grid; grid-template-columns: repeat(3, 1fr); gap: .6rem; margin-top: 1rem; }
-  .arch section { background: #fff; border: 1px solid #e4dcd2; border-radius: 12px; padding: .8rem; color: #1c1915; }
-  .nexts { margin: .8rem 0 0; padding-left: 1.1rem; }
+  .pane-title:has(marble-alt[data-marble-active="v3"]) h2 { font-size: 1.65rem; }
+  .arch { display: grid; grid-template-columns: repeat(3, 1fr); gap: .65rem; margin-top: 1rem; }
+  .arch section { background: var(--paper); border: 1px solid var(--line); border-radius: 5px; padding: .85rem; color: var(--ink); }
+  .nexts { margin: .8rem 0 0; padding-left: 1.1rem; display: flex; flex-direction: column; gap: .35rem; }
   .add { margin-top: .8rem; }
   @media (max-width: 800px) { .deck { grid-template-columns: 1fr; } .arch { grid-template-columns: 1fr; } }
   </style>
@@ -89,12 +112,12 @@ marble-alt:not([data-marble-active]) > [data-marble-alt]:first-child { display: 
   <div data-marble-id="slide-stage" id="slide-stage" class="stage-wrap">
     <section data-marble-id="pane-title" class="slide card pane-title" data-slide="slide-title">
       <marble-alt data-marble-id="title-layout" data-marble-active="v1">
-        <p data-marble-id="layout-v1" data-marble-alt="v1" class="kicker" data-marble-editable>Centered</p>
-        <p data-marble-id="layout-v2" data-marble-alt="v2" class="kicker" data-marble-editable>Split</p>
-        <p data-marble-id="layout-v3" data-marble-alt="v3" class="kicker" data-marble-editable>Kicker</p>
+        <p data-marble-id="layout-v1" data-marble-alt="v1" class="kicker" data-marble-editable>Layout: focus</p>
+        <p data-marble-id="layout-v2" data-marble-alt="v2" class="kicker" data-marble-editable>Layout: split</p>
+        <p data-marble-id="layout-v3" data-marble-alt="v3" class="kicker" data-marble-editable>Layout: compact</p>
       </marble-alt>
       <h2 data-marble-id="slide-hero" data-marble-editable>A logical memory you can check</h2>
-      <p data-marble-id="slide-sub" data-marble-editable>Threshold, scaling, and the decoder we froze before the sweep.</p>
+      <p data-marble-id="slide-sub" class="lede" data-marble-editable>Threshold, scaling, and the decoder we froze before the sweep.</p>
       <p data-marble-id="notes-title" class="speaker" data-marble-editable>Open on the claim, not the architecture. The layout pills only change where the eye lands.</p>
     </section>
     <section data-marble-id="pane-arch" class="slide card" data-slide="slide-arch">
@@ -118,20 +141,20 @@ marble-alt:not([data-marble-active]) > [data-marble-alt]:first-child { display: 
     <section data-marble-id="pane-bench" class="slide card" data-slide="slide-bench">
       <h2 data-marble-id="bench-h" data-marble-editable>Benchmark</h2>
       <svg data-marble-id="bench-svg" viewBox="0 0 520 180" width="100%" height="180" role="img" aria-label="Logical error by distance">
-        <line x1="40" y1="150" x2="490" y2="150" stroke="#1c1915" opacity="0.3"/>
-        <rect x="70" y="70" width="48" height="80" rx="6" fill="#1f4b99"/>
-        <rect x="180" y="46" width="48" height="104" rx="6" fill="#1f4b99"/>
-        <rect x="290" y="28" width="48" height="122" rx="6" fill="#1f7a4d"/>
-        <text x="94" y="168" text-anchor="middle" font-size="12" fill="#1c1915">d=3</text>
-        <text x="204" y="168" text-anchor="middle" font-size="12" fill="#1c1915">d=5</text>
-        <text x="314" y="168" text-anchor="middle" font-size="12" fill="#1c1915">d=7</text>
+        <line x1="40" y1="150" x2="490" y2="150" stroke="currentColor" opacity="0.25"/>
+        <rect x="70" y="70" width="48" height="80" rx="4" fill="var(--accent)"/>
+        <rect x="180" y="46" width="48" height="104" rx="4" fill="var(--accent)"/>
+        <rect x="290" y="28" width="48" height="122" rx="4" fill="var(--good)"/>
+        <text x="94" y="168" text-anchor="middle" font-size="12" fill="currentColor">d=3</text>
+        <text x="204" y="168" text-anchor="middle" font-size="12" fill="currentColor">d=5</text>
+        <text x="314" y="168" text-anchor="middle" font-size="12" fill="currentColor">d=7</text>
       </svg>
       <p data-marble-id="bench-caption" data-marble-editable>Logical error per round falls with distance once p is half the threshold. The green bar is the operating point.</p>
       <p data-marble-id="notes-bench" class="speaker" data-marble-editable>Do not read the y-axis aloud. Say “below 10⁻³ at distance 7” and stop.</p>
     </section>
     <section data-marble-id="pane-eq" class="slide card" data-slide="slide-eq">
       <h2 data-marble-id="eqs-h" data-marble-editable>Key equations</h2>
-      <p data-marble-id="eqs-1" data-marble-editable>P_L ≤ C (p / p_th)^((d+1)/2)</p>
+      <p data-marble-id="eqs-1" style="font-family:var(--mono);margin-bottom:.4rem" data-marble-editable>P_L ≤ C (p / p_th)^((d+1)/2)</p>
       <p data-marble-id="eqs-2" data-marble-editable>The constant C counts homology classes, not fit parameters.</p>
       <p data-marble-id="notes-eq" class="speaker" data-marble-editable>If someone asks where C comes from, go back to the proof slide you have not written yet. Say so.</p>
     </section>
@@ -154,8 +177,22 @@ marble-alt:not([data-marble-active]) > [data-marble-alt]:first-child { display: 
   }
   boot(function (marble) {
     var MID = 'data-marble-' + 'id';
-    var AFFORDANCES = ["data-marble-editable","data-marble-sortable","data-marble-canvas","data-marble-resizable","data-marble-removable","data-marble-add","data-marble-toggle","data-marble-choose","data-marble-expand","data-marble-step","data-marble-note"];
-    if (marble && marble.address) { marble.address(document.querySelectorAll(AFFORDANCES.map(function (a) { return "[" + a + "]"; }).join(","))); }
+    var AFFORDANCES = [
+      'data-marble-editable',
+      'data-marble-sortable',
+      'data-marble-canvas',
+      'data-marble-resizable',
+      'data-marble-removable',
+      'data-marble-add',
+      'data-marble-toggle',
+      'data-marble-choose',
+      'data-marble-expand',
+      'data-marble-step',
+      'data-marble-note'
+    ];
+    if (marble && marble.address) {
+      marble.address(document.querySelectorAll(AFFORDANCES.map(function (a) { return '[' + a + ']'; }).join(',')));
+    }
     function qMarble(id) { return document.querySelector('[' + MID + '="' + id + '"]'); }
     var deck = qMarble('deck');
     function derive() {

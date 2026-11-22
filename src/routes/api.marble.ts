@@ -54,7 +54,7 @@ const sliceOf = marblePatcher.sliceOf as (
   id: string,
 ) => MarbleSlice
 
-const DRIVE_DIR = '/home/daniel/Code/personal/xdrive/marble-drive'
+const DRIVE_DIR = path.resolve(process.cwd(), 'marble-drive')
 const SLUG_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/
 const GUARDED_TYPES = new Set([
   'setText',
