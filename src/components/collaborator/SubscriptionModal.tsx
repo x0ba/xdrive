@@ -16,6 +16,15 @@ import type {
   AntigravityAuthMethodId,
   AntigravityRuntimeStatus,
 } from '#/lib/ai/antigravity-types'
+import {
+  DEFAULT_OPENCODE_GO_MODELS,
+  OPENCODE_GO_ENDPOINT_BASE_URL,
+} from '#/lib/ai/opencode-go-types'
+import type {
+  OpenCodeGoRuntimeStatus,
+  OpenCodeGoUsageMeter,
+} from '#/lib/ai/opencode-go-types'
+import { openCodeGoModelsToSpecs } from '#/lib/ai/opencode-go-client'
 import { Switch } from '#/components/ui/switch'
 import type { ConnectedModelOption } from '#/components/collaborator/FloatingPromptBar'
 import { cn } from '#/lib/utils'
@@ -97,6 +106,23 @@ export const DEFAULT_SUBSCRIPTIONS: ManagedSubscription[] = [
         recommendedFor: 'Active Gemini model from your Google AI plan',
       }),
     ],
+  },
+  {
+    providerId: 'opencode-go',
+    name: 'OpenCode Go',
+    tagline:
+      'Unified subscription routing across GLM, Kimi, DeepSeek, Gemini, Claude, GPT, and Qwen via opencode.ai/inference/go.',
+    planName: 'Go Subscription',
+    connected: false,
+    authMethod: 'api_key',
+    status: 'disconnected',
+    defaultModelId: 'opencode-go/glm-5.3',
+    endpointUrl: OPENCODE_GO_ENDPOINT_BASE_URL,
+    usageThisMonth: { opsGenerated: 0, appsBuilt: 0, quotaPercent: 0 },
+    models: openCodeGoModelsToSpecs(DEFAULT_OPENCODE_GO_MODELS).map((spec) => ({
+      ...spec,
+      promptLabel: `OpenCode Go · ${spec.name}`,
+    })),
   },
   {
     providerId: 'openai',
@@ -248,6 +274,12 @@ export interface SubscriptionModalProps {
   ) => void
   onLogoutAntigravity?: () => void
   onInstallAntigravityBinary?: () => void
+  openCodeGoStatus?: OpenCodeGoRuntimeStatus | null
+  openCodeGoBusy?: string | null
+  openCodeGoError?: string | null
+  onRefreshOpenCodeGo?: () => void
+  onAuthenticateOpenCodeGo?: (options?: { apiKey?: string }) => void
+  onLogoutOpenCodeGo?: () => void
 }
 
 function maskSecret(value: string): string {
@@ -270,6 +302,12 @@ export function SubscriptionModal({
   onAuthenticateAntigravity,
   onLogoutAntigravity,
   onInstallAntigravityBinary,
+  openCodeGoStatus = null,
+  openCodeGoBusy = null,
+  openCodeGoError = null,
+  onRefreshOpenCodeGo,
+  onAuthenticateOpenCodeGo,
+  onLogoutOpenCodeGo,
 }: SubscriptionModalProps) {
   const titleId = useId()
   const [internalSubs, setInternalSubs] = useState<ManagedSubscription[]>(
@@ -282,6 +320,7 @@ export function SubscriptionModal({
   const [draftKey, setDraftKey] = useState('')
   const [geminiApiKey, setGeminiApiKey] = useState('')
   const [showGeminiKeyForm, setShowGeminiKeyForm] = useState(false)
+  const [openCodeApiKey, setOpenCodeApiKey] = useState('')
   const [keyMessage, setKeyMessage] = useState<string | null>(null)
   const [bridgeMessage, setBridgeMessage] = useState<string | null>(null)
 
@@ -374,10 +413,26 @@ export function SubscriptionModal({
 
   const connectedModels = connectedModelsFromSubscriptions(subscriptions)
   const isAntigravity = active.providerId === 'antigravity'
+  const isOpenCodeGo = active.providerId === 'opencode-go'
   const binaryAvailable = antigravityStatus?.binaryAvailable ?? true
   const isAuthenticated = antigravityStatus
     ? antigravityStatus.authenticated
     : active.connected
+  const isOpenCodeGoConnected = openCodeGoStatus
+    ? openCodeGoStatus.authenticated && openCodeGoStatus.entitled
+    : active.connected
+  const openCodeGoUsageRows: Array<[string, OpenCodeGoUsageMeter]> =
+    openCodeGoStatus?.usage
+      ? (
+          [
+            ['5-hour rolling', openCodeGoStatus.usage.rolling],
+            ['Weekly', openCodeGoStatus.usage.weekly],
+            ['Monthly', openCodeGoStatus.usage.monthly],
+          ] as Array<[string, OpenCodeGoUsageMeter | undefined]>
+        ).filter((entry): entry is [string, OpenCodeGoUsageMeter] =>
+          Boolean(entry[1]),
+        )
+      : []
 
   const panel = (
     <div
@@ -453,6 +508,11 @@ export function SubscriptionModal({
                     ACP
                   </span>
                 )}
+                {isOpenCodeGo && (
+                  <span className="xd-mono rounded border border-[var(--xd-accent-border)] bg-[var(--xd-accent-soft)] px-1.5 py-0.5 text-[10px] font-medium text-[var(--xd-accent)]">
+                    Go API
+                  </span>
+                )}
               </div>
               <p className="mt-0.5 text-[12px] text-[var(--xd-ink-secondary)]">
                 {active.tagline}
@@ -471,6 +531,25 @@ export function SubscriptionModal({
                       className={cn(
                         'size-3',
                         antigravityBusy === 'refresh' && 'animate-spin',
+                      )}
+                    />
+                    <span>Refresh</span>
+                  </button>
+                )}
+              </div>
+            ) : isOpenCodeGo ? (
+              <div className="flex items-center gap-1.5">
+                {onRefreshOpenCodeGo && (
+                  <button
+                    type="button"
+                    disabled={Boolean(openCodeGoBusy)}
+                    onClick={onRefreshOpenCodeGo}
+                    className="inline-flex h-7 items-center gap-1 rounded border border-[var(--xd-border)] bg-[var(--xd-rail)] px-2 text-[11px] font-medium text-[var(--xd-ink-secondary)] hover:text-[var(--xd-ink)] disabled:opacity-45"
+                  >
+                    <RefreshCw
+                      className={cn(
+                        'size-3',
+                        openCodeGoBusy === 'refresh' && 'animate-spin',
                       )}
                     />
                     <span>Refresh</span>
@@ -713,6 +792,189 @@ export function SubscriptionModal({
                 </div>
               )}
             </div>
+          ) : isOpenCodeGo ? (
+            <div className="space-y-3">
+              <div className="rounded-md border border-[var(--xd-border)] bg-[var(--xd-rail)] p-3 text-[12px]">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div className="flex items-center gap-1.5 font-medium text-[var(--xd-ink)]">
+                    <ShieldCheck className="size-3.5 text-[var(--xd-commit)]" />
+                    <span>OpenCode Go Inference API</span>
+                  </div>
+                  <span
+                    className={cn(
+                      'inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10.5px] font-medium',
+                      isOpenCodeGoConnected && !openCodeGoStatus?.rateLimited
+                        ? 'bg-[var(--xd-commit-soft)] text-[var(--xd-commit)]'
+                        : openCodeGoStatus?.rateLimited
+                          ? 'bg-[var(--xd-sketch-soft)] text-[var(--xd-sketch)]'
+                          : openCodeGoStatus?.authenticated &&
+                              !openCodeGoStatus.entitled
+                            ? 'bg-[var(--xd-danger-soft)] text-[var(--xd-danger)]'
+                            : 'bg-[var(--xd-sketch-soft)] text-[var(--xd-sketch)]',
+                    )}
+                  >
+                    {isOpenCodeGoConnected ? (
+                      <>
+                        <CheckCircle2 className="size-3" />
+                        <span>
+                          {openCodeGoStatus?.rateLimited
+                            ? 'Connected · Rate limited'
+                            : 'Connected · OpenCode Go'}
+                        </span>
+                      </>
+                    ) : openCodeGoStatus?.authenticated &&
+                      !openCodeGoStatus.entitled ? (
+                      <span>Go subscription required</span>
+                    ) : (
+                      <span>API key required</span>
+                    )}
+                  </span>
+                </div>
+
+                <p className="mt-1.5 text-[11.5px] leading-relaxed text-[var(--xd-ink-secondary)]">
+                  Connects directly to OpenCode Go (
+                  <span className="xd-mono">opencode.ai/inference/go</span>)
+                  with per-document{' '}
+                  <span className="xd-mono">x-opencode-session</span> routing
+                  across Chat Completions, Responses, Anthropic Messages, and
+                  Gemini models. Create a personal API key in the OpenCode
+                  Console under{' '}
+                  <span className="font-medium text-[var(--xd-ink)]">
+                    Account → Personal API keys
+                  </span>{' '}
+                  or set <span className="xd-mono">OPENCODE_API_KEY</span> in{' '}
+                  <span className="xd-mono">.env.local</span>.
+                </p>
+
+                <div className="xd-mono mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[10.5px] text-[var(--xd-ink-muted)]">
+                  <span className="inline-flex items-center gap-1">
+                    <Terminal className="size-3" />
+                    {openCodeGoStatus?.endpointBaseUrl || active.endpointUrl}
+                  </span>
+                  {openCodeGoStatus?.maskedKey && (
+                    <span>
+                      key: {openCodeGoStatus.maskedKey} (
+                      {openCodeGoStatus.keySource === 'env'
+                        ? 'OPENCODE_API_KEY'
+                        : 'server memory'}
+                      )
+                    </span>
+                  )}
+                </div>
+
+                {openCodeGoUsageRows.length > 0 && (
+                  <div className="mt-3 grid gap-2 border-t border-[var(--xd-border)] pt-2.5 sm:grid-cols-3">
+                    {openCodeGoUsageRows.map(([label, meter]) => (
+                      <div key={label} className="space-y-1">
+                        <div className="flex items-center justify-between text-[10.5px]">
+                          <span className="text-[var(--xd-ink-secondary)]">
+                            {label}
+                          </span>
+                          <span
+                            className={cn(
+                              'xd-mono font-medium',
+                              meter.status === 'rate-limited'
+                                ? 'text-[var(--xd-sketch)]'
+                                : 'text-[var(--xd-ink)]',
+                            )}
+                          >
+                            {meter.percent}%
+                          </span>
+                        </div>
+                        <div className="h-1.5 overflow-hidden rounded-full bg-[var(--xd-border)]">
+                          <div
+                            className={cn(
+                              'h-full rounded-full transition-all',
+                              meter.status === 'rate-limited'
+                                ? 'bg-[var(--xd-sketch)]'
+                                : 'bg-[var(--xd-accent)]',
+                            )}
+                            style={{ width: `${Math.min(100, meter.percent)}%` }}
+                          />
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {(openCodeGoError || openCodeGoStatus?.error) && (
+                <p className="flex items-start gap-1.5 rounded border border-[var(--xd-danger)]/35 bg-[var(--xd-danger-soft)] px-2.5 py-2 text-[11.5px] text-[var(--xd-danger)]">
+                  <AlertTriangle className="mt-0.5 size-3.5 shrink-0" />
+                  <span>{openCodeGoError || openCodeGoStatus?.error}</span>
+                </p>
+              )}
+
+              <form
+                className="space-y-2 rounded border border-[var(--xd-border)] bg-[var(--xd-rail)] p-2.5"
+                onSubmit={(event) => {
+                  event.preventDefault()
+                  const trimmed = openCodeApiKey.trim()
+                  if (!trimmed) return
+                  if (onAuthenticateOpenCodeGo) {
+                    onAuthenticateOpenCodeGo({ apiKey: trimmed })
+                  } else {
+                    patchActive({
+                      authMethod: 'api_key',
+                      maskedCredential: maskSecret(trimmed),
+                      connected: true,
+                      status: 'active',
+                    })
+                  }
+                  setOpenCodeApiKey('')
+                }}
+              >
+                <p className="text-[11px] text-[var(--xd-ink-secondary)]">
+                  Paste your OpenCode API key to verify your Go subscription and
+                  enable OpenCode Go models (kept in server memory only, never
+                  written to repository files).
+                </p>
+                <div className="flex flex-wrap items-center gap-1.5">
+                  <input
+                    type="password"
+                    autoComplete="off"
+                    aria-label="OpenCode Go API key"
+                    value={openCodeApiKey}
+                    onChange={(event) => setOpenCodeApiKey(event.target.value)}
+                    placeholder={
+                      openCodeGoStatus?.maskedKey ?? 'Paste OpenCode API key...'
+                    }
+                    className="h-7 min-w-[180px] flex-1 rounded border border-[var(--xd-border)] bg-[var(--xd-canvas)] px-2 text-[12px] outline-none focus-visible:border-[var(--xd-accent)]"
+                  />
+                  <button
+                    type="submit"
+                    disabled={
+                      !openCodeApiKey.trim() || Boolean(openCodeGoBusy)
+                    }
+                    className="inline-flex h-7 items-center gap-1.5 rounded bg-[var(--xd-accent)] px-3 text-[11.5px] font-medium text-white hover:bg-[var(--xd-accent-hover)] disabled:opacity-40"
+                  >
+                    {openCodeGoBusy === 'authenticate' ? (
+                      <Loader2 className="size-3 animate-spin" />
+                    ) : (
+                      <KeyRound className="size-3" />
+                    )}
+                    <span>
+                      {isOpenCodeGoConnected ? 'Update key' : 'Connect'}
+                    </span>
+                  </button>
+                  {isOpenCodeGoConnected && onLogoutOpenCodeGo && (
+                    <button
+                      type="button"
+                      disabled={Boolean(openCodeGoBusy)}
+                      onClick={onLogoutOpenCodeGo}
+                      className="inline-flex h-7 items-center gap-1 rounded border border-[var(--xd-border)] px-2.5 text-[11.5px] text-[var(--xd-ink-secondary)] hover:border-[var(--xd-danger)]/40 hover:text-[var(--xd-danger)] disabled:opacity-45"
+                    >
+                      {openCodeGoBusy === 'logout' ? (
+                        <Loader2 className="size-3 animate-spin" />
+                      ) : (
+                        <LogOut className="size-3" />
+                      )}
+                      <span>Disconnect</span>
+                    </button>
+                  )}
+                </div>
+              </form>
+            </div>
           ) : (
             <div className="space-y-2">
               <div className="flex flex-wrap items-center gap-1">
@@ -825,7 +1087,9 @@ export function SubscriptionModal({
             <h4 className="mb-1.5 text-[11.5px] font-medium text-[var(--xd-ink-muted)]">
               {isAntigravity && isAuthenticated
                 ? `Plan models from Antigravity ACP (${active.models.length})`
-                : 'Available models'}
+                : isOpenCodeGo
+                  ? `OpenCode Go catalog (${active.models.length})`
+                  : 'Available models'}
             </h4>
             <ul className="divide-y divide-[var(--xd-border)] rounded border border-[var(--xd-border)]">
               {active.models.map((item) => (

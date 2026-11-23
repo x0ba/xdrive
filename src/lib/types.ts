@@ -226,7 +226,7 @@ export interface AIMessage {
   timestamp: string
   modelId?: string
   providerId?: AIProviderId
-  runtimeSource?: 'antigravity-acp' | 'api' | 'synthesizer'
+  runtimeSource?: 'antigravity-acp' | 'opencode-go' | 'api' | 'synthesizer'
   thoughts?: string[]
   attachedElements?: SelectedMarbleElement[]
   attachedSketches?: SketchAnnotation[]

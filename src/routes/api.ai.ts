@@ -3,12 +3,17 @@ import {
   AntigravityAcpError,
   getAntigravityAcpManager,
 } from '#/lib/ai/antigravity-acp.server'
+import { toXDriveAntigravityModelId } from '#/lib/ai/antigravity-types'
+import {
+  OpenCodeGoError,
+  getOpenCodeGoManager,
+} from '#/lib/ai/opencode-go.server'
+import { toXDriveOpenCodeGoModelId } from '#/lib/ai/opencode-go-types'
 import {
   buildMarbleAcpPrompt,
   parseMarbleAcpResponse,
 } from '#/lib/ai/marble-prompt.server'
 import type { ServerCollaborateInput } from '#/lib/ai/marble-prompt.server'
-import { toXDriveAntigravityModelId } from '#/lib/ai/antigravity-types'
 
 function json(data: unknown, status = 200) {
   return Response.json(data, {
@@ -22,6 +27,7 @@ function errorResponse(error: unknown) {
     return json(
       {
         ok: false,
+        providerId: 'antigravity',
         code: error.code,
         authRequired: error.code === 'AUTH_REQUIRED',
         binaryMissing: error.code === 'BINARY_MISSING',
@@ -30,15 +36,62 @@ function errorResponse(error: unknown) {
       error.httpStatus,
     )
   }
+  if (error instanceof OpenCodeGoError) {
+    return json(
+      {
+        ok: false,
+        providerId: 'opencode-go',
+        code: error.code,
+        authRequired: error.code === 'AUTH_REQUIRED',
+        entitlementRequired: error.code === 'ENTITLEMENT_REQUIRED',
+        rateLimited: error.code === 'RATE_LIMITED',
+        error: error.message,
+      },
+      error.httpStatus,
+    )
+  }
   const message =
-    error instanceof Error ? error.message : 'Antigravity AI request failed'
+    error instanceof Error ? error.message : 'AI collaborator request failed'
   return json({ ok: false, code: 'AI_ERROR', error: message }, 500)
 }
 
-export async function GET() {
+function resolveProviderId(body: Record<string, unknown>): string {
+  if (typeof body.providerId === 'string' && body.providerId.trim()) {
+    return body.providerId.trim()
+  }
+  if (typeof body.modelId === 'string') {
+    if (body.modelId.startsWith('opencode-go/')) return 'opencode-go'
+    if (body.modelId.startsWith('antigravity/')) return 'antigravity'
+  }
+  return 'antigravity'
+}
+
+export async function GET({ request }: { request: Request }) {
+  const url = new URL(request.url)
+  const provider = url.searchParams.get('provider')
+  const refresh = url.searchParams.get('refresh') === '1'
+
   try {
-    const status = await getAntigravityAcpManager().getStatus()
-    return json(status)
+    if (provider === 'opencode-go') {
+      const status = await getOpenCodeGoManager().getStatus(refresh)
+      return json(status)
+    }
+    if (provider === 'antigravity') {
+      const status = await getAntigravityAcpManager().getStatus()
+      return json(status)
+    }
+
+    const [antigravityStatus, openCodeGoStatus] = await Promise.all([
+      getAntigravityAcpManager().getStatus(),
+      getOpenCodeGoManager().getStatus(refresh),
+    ])
+    return json({
+      ...antigravityStatus,
+      providers: {
+        antigravity: antigravityStatus,
+        'opencode-go': openCodeGoStatus,
+      },
+    })
   } catch (error) {
     return errorResponse(error)
   }
@@ -57,32 +110,46 @@ export async function POST({ request }: { request: Request }) {
   }
 
   const action = typeof body.action === 'string' ? body.action : 'collaborate'
-  const manager = getAntigravityAcpManager()
+  const providerId = resolveProviderId(body)
+  const antigravity = getAntigravityAcpManager()
+  const openCodeGo = getOpenCodeGoManager()
 
   try {
     if (action === 'status') {
-      const status = await manager.getStatus()
+      if (providerId === 'opencode-go') {
+        const status = await openCodeGo.getStatus(Boolean(body.refresh))
+        return json(status)
+      }
+      const status = await antigravity.getStatus()
       return json(status)
     }
 
     if (action === 'install_binary') {
-      const status = await manager.installBinary()
+      const status = await antigravity.installBinary()
       return json(status)
     }
 
     if (action === 'authenticate') {
+      const apiKey =
+        typeof body.apiKey === 'string' ? body.apiKey : undefined
+      if (providerId === 'opencode-go') {
+        const status = await openCodeGo.authenticate(apiKey)
+        return json(status)
+      }
       const methodId =
         typeof body.methodId === 'string' && body.methodId.trim()
           ? body.methodId.trim()
           : 'oauth-personal'
-      const apiKey =
-        typeof body.apiKey === 'string' ? body.apiKey : undefined
-      const status = await manager.authenticate(methodId, { apiKey })
+      const status = await antigravity.authenticate(methodId, { apiKey })
       return json(status)
     }
 
     if (action === 'logout') {
-      const status = await manager.logout()
+      if (providerId === 'opencode-go') {
+        const status = await openCodeGo.logout()
+        return json(status)
+      }
+      const status = await antigravity.logout()
       return json(status)
     }
 
@@ -93,18 +160,21 @@ export async function POST({ request }: { request: Request }) {
         return json({ ok: false, error: 'instruction is required' }, 400)
       }
 
-      const providerId =
-        typeof body.providerId === 'string' ? body.providerId : 'antigravity'
-      if (providerId !== 'antigravity') {
+      if (providerId !== 'antigravity' && providerId !== 'opencode-go') {
         return json(
           {
             ok: false,
             code: 'PROVIDER_UNAVAILABLE',
-            error: `Provider "${providerId}" is not integrated on this server. Select a Google Antigravity model (Google AI plan) in Models & Providers.`,
+            error: `Provider "${providerId}" is not integrated on this server. Select a Google Antigravity or OpenCode Go model in Models & Providers.`,
           },
           400,
         )
       }
+
+      const defaultModel =
+        providerId === 'opencode-go'
+          ? 'opencode-go/glm-5.3'
+          : 'antigravity/default'
 
       const collaborateInput: ServerCollaborateInput = {
         source: typeof body.source === 'string' ? body.source : '',
@@ -112,8 +182,8 @@ export async function POST({ request }: { request: Request }) {
         modelId:
           typeof body.modelId === 'string' && body.modelId.trim()
             ? body.modelId.trim()
-            : 'antigravity/default',
-        providerId: 'antigravity',
+            : defaultModel,
+        providerId,
         action:
           typeof body.actionKind === 'string'
             ? (body.actionKind as ServerCollaborateInput['action'])
@@ -141,7 +211,45 @@ export async function POST({ request }: { request: Request }) {
           ? [body.sketchDataUrl]
           : undefined
 
-      const acpResult = await manager.runPrompt({
+      if (providerId === 'opencode-go') {
+        const sessionId =
+          typeof body.sessionId === 'string' && body.sessionId.trim()
+            ? body.sessionId.trim()
+            : undefined
+
+        const goResult = await openCodeGo.runPrompt({
+          prompt,
+          modelId: collaborateInput.modelId,
+          sessionId,
+          imageDataUrls,
+          signal: request.signal,
+        })
+
+        const resolvedModelId = toXDriveOpenCodeGoModelId(goResult.modelId)
+        const parsed = parseMarbleAcpResponse(
+          goResult.text,
+          collaborateInput,
+          resolvedModelId,
+        )
+
+        return json({
+          ok: true,
+          source: 'opencode-go',
+          proposal: parsed.proposal,
+          stages: parsed.stages,
+          newDocument: parsed.newDocument,
+          thoughts: goResult.thoughts,
+          runtime: {
+            protocol: goResult.apiProtocol,
+            agentName: 'OpenCode Go',
+            agentVersion: 'v1',
+            modelId: resolvedModelId,
+            stopReason: goResult.stopReason,
+          },
+        })
+      }
+
+      const acpResult = await antigravity.runPrompt({
         prompt,
         modelId: collaborateInput.modelId,
         imageDataUrls,
