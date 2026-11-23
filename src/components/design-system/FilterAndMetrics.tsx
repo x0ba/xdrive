@@ -2,6 +2,7 @@ import React, { useState } from 'react'
 import {
   Search,
   LayoutGrid,
+  LayoutPanelTop,
   List,
   ChevronDown,
   Star,
@@ -27,7 +28,7 @@ import {
    ============================================================================ */
 
 export type SortOption = 'updated' | 'nodes' | 'size' | 'title'
-export type DriveViewMode = 'grid' | 'table'
+export type DriveViewMode = 'list' | 'icon' | 'preview'
 
 export interface FilterPillBarProps {
   selectedCategory: MarbleAppCategory | 'all'
@@ -140,29 +141,48 @@ export function FilterPillBar({
         >
           <button
             type="button"
-            aria-label="Grid view"
-            aria-pressed={viewMode === 'grid'}
-            onClick={() => onChangeViewMode?.('grid')}
-            className={`inline-flex h-6 w-6 items-center justify-center rounded-xs transition-colors ${
-              viewMode === 'grid'
-                ? 'bg-[var(--xd-canvas)] text-[var(--xd-ink)] shadow-2xs'
-                : 'text-[var(--xd-ink-muted)] hover:text-[var(--xd-ink)]'
-            }`}
-          >
-            <LayoutGrid className="h-3.5 w-3.5" />
-          </button>
-          <button
-            type="button"
-            aria-label="Table view"
-            aria-pressed={viewMode === 'table'}
-            onClick={() => onChangeViewMode?.('table')}
-            className={`inline-flex h-6 w-6 items-center justify-center rounded-xs transition-colors ${
-              viewMode === 'table'
-                ? 'bg-[var(--xd-canvas)] text-[var(--xd-ink)] shadow-2xs'
+            title="List view"
+            aria-label="List view"
+            aria-pressed={viewMode === 'list'}
+            onClick={() => onChangeViewMode?.('list')}
+            className={`inline-flex h-6 items-center gap-1 rounded-xs px-1.5 text-[11px] transition-colors ${
+              viewMode === 'list'
+                ? 'bg-[var(--xd-canvas)] font-medium text-[var(--xd-ink)] shadow-2xs'
                 : 'text-[var(--xd-ink-muted)] hover:text-[var(--xd-ink)]'
             }`}
           >
             <List className="h-3.5 w-3.5" />
+            <span className="hidden sm:inline">List</span>
+          </button>
+          <button
+            type="button"
+            title="Icon view"
+            aria-label="Icon view"
+            aria-pressed={viewMode === 'icon'}
+            onClick={() => onChangeViewMode?.('icon')}
+            className={`inline-flex h-6 items-center gap-1 rounded-xs px-1.5 text-[11px] transition-colors ${
+              viewMode === 'icon'
+                ? 'bg-[var(--xd-canvas)] font-medium text-[var(--xd-ink)] shadow-2xs'
+                : 'text-[var(--xd-ink-muted)] hover:text-[var(--xd-ink)]'
+            }`}
+          >
+            <LayoutGrid className="h-3.5 w-3.5" />
+            <span className="hidden sm:inline">Icons</span>
+          </button>
+          <button
+            type="button"
+            title="Preview card view"
+            aria-label="Preview card view"
+            aria-pressed={viewMode === 'preview'}
+            onClick={() => onChangeViewMode?.('preview')}
+            className={`inline-flex h-6 items-center gap-1 rounded-xs px-1.5 text-[11px] transition-colors ${
+              viewMode === 'preview'
+                ? 'bg-[var(--xd-canvas)] font-medium text-[var(--xd-ink)] shadow-2xs'
+                : 'text-[var(--xd-ink-muted)] hover:text-[var(--xd-ink)]'
+            }`}
+          >
+            <LayoutPanelTop className="h-3.5 w-3.5" />
+            <span className="hidden sm:inline">Cards</span>
           </button>
         </div>
       </div>

@@ -9,7 +9,42 @@ import type {
   OpenDocumentTab,
   PrimaryNavId,
 } from '#/components/design-system'
-import type { CanvasInteractionMode } from '#/lib/types'
+import type { CanvasInteractionMode, DriveFolder } from '#/lib/types'
+
+const MOCK_DRIVE_FOLDERS: DriveFolder[] = [
+  {
+    id: 'folder-papers',
+    name: 'Papers',
+    parentId: null,
+    color: 'default',
+    createdAt: '2026-11-01T00:00:00.000Z',
+    updatedAt: '2026-11-20T00:00:00.000Z',
+  },
+  {
+    id: 'folder-papers-qec',
+    name: 'Surface Codes',
+    parentId: 'folder-papers',
+    color: 'accent',
+    createdAt: '2026-11-05T00:00:00.000Z',
+    updatedAt: '2026-11-20T00:00:00.000Z',
+  },
+  {
+    id: 'folder-lab',
+    name: 'Lab',
+    parentId: null,
+    color: 'commit',
+    createdAt: '2026-11-02T00:00:00.000Z',
+    updatedAt: '2026-11-21T00:00:00.000Z',
+  },
+  {
+    id: 'folder-talks',
+    name: 'Talks',
+    parentId: null,
+    color: 'sketch',
+    createdAt: '2026-11-03T00:00:00.000Z',
+    updatedAt: '2026-11-21T00:00:00.000Z',
+  },
+]
 
 const MOCK_OPEN_TABS: OpenDocumentTab[] = [
   {
@@ -75,19 +110,34 @@ export const TabStrip: Story = {
 export const LeftNavigationRail: StoryObj = {
   render: () => {
     const [activeNav, setActiveNav] = useState<PrimaryNavId>('drive')
-    const [activeAppId, setActiveAppId] = useState<string>('doc-qec')
+    const [activeFolderId, setActiveFolderId] = useState<string | null>(null)
+    const [activeAppId, setActiveAppId] = useState<string | undefined>(undefined)
 
     return (
       <div className="flex h-[560px] bg-[var(--xd-canvas)]">
         <SidebarRail
           activeNav={activeNav}
-          onSelectNav={setActiveNav}
+          onSelectNav={(next) => {
+            setActiveAppId(undefined)
+            setActiveNav(next)
+          }}
+          folders={MOCK_DRIVE_FOLDERS}
+          activeFolderId={activeFolderId}
+          onSelectFolder={(folderId) => {
+            setActiveAppId(undefined)
+            setActiveFolderId(folderId)
+          }}
+          onCreateFolder={() => {}}
           pinnedApps={MOCK_PINNED_APPS}
           activeAppId={activeAppId}
           onSelectApp={setActiveAppId}
         />
         <div className="flex flex-1 items-center justify-center p-8 text-[13px] text-[var(--xd-ink-secondary)]">
-          Navigation rail
+          {activeAppId
+            ? `Active app: ${activeAppId}`
+            : activeFolderId
+              ? `Folder: ${MOCK_DRIVE_FOLDERS.find((f) => f.id === activeFolderId)?.name}`
+              : `View: ${activeNav}`}
         </div>
       </div>
     )

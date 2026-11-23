@@ -5,13 +5,22 @@ import {
   AgentHeroComposer,
   BrowserTabStrip,
   DocumentBreadcrumbHeader,
+  DriveBreadcrumbBar,
+  DriveFileIconTile,
+  DriveFileListTable,
+  DriveFilePreviewCard,
+  DriveFolderCard,
+  DriveFolderDialog,
+  DriveMoveDialog,
   FilterPillBar,
-  MarbleAppCard,
   SidebarRail,
   TemplateGalleryCard,
-  getCategoryIcon,
-  getCategoryLabel,
+  getDescendantFolderIds,
+  getFolderAncestors,
+  getFolderItemCounts,
+  getFolderPathLabel,
   getPermissionMeta,
+  seedDriveFolders,
 } from '#/components/design-system'
 import type {
   DriveViewMode,
@@ -65,6 +74,8 @@ import type {
   AIProviderId,
   AISubscription,
   CanvasInteractionMode,
+  DriveFolder,
+  DriveFolderColor,
   MarbleAppCategory,
   MarbleCheckpoint,
   MarbleDocumentFile,
@@ -93,6 +104,9 @@ type Place = { tabId: 'home' | string; nav: PrimaryNavId }
 type Trail = { cursor: number; places: Place[] }
 type LivePreview = { docId: string; ops: MarbleOp[]; run: number }
 type NamerState = { sourceId: string; title: string }
+type FolderModalState =
+  | { mode: 'create'; parentId: string | null }
+  | { mode: 'rename'; folder: DriveFolder }
 type PaletteItem = { id: string; label: string; hint: string; run: () => void }
 
 const YOU = { name: 'You', initials: 'YO' }
@@ -538,8 +552,18 @@ export function XDriveWorkspace({
   const [openTabIds, setOpenTabIds] = useState<string[]>(() =>
     resolveOpenIds(initialOpenDocIds, initialActiveTabId),
   )
-  const [docs, setDocs] = useState<MarbleDocumentFile[]>(() =>
-    INITIAL_WORKSPACE_DOCS.map((doc) => ({ ...doc })),
+  const initialDrive = useMemo(
+    () => seedDriveFolders(INITIAL_WORKSPACE_DOCS.map((doc) => ({ ...doc }))),
+    [],
+  )
+  const [folders, setFolders] = useState<DriveFolder[]>(
+    () => initialDrive.folders,
+  )
+  const [currentFolderId, setCurrentFolderId] = useState<string | null>(null)
+  const [folderModal, setFolderModal] = useState<FolderModalState | null>(null)
+  const [moveDocId, setMoveDocId] = useState<string | null>(null)
+  const [docs, setDocs] = useState<MarbleDocumentFile[]>(
+    () => initialDrive.docs,
   )
   const [templates, setTemplates] = useState<MarbleDocumentFile[]>(() =>
     PREDEFINED_MARBLE_TEMPLATES.map((doc) => ({ ...doc })),
@@ -576,7 +600,7 @@ export function XDriveWorkspace({
   const [modelId, setModelId] = useState('xai/grok-4.7')
   const [category, setCategory] = useState<MarbleAppCategory | 'all'>('all')
   const [sortBy, setSortBy] = useState<SortOption>('updated')
-  const [viewMode, setViewMode] = useState<DriveViewMode>('grid')
+  const [viewMode, setViewMode] = useState<DriveViewMode>('preview')
   const [searchQuery, setSearchQuery] = useState('')
   const [shareId, setShareId] = useState<string | null>(null)
   const [namer, setNamer] = useState<NamerState | null>(null)
@@ -652,8 +676,42 @@ export function XDriveWorkspace({
     [subscriptions],
   )
 
+  const folderAncestors = useMemo(
+    () => getFolderAncestors(folders, currentFolderId),
+    [folders, currentFolderId],
+  )
+
+  const folderItemCounts = useMemo(
+    () => getFolderItemCounts(folders, docs),
+    [folders, docs],
+  )
+
+  const visibleFolders = useMemo(() => {
+    const needle = searchQuery.trim().toLowerCase()
+    return folders
+      .filter((folder) => folder.parentId === currentFolderId)
+      .filter(
+        (folder) => !needle || folder.name.toLowerCase().includes(needle),
+      )
+      .slice()
+      .sort((a, b) => a.name.localeCompare(b.name))
+  }, [folders, currentFolderId, searchQuery])
+
   const filteredDocs = useMemo(() => {
+    const scoped =
+      currentFolderId === null
+        ? docs
+        : docs.filter((doc) => doc.folderId === currentFolderId)
+    return scoped
+      .filter((doc) => category === 'all' || doc.category === category)
+      .filter((doc) => matchesQuery(doc, searchQuery))
+      .slice()
+      .sort((a, b) => compareDocs(a, b, sortBy))
+  }, [docs, currentFolderId, category, searchQuery, sortBy])
+
+  const starredDocs = useMemo(() => {
     return docs
+      .filter((doc) => doc.starred)
       .filter((doc) => category === 'all' || doc.category === category)
       .filter((doc) => matchesQuery(doc, searchQuery))
       .slice()
@@ -1113,7 +1171,15 @@ export function XDriveWorkspace({
         evergreenDocs: liveEvergreen,
       })
       if (result.newDocument) {
-        const created = adoptDocument(result.newDocument, libraryRef.current)
+        const adopted = adoptDocument(result.newDocument, libraryRef.current)
+        const targetFolder = currentFolderId
+          ? folders.find((f) => f.id === currentFolderId)
+          : null
+        const created: MarbleDocumentFile = {
+          ...adopted,
+          folderId: targetFolder ? targetFolder.id : null,
+          folder: targetFolder ? targetFolder.name : 'My Drive',
+        }
         setDocs((prev) => [created, ...prev])
         setOpenTabIds((prev) =>
           prev.includes(created.id) ? prev : [...prev, created.id],
@@ -1350,12 +1416,92 @@ export function XDriveWorkspace({
       title.trim() || `${sourceDoc.title} copy`,
       YOU.name,
     )
-    const placed = adoptDocument(copy, libraryRef.current)
+    const targetFolderId = sourceDoc.isTemplate
+      ? currentFolderId
+      : (sourceDoc.folderId ?? currentFolderId)
+    const targetFolder = targetFolderId
+      ? folders.find((f) => f.id === targetFolderId)
+      : null
+    const adopted = adoptDocument(copy, libraryRef.current)
+    const placed: MarbleDocumentFile = {
+      ...adopted,
+      folderId: targetFolder ? targetFolder.id : null,
+      folder: targetFolder ? targetFolder.name : 'My Drive',
+    }
     setDocs((prev) => [placed, ...prev])
     setOpenTabIds((prev) => [...prev, placed.id])
     setNamer(null)
     visit(placed.id, 'drive')
     persist(placed.id, placed.slug, placed.source, [], placed.source)
+  }
+
+  function navigateToFolder(folderId: string | null) {
+    setCurrentFolderId(folderId)
+    visit('home', 'drive')
+  }
+
+  function submitFolderModal(name: string, color: DriveFolderColor) {
+    if (!folderModal) return
+    const now = new Date().toISOString()
+    if (folderModal.mode === 'create') {
+      const created: DriveFolder = {
+        id: `folder-${shortSha()}`,
+        name,
+        parentId: folderModal.parentId,
+        color,
+        createdAt: now,
+        updatedAt: now,
+      }
+      setFolders((prev) => [...prev, created])
+    } else {
+      setFolders((prev) =>
+        prev.map((folder) =>
+          folder.id === folderModal.folder.id
+            ? { ...folder, name, color, updatedAt: now }
+            : folder,
+        ),
+      )
+      setDocs((prev) =>
+        prev.map((doc) =>
+          doc.folderId === folderModal.folder.id
+            ? { ...doc, folder: name }
+            : doc,
+        ),
+      )
+    }
+    setFolderModal(null)
+  }
+
+  function deleteFolder(folder: DriveFolder) {
+    const removed = getDescendantFolderIds(folders, folder.id)
+    const parentName = folder.parentId
+      ? (folders.find((f) => f.id === folder.parentId)?.name ?? 'My Drive')
+      : 'My Drive'
+    setFolders((prev) => prev.filter((item) => !removed.has(item.id)))
+    setDocs((prev) =>
+      prev.map((doc) =>
+        doc.folderId && removed.has(doc.folderId)
+          ? { ...doc, folderId: folder.parentId, folder: parentName }
+          : doc,
+      ),
+    )
+    if (currentFolderId && removed.has(currentFolderId)) {
+      setCurrentFolderId(folder.parentId)
+    }
+  }
+
+  function moveDocumentToFolder(docId: string, targetFolderId: string | null) {
+    const targetFolder = targetFolderId
+      ? folders.find((f) => f.id === targetFolderId)
+      : null
+    const folderName = targetFolder ? targetFolder.name : 'My Drive'
+    patchFile(docId, (doc) => ({
+      ...doc,
+      folderId: targetFolder ? targetFolder.id : null,
+      folder: folderName,
+      updatedAt: new Date().toISOString(),
+    }))
+    setMoveDocId(null)
   }
 
   function toggleFlag(id: string, flag: 'starred' | 'pinned') {
@@ -1367,9 +1513,15 @@ export function XDriveWorkspace({
     const views: PaletteItem[] = [
       {
         id: 'nav-drive',
-        label: 'Files',
-        hint: 'Browse .mrbl apps',
-        run: () => visit('home', 'drive'),
+        label: 'My Drive',
+        hint: 'Browse folders and .mrbl apps',
+        run: () => navigateToFolder(null),
+      },
+      {
+        id: 'nav-starred',
+        label: 'Starred',
+        hint: 'Starred files',
+        run: () => visit('home', 'starred'),
       },
       {
         id: 'nav-templates',
@@ -1390,13 +1542,19 @@ export function XDriveWorkspace({
         run: () => visit('home', 'subscriptions'),
       },
     ]
+    const folderItems: PaletteItem[] = folders.map((folder) => ({
+      id: folder.id,
+      label: folder.name,
+      hint: `Folder · ${getFolderPathLabel(folders, folder.parentId)}`,
+      run: () => navigateToFolder(folder.id),
+    }))
     const files: PaletteItem[] = library.map((doc) => ({
       id: doc.id,
       label: doc.title,
       hint: doc.fileName,
       run: () => openDocument(doc.id),
     }))
-    return [...views, ...files]
+    return [...views, ...folderItems, ...files]
       .filter((item) => {
         if (!needle) return true
         return `${item.label} ${item.hint}`.toLowerCase().includes(needle)
@@ -1558,6 +1716,13 @@ export function XDriveWorkspace({
           activeNav={nav}
           onSelectNav={(next) => visit('home', next)}
           onOpenCommandPalette={() => setPaletteOpen(true)}
+          folders={folders}
+          activeFolderId={currentFolderId}
+          onSelectFolder={(folderId) => navigateToFolder(folderId)}
+          onCreateFolder={(parentId) =>
+            setFolderModal({ mode: 'create', parentId })
+          }
+          onDropDocOnFolder={moveDocumentToFolder}
           pinnedApps={pinnedApps}
           activeAppId={activeDoc?.id}
           onSelectApp={openDocument}
@@ -1566,7 +1731,14 @@ export function XDriveWorkspace({
           {activeDoc ? (
             <div className="flex min-h-0 flex-1 flex-col">
               <DocumentBreadcrumbHeader
-                folder={activeDoc.folder}
+                folder={getFolderPathLabel(
+                  folders,
+                  activeDoc.folderId,
+                  activeDoc.folder,
+                )}
+                onClickFolder={() =>
+                  navigateToFolder(activeDoc.folderId ?? null)
+                }
                 category={activeDoc.category}
                 fileName={activeDoc.fileName}
                 syncState={activeDoc.syncState}
@@ -1692,7 +1864,21 @@ export function XDriveWorkspace({
           ) : (
             <div className="min-h-0 flex-1 overflow-y-auto">
               {(nav === 'drive' || nav === 'agent-studio') && (
-                <div className="mx-auto flex w-full max-w-5xl flex-col gap-5 px-6 py-6">
+                <div className="mx-auto flex w-full max-w-6xl flex-col gap-5 px-6 py-6">
+                  <DriveBreadcrumbBar
+                    ancestors={folderAncestors}
+                    folderCount={visibleFolders.length}
+                    itemCount={filteredDocs.length}
+                    onNavigateFolder={navigateToFolder}
+                    onCreateFolder={() =>
+                      setFolderModal({
+                        mode: 'create',
+                        parentId: currentFolderId,
+                      })
+                    }
+                    onDropDocOnFolder={moveDocumentToFolder}
+                  />
+
                   <div>
                     <AgentHeroComposer
                       models={composerModels}
@@ -1721,17 +1907,218 @@ export function XDriveWorkspace({
                     onChangeSearchQuery={setSearchQuery}
                   />
 
-                  {filteredDocs.length === 0 ? (
+                  {visibleFolders.length === 0 && filteredDocs.length === 0 ? (
+                    <div className="flex flex-col items-center justify-center rounded-lg border border-dashed border-[var(--xd-border-strong)] py-14 text-center">
+                      <p className="text-[13px] font-medium text-[var(--xd-ink)]">
+                        {currentFolderId
+                          ? 'This folder is empty'
+                          : 'No matching files or folders'}
+                      </p>
+                      <p className="mt-1 text-[12px] text-[var(--xd-ink-muted)]">
+                        {currentFolderId
+                          ? 'Create a subfolder or drag files here from My Drive.'
+                          : 'Try clearing your search or category filter.'}
+                      </p>
+                      {currentFolderId && (
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setFolderModal({
+                              mode: 'create',
+                              parentId: currentFolderId,
+                            })
+                          }
+                          className="mt-3 rounded border border-[var(--xd-border-strong)] bg-[var(--xd-canvas)] px-3 py-1.5 text-[12px] font-medium text-[var(--xd-ink)] hover:bg-[var(--xd-surface-hover)]"
+                        >
+                          Create subfolder
+                        </button>
+                      )}
+                    </div>
+                  ) : viewMode === 'list' ? (
+                    <DriveFileListTable
+                      folders={visibleFolders}
+                      folderCounts={folderItemCounts}
+                      docs={filteredDocs.map(forCard)}
+                      resolveFolderLabel={(doc) =>
+                        getFolderPathLabel(folders, doc.folderId, doc.folder)
+                      }
+                      onOpenFolder={(folder) => navigateToFolder(folder.id)}
+                      onCreateSubfolder={(folder) =>
+                        setFolderModal({ mode: 'create', parentId: folder.id })
+                      }
+                      onRenameFolder={(folder) =>
+                        setFolderModal({ mode: 'rename', folder })
+                      }
+                      onDeleteFolder={deleteFolder}
+                      onDropDocOnFolder={moveDocumentToFolder}
+                      onOpenDoc={(doc) => openDocument(doc.id)}
+                      onMoveDoc={(doc) => setMoveDocId(doc.id)}
+                      onDuplicateDoc={(doc) =>
+                        setNamer({
+                          sourceId: doc.id,
+                          title: `${doc.title} copy`,
+                        })
+                      }
+                      onShareDoc={(doc) => setShareId(doc.id)}
+                      onToggleStar={(doc) => toggleFlag(doc.id, 'starred')}
+                      onTogglePin={(doc) => toggleFlag(doc.id, 'pinned')}
+                    />
+                  ) : (
+                    <div className="space-y-6">
+                      {visibleFolders.length > 0 && (
+                        <section className="space-y-2.5">
+                          <h2 className="text-[12px] font-medium text-[var(--xd-ink-secondary)]">
+                            Folders
+                          </h2>
+                          <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-3 lg:grid-cols-4">
+                            {visibleFolders.map((folder) => (
+                              <DriveFolderCard
+                                key={folder.id}
+                                folder={folder}
+                                itemCount={
+                                  folderItemCounts.get(folder.id)?.total ?? 0
+                                }
+                                onOpen={(target) => navigateToFolder(target.id)}
+                                onCreateSubfolder={(target) =>
+                                  setFolderModal({
+                                    mode: 'create',
+                                    parentId: target.id,
+                                  })
+                                }
+                                onRename={(target) =>
+                                  setFolderModal({
+                                    mode: 'rename',
+                                    folder: target,
+                                  })
+                                }
+                                onDelete={deleteFolder}
+                                onDropDoc={moveDocumentToFolder}
+                              />
+                            ))}
+                          </div>
+                        </section>
+                      )}
+
+                      {filteredDocs.length > 0 && (
+                        <section className="space-y-2.5">
+                          <h2 className="text-[12px] font-medium text-[var(--xd-ink-secondary)]">
+                            Files
+                          </h2>
+                          {viewMode === 'preview' ? (
+                            <div className="grid grid-cols-1 gap-3.5 sm:grid-cols-2 lg:grid-cols-3">
+                              {filteredDocs.map((doc) => (
+                                <DriveFilePreviewCard
+                                  key={doc.id}
+                                  doc={forCard(doc)}
+                                  folderLabel={getFolderPathLabel(
+                                    folders,
+                                    doc.folderId,
+                                    doc.folder,
+                                  )}
+                                  onOpen={() => openDocument(doc.id)}
+                                  onMove={() => setMoveDocId(doc.id)}
+                                  onDuplicate={() =>
+                                    setNamer({
+                                      sourceId: doc.id,
+                                      title: `${doc.title} copy`,
+                                    })
+                                  }
+                                  onShare={() => setShareId(doc.id)}
+                                  onToggleStar={() =>
+                                    toggleFlag(doc.id, 'starred')
+                                  }
+                                  onTogglePin={() =>
+                                    toggleFlag(doc.id, 'pinned')
+                                  }
+                                />
+                              ))}
+                            </div>
+                          ) : (
+                            <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6">
+                              {filteredDocs.map((doc) => (
+                                <DriveFileIconTile
+                                  key={doc.id}
+                                  doc={forCard(doc)}
+                                  onOpen={() => openDocument(doc.id)}
+                                  onMove={() => setMoveDocId(doc.id)}
+                                  onDuplicate={() =>
+                                    setNamer({
+                                      sourceId: doc.id,
+                                      title: `${doc.title} copy`,
+                                    })
+                                  }
+                                  onShare={() => setShareId(doc.id)}
+                                  onToggleStar={() =>
+                                    toggleFlag(doc.id, 'starred')
+                                  }
+                                  onTogglePin={() =>
+                                    toggleFlag(doc.id, 'pinned')
+                                  }
+                                />
+                              ))}
+                            </div>
+                          )}
+                        </section>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {nav === 'starred' && (
+                <div className="mx-auto flex w-full max-w-6xl flex-col gap-5 px-6 py-6">
+                  <div className="flex items-center justify-between">
+                    <h1 className="text-[16px] font-semibold tracking-tight">
+                      Starred
+                    </h1>
+                    <span className="xd-tabular text-[12px] text-[var(--xd-ink-muted)]">
+                      {starredDocs.length}{' '}
+                      {starredDocs.length === 1 ? 'file' : 'files'}
+                    </span>
+                  </div>
+
+                  <FilterPillBar
+                    selectedCategory={category}
+                    onSelectCategory={setCategory}
+                    sortBy={sortBy}
+                    onSelectSort={setSortBy}
+                    viewMode={viewMode}
+                    onChangeViewMode={setViewMode}
+                    searchQuery={searchQuery}
+                    onChangeSearchQuery={setSearchQuery}
+                  />
+
+                  {starredDocs.length === 0 ? (
                     <p className="py-12 text-center text-[13px] text-[var(--xd-ink-muted)]">
-                      No matching files.
+                      Star files in My Drive to keep them here.
                     </p>
-                  ) : viewMode === 'grid' ? (
-                    <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
-                      {filteredDocs.map((doc) => (
-                        <MarbleAppCard
+                  ) : viewMode === 'list' ? (
+                    <DriveFileListTable
+                      folders={[]}
+                      docs={starredDocs.map(forCard)}
+                      resolveFolderLabel={(doc) =>
+                        getFolderPathLabel(folders, doc.folderId, doc.folder)
+                      }
+                      onOpenDoc={(doc) => openDocument(doc.id)}
+                      onMoveDoc={(doc) => setMoveDocId(doc.id)}
+                      onDuplicateDoc={(doc) =>
+                        setNamer({
+                          sourceId: doc.id,
+                          title: `${doc.title} copy`,
+                        })
+                      }
+                      onShareDoc={(doc) => setShareId(doc.id)}
+                      onToggleStar={(doc) => toggleFlag(doc.id, 'starred')}
+                      onTogglePin={(doc) => toggleFlag(doc.id, 'pinned')}
+                    />
+                  ) : viewMode === 'icon' ? (
+                    <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6">
+                      {starredDocs.map((doc) => (
+                        <DriveFileIconTile
                           key={doc.id}
                           doc={forCard(doc)}
                           onOpen={() => openDocument(doc.id)}
+                          onMove={() => setMoveDocId(doc.id)}
                           onDuplicate={() =>
                             setNamer({
                               sourceId: doc.id,
@@ -1745,70 +2132,29 @@ export function XDriveWorkspace({
                       ))}
                     </div>
                   ) : (
-                    <div className="overflow-x-auto rounded-md border border-[var(--xd-border)]">
-                      <table className="w-full text-left text-[12.5px]">
-                        <thead className="border-b border-[var(--xd-border)] bg-[var(--xd-rail)] text-[11px] text-[var(--xd-ink-muted)]">
-                          <tr>
-                            <th className="px-3 py-2 font-medium">File</th>
-                            <th className="px-3 py-2 font-medium">Type</th>
-                            <th className="px-3 py-2 font-medium">Edited</th>
-                            <th className="px-3 py-2 font-medium"> </th>
-                          </tr>
-                        </thead>
-                        <tbody className="divide-y divide-[var(--xd-border)]">
-                          {filteredDocs.map((doc) => (
-                            <tr
-                              key={doc.id}
-                              onClick={() => openDocument(doc.id)}
-                              className="cursor-pointer transition-colors hover:bg-[var(--xd-surface-hover)]/50"
-                            >
-                              <td className="px-3 py-2.5">
-                                <div className="font-medium text-[var(--xd-ink)]">
-                                  {doc.title}
-                                </div>
-                                <div className="xd-mono text-[10.5px] text-[var(--xd-ink-muted)]">
-                                  {doc.fileName}
-                                </div>
-                              </td>
-                              <td className="px-3 py-2.5 text-[var(--xd-ink-secondary)]">
-                                <span className="inline-flex items-center gap-1.5">
-                                  {getCategoryIcon(doc.category, 'size-3.5')}
-                                  <span>{getCategoryLabel(doc.category)}</span>
-                                </span>
-                              </td>
-                              <td className="xd-tabular px-3 py-2.5 text-[var(--xd-ink-muted)]">
-                                {relativeTime(doc.updatedAt)}
-                              </td>
-                              <td
-                                className="px-3 py-2.5"
-                                onClick={(e) => e.stopPropagation()}
-                              >
-                                <div className="flex justify-end gap-1.5">
-                                  <button
-                                    type="button"
-                                    onClick={() =>
-                                      setNamer({
-                                        sourceId: doc.id,
-                                        title: `${doc.title} copy`,
-                                      })
-                                    }
-                                    className="rounded px-2 py-1 text-[11px] text-[var(--xd-ink-secondary)] hover:bg-[var(--xd-surface-hover)] hover:text-[var(--xd-ink)]"
-                                  >
-                                    Duplicate
-                                  </button>
-                                  <button
-                                    type="button"
-                                    onClick={() => setShareId(doc.id)}
-                                    className="rounded px-2 py-1 text-[11px] text-[var(--xd-ink-secondary)] hover:bg-[var(--xd-surface-hover)] hover:text-[var(--xd-ink)]"
-                                  >
-                                    Share
-                                  </button>
-                                </div>
-                              </td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
+                    <div className="grid grid-cols-1 gap-3.5 sm:grid-cols-2 lg:grid-cols-3">
+                      {starredDocs.map((doc) => (
+                        <DriveFilePreviewCard
+                          key={doc.id}
+                          doc={forCard(doc)}
+                          folderLabel={getFolderPathLabel(
+                            folders,
+                            doc.folderId,
+                            doc.folder,
+                          )}
+                          onOpen={() => openDocument(doc.id)}
+                          onMove={() => setMoveDocId(doc.id)}
+                          onDuplicate={() =>
+                            setNamer({
+                              sourceId: doc.id,
+                              title: `${doc.title} copy`,
+                            })
+                          }
+                          onShare={() => setShareId(doc.id)}
+                          onToggleStar={() => toggleFlag(doc.id, 'starred')}
+                          onTogglePin={() => toggleFlag(doc.id, 'pinned')}
+                        />
+                      ))}
                     </div>
                   )}
                 </div>
@@ -1977,6 +2323,37 @@ export function XDriveWorkspace({
           />
         )}
       </div>
+      <DriveFolderDialog
+        open={folderModal !== null}
+        mode={folderModal?.mode ?? 'create'}
+        initialName={
+          folderModal?.mode === 'rename' ? folderModal.folder.name : ''
+        }
+        initialColor={
+          folderModal?.mode === 'rename'
+            ? (folderModal.folder.color ?? 'default')
+            : 'default'
+        }
+        parentPathLabel={
+          folderModal?.mode === 'create'
+            ? getFolderPathLabel(folders, folderModal.parentId)
+            : 'My Drive'
+        }
+        onClose={() => setFolderModal(null)}
+        onSubmit={submitFolderModal}
+      />
+      {moveDocId && (
+        <DriveMoveDialog
+          open
+          fileName={findDoc(moveDocId)?.fileName ?? ''}
+          currentFolderId={findDoc(moveDocId)?.folderId ?? null}
+          folders={folders}
+          onClose={() => setMoveDocId(null)}
+          onMove={(targetFolderId) =>
+            moveDocumentToFolder(moveDocId, targetFolderId)
+          }
+        />
+      )}
       {shareDoc && (
         <ShareModal
           open

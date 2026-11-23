@@ -93,6 +93,22 @@ export interface MarbleCheckpoint {
   note?: string
 }
 
+export type DriveFolderColor =
+  | 'default'
+  | 'accent'
+  | 'commit'
+  | 'sketch'
+  | 'danger'
+
+export interface DriveFolder {
+  id: string
+  name: string
+  parentId: string | null
+  color?: DriveFolderColor
+  createdAt: string
+  updatedAt: string
+}
+
 export interface MarbleDocumentFile {
   id: string
   slug: string
@@ -126,6 +142,7 @@ export interface MarbleDocumentFile {
   pinned: boolean
   tags: string[]
   folder: string
+  folderId?: string | null
   share: ShareConfig
   checkpoints: MarbleCheckpoint[]
   intentHistory: MarbleOpProposal[]

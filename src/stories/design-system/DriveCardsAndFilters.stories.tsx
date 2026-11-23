@@ -1,6 +1,9 @@
 import { useState } from 'react'
 import type { Meta, StoryObj } from '@storybook/tanstack-react'
 import {
+  DriveFileIconTile,
+  DriveFileListTable,
+  DriveFilePreviewCard,
   FilterPillBar,
   MarbleAppCard,
   TemplateGalleryCard,
@@ -266,7 +269,7 @@ export const DriveFileIndex: StoryObj = {
   render: () => {
     const [category, setCategory] = useState<MarbleAppCategory | 'all'>('all')
     const [sortBy, setSortBy] = useState<SortOption>('updated')
-    const [viewMode, setViewMode] = useState<DriveViewMode>('grid')
+    const [viewMode, setViewMode] = useState<DriveViewMode>('preview')
     const [searchQuery, setSearchQuery] = useState('')
     const [docs, setDocs] = useState(MOCK_RESEARCH_DOCUMENTS)
 
@@ -306,15 +309,34 @@ export const DriveFileIndex: StoryObj = {
           onChangeSearchQuery={setSearchQuery}
         />
 
-        <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
-          {filteredDocs.map((doc) => (
-            <MarbleAppCard
-              key={doc.id}
-              doc={doc}
-              onToggleStar={toggleStar}
-            />
-          ))}
-        </div>
+        {viewMode === 'list' ? (
+          <DriveFileListTable
+            folders={[]}
+            docs={filteredDocs}
+            onToggleStar={toggleStar}
+          />
+        ) : viewMode === 'icon' ? (
+          <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+            {filteredDocs.map((doc) => (
+              <DriveFileIconTile
+                key={doc.id}
+                doc={doc}
+                onToggleStar={toggleStar}
+              />
+            ))}
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 gap-3.5 sm:grid-cols-2 lg:grid-cols-3">
+            {filteredDocs.map((doc) => (
+              <DriveFilePreviewCard
+                key={doc.id}
+                doc={doc}
+                folderLabel={doc.folder}
+                onToggleStar={toggleStar}
+              />
+            ))}
+          </div>
+        )}
       </div>
     )
   },
