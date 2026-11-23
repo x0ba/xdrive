@@ -2,7 +2,6 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import type { CSSProperties } from 'react'
 import { Search, X } from 'lucide-react'
 import {
-  AgentHeroComposer,
   BrowserTabStrip,
   DocumentBreadcrumbHeader,
   DriveBreadcrumbBar,
@@ -13,6 +12,8 @@ import {
   DriveFolderDialog,
   DriveMoveDialog,
   FilterPillBar,
+  NewAppButton,
+  NewAppModal,
   SidebarRail,
   TemplateGalleryCard,
   getDescendantFolderIds,
@@ -25,6 +26,7 @@ import {
 import type {
   DriveViewMode,
   MarbleTemplateBlueprint,
+  NewAppMode,
   OpenDocumentTab,
   PrimaryNavId,
   SortOption,
@@ -562,6 +564,9 @@ export function XDriveWorkspace({
   const [currentFolderId, setCurrentFolderId] = useState<string | null>(null)
   const [folderModal, setFolderModal] = useState<FolderModalState | null>(null)
   const [moveDocId, setMoveDocId] = useState<string | null>(null)
+  const [newAppModalMode, setNewAppModalMode] = useState<NewAppMode | null>(
+    null,
+  )
   const [docs, setDocs] = useState<MarbleDocumentFile[]>(
     () => initialDrive.docs,
   )
@@ -1136,6 +1141,7 @@ export function XDriveWorkspace({
     action?: MarbleActionKind
     selectedElements?: SelectedMarbleElement[]
     sketchAnnotations?: SketchAnnotation[]
+    targetFolderId?: string | null
   }) {
     const instruction = input.instruction.trim()
     if (!instruction) return
@@ -1172,8 +1178,12 @@ export function XDriveWorkspace({
       })
       if (result.newDocument) {
         const adopted = adoptDocument(result.newDocument, libraryRef.current)
-        const targetFolder = currentFolderId
-          ? folders.find((f) => f.id === currentFolderId)
+        const resolvedFolderId =
+          input.targetFolderId !== undefined
+            ? input.targetFolderId
+            : currentFolderId
+        const targetFolder = resolvedFolderId
+          ? folders.find((f) => f.id === resolvedFolderId)
           : null
         const created: MarbleDocumentFile = {
           ...adopted,
@@ -1277,7 +1287,11 @@ export function XDriveWorkspace({
     }
   }
 
-  function buildApp(prompt: string, nextModelId: string) {
+  function buildApp(
+    prompt: string,
+    nextModelId: string,
+    targetFolderId?: string | null,
+  ) {
     setModelId(nextModelId)
     void collaborate({
       doc: null,
@@ -1285,7 +1299,34 @@ export function XDriveWorkspace({
       model: nextModelId,
       providerId: providerFor(nextModelId, connectedModels),
       action: 'new_app',
+      targetFolderId,
     })
+  }
+
+  function createAppFromTemplate(input: {
+    template: MarbleDocumentFile
+    title: string
+    folderId: string | null
+  }) {
+    const copy = duplicateMarbleTemplate(
+      input.template,
+      input.title.trim() || input.template.title,
+      YOU.name,
+    )
+    const targetFolder = input.folderId
+      ? folders.find((f) => f.id === input.folderId)
+      : null
+    const adopted = adoptDocument(copy, libraryRef.current)
+    const placed: MarbleDocumentFile = {
+      ...adopted,
+      folderId: targetFolder ? targetFolder.id : null,
+      folder: targetFolder ? targetFolder.name : 'My Drive',
+    }
+    setDocs((prev) => [placed, ...prev])
+    setOpenTabIds((prev) => [...prev, placed.id])
+    visit(placed.id, 'drive')
+    persist(placed.id, placed.slug, placed.source, [], placed.source)
+    setAgentStatus(`Created ${placed.fileName} from ${input.template.title}`)
   }
 
   function onIntent(request: MarbleIntentRequest) {
@@ -1512,6 +1553,18 @@ export function XDriveWorkspace({
     const needle = paletteQuery.trim().toLowerCase()
     const views: PaletteItem[] = [
       {
+        id: 'action-new-ai',
+        label: 'New app with AI agent',
+        hint: 'Build a .mrbl app from a prompt',
+        run: () => setNewAppModalMode('agent'),
+      },
+      {
+        id: 'action-new-template',
+        label: 'New app from template',
+        hint: 'Choose from your templates',
+        run: () => setNewAppModalMode('templates'),
+      },
+      {
         id: 'nav-drive',
         label: 'My Drive',
         hint: 'Browse folders and .mrbl apps',
@@ -1716,6 +1769,23 @@ export function XDriveWorkspace({
           activeNav={nav}
           onSelectNav={(next) => visit('home', next)}
           onOpenCommandPalette={() => setPaletteOpen(true)}
+          topAction={
+            <NewAppButton
+              templates={templates}
+              onOpenAIAgent={() => setNewAppModalMode('agent')}
+              onOpenTemplates={() => setNewAppModalMode('templates')}
+              onQuickCreateTemplate={(tpl) =>
+                createAppFromTemplate({
+                  template: tpl,
+                  title: tpl.title,
+                  folderId: currentFolderId,
+                })
+              }
+              onCreateFolder={() =>
+                setFolderModal({ mode: 'create', parentId: currentFolderId })
+              }
+            />
+          }
           folders={folders}
           activeFolderId={currentFolderId}
           onSelectFolder={(folderId) => navigateToFolder(folderId)}
@@ -1879,22 +1949,19 @@ export function XDriveWorkspace({
                     onDropDocOnFolder={moveDocumentToFolder}
                   />
 
-                  <div>
-                    <AgentHeroComposer
-                      models={composerModels}
-                      selectedModelId={modelId}
-                      onSelectModel={setModelId}
-                      onSubmitPrompt={buildApp}
-                      onQuickStartTemplate={(_category, prompt) =>
-                        buildApp(prompt, modelId)
-                      }
-                    />
-                    {agentStatus && (
-                      <p className="mt-2 text-[12px] text-[var(--xd-ink-secondary)]">
-                        {agentStatus}
-                      </p>
-                    )}
-                  </div>
+                  {agentStatus && (
+                    <div className="flex items-center justify-between rounded-md border border-[var(--xd-border)] bg-[var(--xd-rail)] px-3 py-2 text-[12px] text-[var(--xd-ink-secondary)]">
+                      <span>{agentStatus}</span>
+                      <button
+                        type="button"
+                        onClick={() => setAgentStatus(null)}
+                        aria-label="Dismiss status"
+                        className="text-[var(--xd-ink-muted)] hover:text-[var(--xd-ink)]"
+                      >
+                        <X className="h-3.5 w-3.5" />
+                      </button>
+                    </div>
+                  )}
 
                   <FilterPillBar
                     selectedCategory={category}
@@ -2323,6 +2390,22 @@ export function XDriveWorkspace({
           />
         )}
       </div>
+      <NewAppModal
+        open={newAppModalMode !== null}
+        initialMode={newAppModalMode ?? 'agent'}
+        templates={templates}
+        folders={folders}
+        initialFolderId={currentFolderId}
+        models={composerModels}
+        selectedModelId={modelId}
+        onSelectModel={setModelId}
+        onClose={() => setNewAppModalMode(null)}
+        onBuildWithAgent={({ prompt, modelId: chosenModel, folderId }) =>
+          buildApp(prompt, chosenModel, folderId)
+        }
+        onCreateFromTemplate={createAppFromTemplate}
+        onPreviewTemplate={(tpl) => openDocument(tpl.id)}
+      />
       <DriveFolderDialog
         open={folderModal !== null}
         mode={folderModal?.mode ?? 'create'}

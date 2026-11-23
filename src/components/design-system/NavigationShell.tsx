@@ -366,6 +366,7 @@ export interface SidebarRailProps {
   activeNav: PrimaryNavId
   onSelectNav?: (nav: PrimaryNavId) => void
   onOpenCommandPalette?: () => void
+  topAction?: React.ReactNode
   folders?: DriveFolder[]
   activeFolderId?: string | null
   onSelectFolder?: (folderId: string | null) => void
@@ -398,6 +399,7 @@ export function SidebarRail({
   activeNav,
   onSelectNav,
   onOpenCommandPalette,
+  topAction,
   folders = [],
   activeFolderId = null,
   onSelectFolder,
@@ -569,6 +571,8 @@ export function SidebarRail({
           <kbd className="xd-mono text-[10px]">⌘K</kbd>
         </button>
       </div>
+
+      {topAction && <div className="mt-2 px-1">{topAction}</div>}
 
       <nav
         className="mt-2 space-y-0.5"

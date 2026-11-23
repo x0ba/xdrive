@@ -2,6 +2,7 @@ import { useState } from 'react'
 import type { Meta, StoryObj } from '@storybook/tanstack-react'
 import {
   BrowserTabStrip,
+  NewAppButton,
   SidebarRail,
   DocumentBreadcrumbHeader,
 } from '#/components/design-system'
@@ -121,6 +122,13 @@ export const LeftNavigationRail: StoryObj = {
             setActiveAppId(undefined)
             setActiveNav(next)
           }}
+          topAction={
+            <NewAppButton
+              onOpenAIAgent={() => {}}
+              onOpenTemplates={() => {}}
+              onCreateFolder={() => {}}
+            />
+          }
           folders={MOCK_DRIVE_FOLDERS}
           activeFolderId={activeFolderId}
           onSelectFolder={(folderId) => {
