@@ -1,6 +1,21 @@
 import { useEffect, useId, useState } from 'react'
-import { AlertTriangle, KeyRound, Terminal, X } from 'lucide-react'
+import {
+  AlertTriangle,
+  CheckCircle2,
+  Download,
+  KeyRound,
+  Loader2,
+  LogOut,
+  RefreshCw,
+  ShieldCheck,
+  Terminal,
+  X,
+} from 'lucide-react'
 import type { AIModelSpec, AIProviderId, AISubscription } from '#/lib/types'
+import type {
+  AntigravityAuthMethodId,
+  AntigravityRuntimeStatus,
+} from '#/lib/ai/antigravity-types'
 import { Switch } from '#/components/ui/switch'
 import type { ConnectedModelOption } from '#/components/collaborator/FloatingPromptBar'
 import { cn } from '#/lib/utils'
@@ -58,111 +73,78 @@ function model(
 
 export const DEFAULT_SUBSCRIPTIONS: ManagedSubscription[] = [
   {
-    providerId: 'opencode-go',
-    name: 'OpenCode Go',
-    tagline: 'Unified subscription routing across Gemini, Grok, Claude, and DeepSeek.',
-    planName: 'Go',
+    providerId: 'antigravity',
+    name: 'Google Antigravity',
+    tagline:
+      'Official unmodified Antigravity ACP runtime (`agy acp`) with native Google AI plan OAuth.',
+    planName: 'Google AI Plan',
     connected: true,
-    authMethod: 'subscription_oauth',
+    authMethod: 'antigravity_acp',
     status: 'active',
-    defaultModelId: 'opencode-go/gemini-4-argon',
-    endpointUrl: 'https://opencode.ai/zen/go',
-    usageThisMonth: { opsGenerated: 1284, appsBuilt: 17, quotaPercent: 46 },
+    defaultModelId: 'antigravity/default',
+    endpointUrl: 'agy acp (JSON-RPC stdio)',
+    usageThisMonth: { opsGenerated: 0, appsBuilt: 0, quotaPercent: 0 },
     models: [
       model({
-        id: 'opencode-go/gemini-4-argon',
-        name: 'Gemini 4 Argon',
-        providerId: 'opencode-go',
-        promptLabel: 'OpenCode Go · Gemini 4 Argon',
-        role: 'design',
+        id: 'antigravity/default',
+        name: 'Gemini (Google AI Plan)',
+        providerId: 'antigravity',
+        promptLabel: 'Antigravity · Gemini (Google AI Plan)',
+        role: 'implementation',
         contextWindow: '1M',
         speedTier: 'deep',
         supportsVisionSketch: true,
-        recommendedFor: 'Manuscript layout and UI',
-      }),
-      model({
-        id: 'opencode-go/grok-4.7',
-        name: 'Grok 4.7',
-        providerId: 'opencode-go',
-        promptLabel: 'Grok · Grok 4.7',
-        role: 'implementation',
-        contextWindow: '256K',
-        speedTier: 'deep',
-        supportsVisionSketch: true,
-        recommendedFor: 'Semantic ops over a selection',
-      }),
-      model({
-        id: 'opencode-go/claude-haiku-5-5',
-        name: 'Claude Haiku 5.5',
-        providerId: 'opencode-go',
-        promptLabel: 'OpenCode Go · Claude Haiku 5.5',
-        role: 'review',
-        contextWindow: '200K',
-        speedTier: 'fast',
-        supportsVisionSketch: false,
-        recommendedFor: 'Fast op review',
-      }),
-      model({
-        id: 'opencode-go/deepseek-v4.1-flash',
-        name: 'DeepSeek V4.1 Flash',
-        providerId: 'opencode-go',
-        promptLabel: 'OpenCode Go · DeepSeek V4.1 Flash',
-        role: 'exploration',
-        contextWindow: '128K',
-        speedTier: 'instant',
-        supportsVisionSketch: false,
-        recommendedFor: 'Fast exploration',
+        recommendedFor: 'Active Gemini model from your Google AI plan',
       }),
     ],
   },
   {
-    providerId: 'xai',
-    name: 'SpaceX AI',
-    tagline: 'Grok models for implementation and fast edits.',
-    planName: 'SuperGrok',
-    connected: true,
+    providerId: 'openai',
+    name: 'OpenAI',
+    tagline: 'Not yet configured on this server.',
+    planName: 'API',
+    connected: false,
     authMethod: 'api_key',
-    maskedCredential: 'xai-···7k2q',
-    status: 'active',
-    defaultModelId: 'xai/grok-4.7',
-    endpointUrl: 'https://api.x.ai/v1',
-    usageThisMonth: { opsGenerated: 860, appsBuilt: 11, quotaPercent: 38 },
+    status: 'disconnected',
+    defaultModelId: 'gpt-5.4',
+    endpointUrl: 'https://api.openai.com/v1',
+    usageThisMonth: { opsGenerated: 0, appsBuilt: 0, quotaPercent: 0 },
     models: [
       model({
-        id: 'xai/grok-4.7',
-        name: 'Grok 4.7',
-        providerId: 'xai',
-        promptLabel: 'SpaceX AI · Grok 4.7',
+        id: 'gpt-5.4',
+        name: 'GPT-5.4',
+        providerId: 'openai',
+        promptLabel: 'OpenAI · GPT-5.4',
         role: 'implementation',
-        contextWindow: '256K',
+        contextWindow: '400K',
         speedTier: 'deep',
         supportsVisionSketch: true,
-        recommendedFor: 'Staged .mrbl edits',
+        recommendedFor: 'General edits',
       }),
       model({
-        id: 'xai/grok-4.7-build-fast',
-        name: 'Grok 4.7 Build Fast',
-        providerId: 'xai',
-        promptLabel: 'SpaceX AI · Grok 4.7 Build Fast',
-        role: 'exploration',
-        contextWindow: '256K',
-        speedTier: 'instant',
-        supportsVisionSketch: true,
-        recommendedFor: 'Scale gestures',
+        id: 'o4-mini',
+        name: 'o4-mini',
+        providerId: 'openai',
+        promptLabel: 'OpenAI · o4-mini',
+        role: 'reasoning',
+        contextWindow: '200K',
+        speedTier: 'fast',
+        supportsVisionSketch: false,
+        recommendedFor: 'Proofs and checks',
       }),
     ],
   },
   {
     providerId: 'claude',
     name: 'Anthropic Claude',
-    tagline: 'Claude models for code review and op diffs.',
-    planName: 'Pro',
-    connected: true,
-    authMethod: 'subscription_oauth',
-    status: 'rate_limited',
+    tagline: 'Not yet configured on this server.',
+    planName: 'API',
+    connected: false,
+    authMethod: 'api_key',
+    status: 'disconnected',
     defaultModelId: 'claude-sonnet-5-5',
     endpointUrl: 'https://api.anthropic.com/v1',
-    usageThisMonth: { opsGenerated: 2100, appsBuilt: 9, quotaPercent: 100 },
+    usageThisMonth: { opsGenerated: 0, appsBuilt: 0, quotaPercent: 0 },
     models: [
       model({
         id: 'claude-sonnet-5-5',
@@ -189,49 +171,37 @@ export const DEFAULT_SUBSCRIPTIONS: ManagedSubscription[] = [
     ],
   },
   {
-    providerId: 'openai',
-    name: 'OpenAI',
-    tagline: 'GPT models via API key or subscription.',
-    planName: 'Plus',
-    connected: true,
+    providerId: 'xai',
+    name: 'SpaceX AI / xAI',
+    tagline: 'Not yet configured on this server.',
+    planName: 'API',
+    connected: false,
     authMethod: 'api_key',
-    maskedCredential: 'sk-···4f2a',
-    status: 'active',
-    defaultModelId: 'gpt-5.4',
-    endpointUrl: 'https://api.openai.com/v1',
-    usageThisMonth: { opsGenerated: 640, appsBuilt: 6, quotaPercent: 22 },
+    status: 'disconnected',
+    defaultModelId: 'xai/grok-4.7',
+    endpointUrl: 'https://api.x.ai/v1',
+    usageThisMonth: { opsGenerated: 0, appsBuilt: 0, quotaPercent: 0 },
     models: [
       model({
-        id: 'gpt-5.4',
-        name: 'GPT-5.4',
-        providerId: 'openai',
-        promptLabel: 'OpenAI · GPT-5.4',
+        id: 'xai/grok-4.7',
+        name: 'Grok 4.7',
+        providerId: 'xai',
+        promptLabel: 'SpaceX AI · Grok 4.7',
         role: 'implementation',
         contextWindow: '256K',
         speedTier: 'deep',
         supportsVisionSketch: true,
-        recommendedFor: 'General edits',
-      }),
-      model({
-        id: 'o4-mini',
-        name: 'o4-mini',
-        providerId: 'openai',
-        promptLabel: 'OpenAI · o4-mini',
-        role: 'reasoning',
-        contextWindow: '128K',
-        speedTier: 'fast',
-        supportsVisionSketch: false,
-        recommendedFor: 'Proofs and checks',
+        recommendedFor: 'Staged .mrbl edits',
       }),
     ],
   },
 ]
 
 export const DEFAULT_ROLE_ASSIGNMENTS: RoleAssignments = {
-  implementation: 'xai/grok-4.7',
-  exploration: 'opencode-go/deepseek-v4.1-flash',
-  review: 'claude-sonnet-5-5',
-  design: 'opencode-go/gemini-4-argon',
+  implementation: 'antigravity/default',
+  exploration: 'antigravity/default',
+  review: 'antigravity/default',
+  design: 'antigravity/default',
 }
 
 export function connectedModelsFromSubscriptions(
@@ -268,6 +238,16 @@ export interface SubscriptionModalProps {
     subscriptions: ManagedSubscription[],
     roles: RoleAssignments,
   ) => void
+  antigravityStatus?: AntigravityRuntimeStatus | null
+  antigravityBusy?: string | null
+  antigravityError?: string | null
+  onRefreshAntigravity?: () => void
+  onAuthenticateAntigravity?: (
+    methodId: AntigravityAuthMethodId | string,
+    options?: { apiKey?: string },
+  ) => void
+  onLogoutAntigravity?: () => void
+  onInstallAntigravityBinary?: () => void
 }
 
 function maskSecret(value: string): string {
@@ -283,6 +263,13 @@ export function SubscriptionModal({
   subscriptions: subscriptionsProp,
   roleAssignments: rolesProp,
   onChange,
+  antigravityStatus = null,
+  antigravityBusy = null,
+  antigravityError = null,
+  onRefreshAntigravity,
+  onAuthenticateAntigravity,
+  onLogoutAntigravity,
+  onInstallAntigravityBinary,
 }: SubscriptionModalProps) {
   const titleId = useId()
   const [internalSubs, setInternalSubs] = useState<ManagedSubscription[]>(
@@ -291,8 +278,10 @@ export function SubscriptionModal({
   const [internalRoles, setInternalRoles] = useState<RoleAssignments>(
     rolesProp ?? DEFAULT_ROLE_ASSIGNMENTS,
   )
-  const [activeId, setActiveId] = useState<AIProviderId>('opencode-go')
+  const [activeId, setActiveId] = useState<AIProviderId>('antigravity')
   const [draftKey, setDraftKey] = useState('')
+  const [geminiApiKey, setGeminiApiKey] = useState('')
+  const [showGeminiKeyForm, setShowGeminiKeyForm] = useState(false)
   const [keyMessage, setKeyMessage] = useState<string | null>(null)
   const [bridgeMessage, setBridgeMessage] = useState<string | null>(null)
 
@@ -333,6 +322,14 @@ export function SubscriptionModal({
   }
 
   function setConnected(connected: boolean) {
+    if (provider.providerId === 'antigravity') {
+      if (connected) {
+        onAuthenticateAntigravity?.('oauth-personal')
+      } else {
+        onLogoutAntigravity?.()
+      }
+      return
+    }
     if (
       connected &&
       provider.authMethod === 'api_key' &&
@@ -376,6 +373,11 @@ export function SubscriptionModal({
   }
 
   const connectedModels = connectedModelsFromSubscriptions(subscriptions)
+  const isAntigravity = active.providerId === 'antigravity'
+  const binaryAvailable = antigravityStatus?.binaryAvailable ?? true
+  const isAuthenticated = antigravityStatus
+    ? antigravityStatus.authenticated
+    : active.connected
 
   const panel = (
     <div
@@ -405,7 +407,7 @@ export function SubscriptionModal({
         )}
       </header>
 
-      <div className="grid min-h-0 flex-1 md:grid-cols-[200px_minmax(0,1fr)]">
+      <div className="grid min-h-0 flex-1 md:grid-cols-[210px_minmax(0,1fr)]">
         <ul className="border-b border-[var(--xd-border)] bg-[var(--xd-rail)] p-1.5 md:border-r md:border-b-0">
           {subscriptions.map((subscription) => {
             const selected = subscription.providerId === active.providerId
@@ -444,19 +446,47 @@ export function SubscriptionModal({
         <div className="min-h-0 space-y-4 overflow-y-auto p-4">
           <div className="flex items-start justify-between gap-3">
             <div>
-              <h3 className="text-[13.5px] font-semibold">{active.name}</h3>
+              <div className="flex items-center gap-2">
+                <h3 className="text-[13.5px] font-semibold">{active.name}</h3>
+                {isAntigravity && (
+                  <span className="xd-mono rounded border border-[var(--xd-accent-border)] bg-[var(--xd-accent-soft)] px-1.5 py-0.5 text-[10px] font-medium text-[var(--xd-accent)]">
+                    ACP
+                  </span>
+                )}
+              </div>
               <p className="mt-0.5 text-[12px] text-[var(--xd-ink-secondary)]">
                 {active.tagline}
               </p>
             </div>
-            <label className="inline-flex items-center gap-2 text-[12px] font-medium">
-              <Switch
-                checked={active.connected}
-                onCheckedChange={setConnected}
-                aria-label={`Connect ${active.name}`}
-              />
-              <span>{active.connected ? 'Connected' : 'Off'}</span>
-            </label>
+            {isAntigravity ? (
+              <div className="flex items-center gap-1.5">
+                {onRefreshAntigravity && (
+                  <button
+                    type="button"
+                    disabled={Boolean(antigravityBusy)}
+                    onClick={onRefreshAntigravity}
+                    className="inline-flex h-7 items-center gap-1 rounded border border-[var(--xd-border)] bg-[var(--xd-rail)] px-2 text-[11px] font-medium text-[var(--xd-ink-secondary)] hover:text-[var(--xd-ink)] disabled:opacity-45"
+                  >
+                    <RefreshCw
+                      className={cn(
+                        'size-3',
+                        antigravityBusy === 'refresh' && 'animate-spin',
+                      )}
+                    />
+                    <span>Refresh</span>
+                  </button>
+                )}
+              </div>
+            ) : (
+              <label className="inline-flex items-center gap-2 text-[12px] font-medium">
+                <Switch
+                  checked={active.connected}
+                  onCheckedChange={setConnected}
+                  aria-label={`Connect ${active.name}`}
+                />
+                <span>{active.connected ? 'Connected' : 'Off'}</span>
+              </label>
+            )}
           </div>
 
           {active.status === 'rate_limited' && active.connected && (
@@ -466,115 +496,336 @@ export function SubscriptionModal({
             </p>
           )}
 
-          <div className="space-y-2">
-            <div className="flex flex-wrap items-center gap-1">
-              {(
-                [
-                  ['subscription_oauth', 'OAuth'],
-                  ['api_key', 'API Key'],
-                  ['cli_bridge', 'CLI Bridge'],
-                ] as const
-              ).map(([method, label]) => (
-                <button
-                  key={method}
-                  type="button"
-                  aria-pressed={active.authMethod === method}
-                  onClick={() => patchActive({ authMethod: method })}
-                  className={cn(
-                    'rounded border px-2.5 py-1 text-[11.5px] transition-colors',
-                    active.authMethod === method
-                      ? 'border-[var(--xd-accent-border)] bg-[var(--xd-accent-soft)] font-medium text-[var(--xd-accent)]'
-                      : 'border-[var(--xd-border)] text-[var(--xd-ink-secondary)] hover:bg-[var(--xd-surface-hover)]',
-                  )}
-                >
-                  {label}
-                </button>
-              ))}
-            </div>
-
-            {active.authMethod === 'subscription_oauth' && (
-              <div className="flex items-center justify-between rounded border border-[var(--xd-border)] bg-[var(--xd-rail)] px-3 py-2 text-[12px]">
-                <span className="text-[var(--xd-ink-secondary)]">
-                  Authenticate with your {active.name} account
-                </span>
-                <button
-                  type="button"
-                  onClick={() =>
-                    patchActive({
-                      connected: true,
-                      status: 'active',
-                      authMethod: 'subscription_oauth',
-                      maskedCredential: undefined,
-                    })
-                  }
-                  className="inline-flex h-7 items-center gap-1.5 rounded bg-[var(--xd-accent)] px-2.5 text-[11.5px] font-medium text-white"
-                >
-                  <KeyRound className="size-3" />
-                  <span>{active.connected ? 'Reconnect' : 'Connect'}</span>
-                </button>
-              </div>
-            )}
-
-            {active.authMethod === 'api_key' && (
-              <form
-                className="space-y-1.5 rounded border border-[var(--xd-border)] bg-[var(--xd-rail)] p-2.5"
-                onSubmit={(event) => {
-                  event.preventDefault()
-                  saveKey()
-                }}
-              >
-                <div className="flex items-center gap-1.5">
-                  <input
-                    id={`${active.providerId}-key`}
-                    type="password"
-                    autoComplete="off"
-                    aria-label="API key or token"
-                    value={draftKey}
-                    onChange={(event) => setDraftKey(event.target.value)}
-                    placeholder={active.maskedCredential ?? 'Paste API key...'}
-                    className="h-7 min-w-0 flex-1 rounded border border-[var(--xd-border)] bg-[var(--xd-canvas)] px-2 text-[12px] outline-none focus-visible:border-[var(--xd-accent)]"
-                  />
-                  <button
-                    type="submit"
-                    className="inline-flex h-7 items-center rounded border border-[var(--xd-border)] bg-[var(--xd-elevated)] px-2.5 text-[11.5px] font-medium"
+          {isAntigravity ? (
+            <div className="space-y-3">
+              {/* Compliance & official ACP runtime status */}
+              <div className="rounded-md border border-[var(--xd-border)] bg-[var(--xd-rail)] p-3 text-[12px]">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div className="flex items-center gap-1.5 font-medium text-[var(--xd-ink)]">
+                    <ShieldCheck className="size-3.5 text-[var(--xd-commit)]" />
+                    <span>
+                      {antigravityStatus?.agentName || 'Antigravity ACP Server'}
+                      {antigravityStatus?.agentVersion
+                        ? ` v${antigravityStatus.agentVersion}`
+                        : ''}
+                    </span>
+                  </div>
+                  <span
+                    className={cn(
+                      'inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10.5px] font-medium',
+                      isAuthenticated
+                        ? 'bg-[var(--xd-commit-soft)] text-[var(--xd-commit)]'
+                        : binaryAvailable
+                          ? 'bg-[var(--xd-sketch-soft)] text-[var(--xd-sketch)]'
+                          : 'bg-[var(--xd-danger-soft)] text-[var(--xd-danger)]',
+                    )}
                   >
-                    Save
+                    {isAuthenticated ? (
+                      <>
+                        <CheckCircle2 className="size-3" />
+                        <span>
+                          Signed in
+                          {antigravityStatus?.tier
+                            ? ` · ${antigravityStatus.tier}`
+                            : ` · ${active.planName}`}
+                        </span>
+                      </>
+                    ) : binaryAvailable ? (
+                      <span>Sign in required</span>
+                    ) : (
+                      <span>ACP binary not installed</span>
+                    )}
+                  </span>
+                </div>
+
+                <p className="mt-1.5 text-[11.5px] leading-relaxed text-[var(--xd-ink-secondary)]">
+                  Follows Google Antigravity Terms of Service using the same
+                  architecture as T3 Code: communicates directly with the
+                  official unmodified ACP binary over JSON-RPC 2.0{' '}
+                  <span className="xd-mono">stdio</span> and delegates Google AI
+                  plan sign-in natively to Antigravity without extracting or
+                  proxying OAuth tokens.
+                </p>
+
+                <div className="xd-mono mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[10.5px] text-[var(--xd-ink-muted)]">
+                  <span className="inline-flex items-center gap-1">
+                    <Terminal className="size-3" />
+                    {antigravityStatus?.binaryPath || active.endpointUrl}
+                  </span>
+                  {antigravityStatus?.binarySource &&
+                    antigravityStatus.binarySource !== 'none' && (
+                      <span>source: {antigravityStatus.binarySource}</span>
+                    )}
+                </div>
+              </div>
+
+              {(antigravityError || antigravityStatus?.error) && (
+                <p className="flex items-start gap-1.5 rounded border border-[var(--xd-danger)]/35 bg-[var(--xd-danger-soft)] px-2.5 py-2 text-[11.5px] text-[var(--xd-danger)]">
+                  <AlertTriangle className="mt-0.5 size-3.5 shrink-0" />
+                  <span>{antigravityError || antigravityStatus?.error}</span>
+                </p>
+              )}
+
+              {!binaryAvailable ? (
+                <div className="flex flex-wrap items-center justify-between gap-2 rounded border border-[var(--xd-border)] bg-[var(--xd-rail)] px-3 py-2.5 text-[12px]">
+                  <div className="min-w-0 flex-1">
+                    <p className="font-medium text-[var(--xd-ink)]">
+                      Install official Google Antigravity ACP binary
+                    </p>
+                    <p className="mt-0.5 text-[11px] text-[var(--xd-ink-secondary)]">
+                      Downloads the official SHA-256 verified binary from
+                      Google’s ACP Registry release channel, or install{' '}
+                      <span className="xd-mono">agy</span> via Homebrew.
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    disabled={Boolean(antigravityBusy)}
+                    onClick={() => onInstallAntigravityBinary?.()}
+                    className="inline-flex h-7 items-center gap-1.5 rounded bg-[var(--xd-accent)] px-2.5 text-[11.5px] font-medium text-white hover:bg-[var(--xd-accent-hover)] disabled:opacity-45"
+                  >
+                    {antigravityBusy === 'install' ? (
+                      <Loader2 className="size-3 animate-spin" />
+                    ) : (
+                      <Download className="size-3" />
+                    )}
+                    <span>Install ACP binary</span>
                   </button>
                 </div>
-                {keyMessage && (
-                  <p className="text-[11px] text-[var(--xd-ink-secondary)]">
-                    {keyMessage}
-                  </p>
-                )}
-              </form>
-            )}
+              ) : (
+                <div className="space-y-2">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <button
+                      type="button"
+                      disabled={Boolean(antigravityBusy)}
+                      onClick={() =>
+                        onAuthenticateAntigravity?.('oauth-personal')
+                      }
+                      className="inline-flex h-7 items-center gap-1.5 rounded bg-[var(--xd-accent)] px-3 text-[11.5px] font-medium text-white hover:bg-[var(--xd-accent-hover)] disabled:opacity-45"
+                    >
+                      {antigravityBusy === 'oauth-personal' ? (
+                        <Loader2 className="size-3 animate-spin" />
+                      ) : (
+                        <KeyRound className="size-3" />
+                      )}
+                      <span>
+                        {antigravityBusy === 'oauth-personal'
+                          ? 'Complete sign-in in browser…'
+                          : isAuthenticated
+                            ? 'Switch Google account'
+                            : 'Sign in with Google (Google AI Plan)'}
+                      </span>
+                    </button>
 
-            {active.authMethod === 'cli_bridge' && (
-              <div className="flex items-center justify-between rounded border border-[var(--xd-border)] bg-[var(--xd-rail)] px-3 py-2 text-[12px]">
-                <span className="xd-mono flex items-center gap-1.5 text-[11.5px] text-[var(--xd-ink-secondary)]">
-                  <Terminal className="size-3.5" />
-                  <span>{active.endpointUrl}</span>
-                </span>
-                <button
-                  type="button"
-                  onClick={pingBridge}
-                  className="inline-flex h-7 items-center rounded border border-[var(--xd-border)] bg-[var(--xd-elevated)] px-2.5 text-[11.5px] font-medium"
-                >
-                  Detect CLI
-                </button>
+                    <button
+                      type="button"
+                      disabled={Boolean(antigravityBusy)}
+                      onClick={() =>
+                        onAuthenticateAntigravity?.('oauth-business')
+                      }
+                      className="inline-flex h-7 items-center gap-1.5 rounded border border-[var(--xd-border)] bg-[var(--xd-elevated)] px-2.5 text-[11.5px] font-medium text-[var(--xd-ink)] hover:bg-[var(--xd-surface-hover)] disabled:opacity-45"
+                    >
+                      {antigravityBusy === 'oauth-business' && (
+                        <Loader2 className="size-3 animate-spin" />
+                      )}
+                      <span>Gemini Enterprise</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      disabled={Boolean(antigravityBusy)}
+                      onClick={() => setShowGeminiKeyForm((prev) => !prev)}
+                      className="inline-flex h-7 items-center rounded border border-[var(--xd-border)] bg-[var(--xd-rail)] px-2.5 text-[11.5px] text-[var(--xd-ink-secondary)] hover:text-[var(--xd-ink)] disabled:opacity-45"
+                    >
+                      Gemini API Key
+                    </button>
+
+                    <button
+                      type="button"
+                      disabled={Boolean(antigravityBusy)}
+                      onClick={() =>
+                        onAuthenticateAntigravity?.('agent-platform')
+                      }
+                      className="inline-flex h-7 items-center rounded border border-[var(--xd-border)] bg-[var(--xd-rail)] px-2.5 text-[11.5px] text-[var(--xd-ink-secondary)] hover:text-[var(--xd-ink)] disabled:opacity-45"
+                    >
+                      Vertex AI (ADC)
+                    </button>
+
+                    {isAuthenticated && onLogoutAntigravity && (
+                      <button
+                        type="button"
+                        disabled={Boolean(antigravityBusy)}
+                        onClick={onLogoutAntigravity}
+                        className="ml-auto inline-flex h-7 items-center gap-1 rounded border border-[var(--xd-border)] px-2.5 text-[11.5px] text-[var(--xd-ink-secondary)] hover:border-[var(--xd-danger)]/40 hover:text-[var(--xd-danger)] disabled:opacity-45"
+                      >
+                        {antigravityBusy === 'logout' ? (
+                          <Loader2 className="size-3 animate-spin" />
+                        ) : (
+                          <LogOut className="size-3" />
+                        )}
+                        <span>Sign out</span>
+                      </button>
+                    )}
+                  </div>
+
+                  {showGeminiKeyForm && (
+                    <form
+                      className="space-y-1.5 rounded border border-[var(--xd-border)] bg-[var(--xd-rail)] p-2.5"
+                      onSubmit={(event) => {
+                        event.preventDefault()
+                        if (!geminiApiKey.trim()) return
+                        onAuthenticateAntigravity?.('gemini-api-key', {
+                          apiKey: geminiApiKey.trim(),
+                        })
+                        setGeminiApiKey('')
+                        setShowGeminiKeyForm(false)
+                      }}
+                    >
+                      <p className="text-[11px] text-[var(--xd-ink-secondary)]">
+                        Optional: authenticate the Antigravity ACP runtime with
+                        a Google AI Studio <span className="xd-mono">GEMINI_API_KEY</span>{' '}
+                        (kept in server memory only, never saved to repo files).
+                      </p>
+                      <div className="flex items-center gap-1.5">
+                        <input
+                          type="password"
+                          autoComplete="off"
+                          aria-label="Gemini API key"
+                          value={geminiApiKey}
+                          onChange={(event) =>
+                            setGeminiApiKey(event.target.value)
+                          }
+                          placeholder="AIza..."
+                          className="h-7 min-w-0 flex-1 rounded border border-[var(--xd-border)] bg-[var(--xd-canvas)] px-2 text-[12px] outline-none focus-visible:border-[var(--xd-accent)]"
+                        />
+                        <button
+                          type="submit"
+                          disabled={
+                            !geminiApiKey.trim() || Boolean(antigravityBusy)
+                          }
+                          className="inline-flex h-7 items-center rounded bg-[var(--xd-accent)] px-2.5 text-[11.5px] font-medium text-white disabled:opacity-40"
+                        >
+                          Connect key
+                        </button>
+                      </div>
+                    </form>
+                  )}
+                </div>
+              )}
+            </div>
+          ) : (
+            <div className="space-y-2">
+              <div className="flex flex-wrap items-center gap-1">
+                {(
+                  [
+                    ['subscription_oauth', 'OAuth'],
+                    ['api_key', 'API Key'],
+                    ['cli_bridge', 'CLI Bridge'],
+                  ] as const
+                ).map(([method, label]) => (
+                  <button
+                    key={method}
+                    type="button"
+                    aria-pressed={active.authMethod === method}
+                    onClick={() => patchActive({ authMethod: method })}
+                    className={cn(
+                      'rounded border px-2.5 py-1 text-[11.5px] transition-colors',
+                      active.authMethod === method
+                        ? 'border-[var(--xd-accent-border)] bg-[var(--xd-accent-soft)] font-medium text-[var(--xd-accent)]'
+                        : 'border-[var(--xd-border)] text-[var(--xd-ink-secondary)] hover:bg-[var(--xd-surface-hover)]',
+                    )}
+                  >
+                    {label}
+                  </button>
+                ))}
               </div>
-            )}
-            {bridgeMessage && (
-              <p className="text-[11px] text-[var(--xd-commit)]">
-                {bridgeMessage}
-              </p>
-            )}
-          </div>
+
+              {active.authMethod === 'subscription_oauth' && (
+                <div className="flex items-center justify-between rounded border border-[var(--xd-border)] bg-[var(--xd-rail)] px-3 py-2 text-[12px]">
+                  <span className="text-[var(--xd-ink-secondary)]">
+                    Authenticate with your {active.name} account
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      patchActive({
+                        connected: true,
+                        status: 'active',
+                        authMethod: 'subscription_oauth',
+                        maskedCredential: undefined,
+                      })
+                    }
+                    className="inline-flex h-7 items-center gap-1.5 rounded bg-[var(--xd-accent)] px-2.5 text-[11.5px] font-medium text-white"
+                  >
+                    <KeyRound className="size-3" />
+                    <span>{active.connected ? 'Reconnect' : 'Connect'}</span>
+                  </button>
+                </div>
+              )}
+
+              {active.authMethod === 'api_key' && (
+                <form
+                  className="space-y-1.5 rounded border border-[var(--xd-border)] bg-[var(--xd-rail)] p-2.5"
+                  onSubmit={(event) => {
+                    event.preventDefault()
+                    saveKey()
+                  }}
+                >
+                  <div className="flex items-center gap-1.5">
+                    <input
+                      id={`${active.providerId}-key`}
+                      type="password"
+                      autoComplete="off"
+                      aria-label="API key or token"
+                      value={draftKey}
+                      onChange={(event) => setDraftKey(event.target.value)}
+                      placeholder={active.maskedCredential ?? 'Paste API key...'}
+                      className="h-7 min-w-0 flex-1 rounded border border-[var(--xd-border)] bg-[var(--xd-canvas)] px-2 text-[12px] outline-none focus-visible:border-[var(--xd-accent)]"
+                    />
+                    <button
+                      type="submit"
+                      className="inline-flex h-7 items-center rounded border border-[var(--xd-border)] bg-[var(--xd-elevated)] px-2.5 text-[11.5px] font-medium"
+                    >
+                      Save
+                    </button>
+                  </div>
+                  {keyMessage && (
+                    <p className="text-[11px] text-[var(--xd-ink-secondary)]">
+                      {keyMessage}
+                    </p>
+                  )}
+                </form>
+              )}
+
+              {active.authMethod === 'cli_bridge' && (
+                <div className="flex items-center justify-between rounded border border-[var(--xd-border)] bg-[var(--xd-rail)] px-3 py-2 text-[12px]">
+                  <span className="xd-mono flex items-center gap-1.5 text-[11.5px] text-[var(--xd-ink-secondary)]">
+                    <Terminal className="size-3.5" />
+                    <span>{active.endpointUrl}</span>
+                  </span>
+                  <button
+                    type="button"
+                    onClick={pingBridge}
+                    className="inline-flex h-7 items-center rounded border border-[var(--xd-border)] bg-[var(--xd-elevated)] px-2.5 text-[11.5px] font-medium"
+                  >
+                    Detect CLI
+                  </button>
+                </div>
+              )}
+              {bridgeMessage && (
+                <p className="text-[11px] text-[var(--xd-commit)]">
+                  {bridgeMessage}
+                </p>
+              )}
+            </div>
+          )}
 
           {/* Models list */}
           <div>
             <h4 className="mb-1.5 text-[11.5px] font-medium text-[var(--xd-ink-muted)]">
-              Available models
+              {isAntigravity && isAuthenticated
+                ? `Plan models from Antigravity ACP (${active.models.length})`
+                : 'Available models'}
             </h4>
             <ul className="divide-y divide-[var(--xd-border)] rounded border border-[var(--xd-border)]">
               {active.models.map((item) => (
@@ -582,8 +833,17 @@ export function SubscriptionModal({
                   key={item.id}
                   className="flex items-center justify-between gap-2 px-2.5 py-1.5 text-[12px]"
                 >
-                  <span className="font-medium">{item.name}</span>
-                  <span className="xd-mono text-[11px] text-[var(--xd-ink-muted)]">
+                  <div className="min-w-0">
+                    <span className="block truncate font-medium">
+                      {item.name}
+                    </span>
+                    {item.recommendedFor && (
+                      <span className="block truncate text-[10.5px] text-[var(--xd-ink-muted)]">
+                        {item.recommendedFor}
+                      </span>
+                    )}
+                  </div>
+                  <span className="xd-mono shrink-0 text-[11px] text-[var(--xd-ink-muted)]">
                     {item.contextWindow} · {item.role}
                   </span>
                 </li>

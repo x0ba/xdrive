@@ -3,7 +3,7 @@ import type {
   KeyboardEvent as ReactKeyboardEvent,
   PointerEvent as ReactPointerEvent,
 } from 'react'
-import { Lock, X } from 'lucide-react'
+import { Loader2, Lock, ShieldCheck, X } from 'lucide-react'
 import type {
   AIMessage,
   EvergreenDocRef,
@@ -257,6 +257,10 @@ export interface CursorAISidebarProps {
   onSend?: (text: string) => void
   onKeep?: (proposalId: string) => void
   onDiscard?: (proposalId: string) => void
+  onOpenProviders?: () => void
+  isThinking?: boolean
+  thinkingLabel?: string
+  antigravityConnected?: boolean
   pendingIntent?: MarbleIntentRequest | null
   width?: number
   className?: string
@@ -494,6 +498,10 @@ export function CursorAISidebar({
   onSend,
   onKeep,
   onDiscard,
+  onOpenProviders,
+  isThinking = false,
+  thinkingLabel,
+  antigravityConnected,
   pendingIntent = null,
   width: widthProp,
   className,
@@ -506,7 +514,7 @@ export function CursorAISidebar({
   const [draft, setDraft] = useState('')
   const [internalWidth, setInternalWidth] = useState(widthProp ?? 340)
   const [internalModel, setInternalModel] = useState(
-    () => modelIdProp ?? resolveModel(models)?.id ?? 'xai/grok-4.7',
+    () => modelIdProp ?? resolveModel(models)?.id ?? 'antigravity/default',
   )
   const [hiddenElements, setHiddenElements] = useState<string[]>([])
   const [hiddenSketches, setHiddenSketches] = useState<string[]>([])
@@ -517,6 +525,18 @@ export function CursorAISidebar({
   const modelId = modelIdProp ?? internalModel
   const width = widthProp ?? internalWidth
   const model = resolveModel(models, modelId)
+
+  useEffect(() => {
+    setThread(messages)
+  }, [messages])
+
+  useEffect(() => {
+    setProposalList(proposals)
+  }, [proposals])
+
+  useEffect(() => {
+    setHistory(checkpoints)
+  }, [checkpoints])
 
   useEffect(() => {
     return () => {
@@ -612,8 +632,14 @@ export function CursorAISidebar({
 
   function sendText(text: string) {
     const instruction = text.trim()
-    if (!instruction || !model) return
+    if (!instruction) return
     setDraft('')
+    if (onSend) {
+      setTab('chat')
+      onSend(instruction)
+      return
+    }
+    if (!model) return
     ingest({
       id: uid('intent'),
       kind: instruction.includes('<marble-alt>') ? 'fork-alt' : 'instruct',
@@ -831,10 +857,26 @@ export function CursorAISidebar({
         </p>
       )}
 
+      {!blocked && antigravityConnected === false && onOpenProviders && (
+        <div className="flex items-center justify-between gap-2 border-b border-[var(--xd-border)] bg-[var(--xd-accent-soft)]/50 px-2.5 py-1.5 text-[11px]">
+          <span className="inline-flex min-w-0 items-center gap-1.5 text-[var(--xd-ink-secondary)]">
+            <ShieldCheck className="size-3.5 shrink-0 text-[var(--xd-accent)]" />
+            <span className="truncate">Sign in to Google Antigravity</span>
+          </span>
+          <button
+            type="button"
+            onClick={onOpenProviders}
+            className="shrink-0 rounded bg-[var(--xd-accent)] px-2 py-0.5 text-[10.5px] font-medium text-white hover:bg-[var(--xd-accent-hover)]"
+          >
+            Connect
+          </button>
+        </div>
+      )}
+
       <div className="min-h-0 flex-1 overflow-y-auto" role="tabpanel">
         {tab === 'chat' && (
           <ol className="space-y-3 px-2.5 py-2.5">
-            {thread.length === 0 && (
+            {thread.length === 0 && !isThinking && (
               <li className="py-6 text-center text-[12px] text-[var(--xd-ink-muted)]">
                 Select a node or ask for a change.
               </li>
@@ -859,6 +901,16 @@ export function CursorAISidebar({
                 )}
               </li>
             ))}
+            {isThinking && (
+              <li>
+                <div className="flex items-center gap-2 rounded border border-[var(--xd-border)] bg-[var(--xd-canvas)] px-2.5 py-2 text-[11.5px] text-[var(--xd-ink-secondary)]">
+                  <Loader2 className="size-3.5 shrink-0 animate-spin text-[var(--xd-accent)]" />
+                  <span className="truncate">
+                    {thinkingLabel || 'Running Google Antigravity ACP…'}
+                  </span>
+                </div>
+              </li>
+            )}
           </ol>
         )}
         {tab === 'ops' && (
@@ -950,10 +1002,14 @@ export function CursorAISidebar({
             />
             <button
               type="submit"
-              disabled={blocked || draft.trim().length === 0}
+              disabled={blocked || isThinking || draft.trim().length === 0}
               className="inline-flex h-7 items-center rounded bg-[var(--xd-accent)] px-2.5 text-[11.5px] font-medium text-white disabled:opacity-35"
             >
-              {spec.ai === 'propose' ? 'Propose' : 'Send'}
+              {isThinking
+                ? 'Working…'
+                : spec.ai === 'propose'
+                  ? 'Propose'
+                  : 'Send'}
             </button>
           </form>
         </div>
@@ -977,7 +1033,18 @@ function MessageBubble({ message }: { message: AIMessage }) {
             'border border-dashed border-[var(--xd-border)] text-[var(--xd-ink-muted)]',
         )}
       >
-        {message.content}
+        {message.runtimeSource === 'antigravity-acp' && (
+          <div className="xd-mono mb-1 flex items-center gap-1 text-[9.5px] text-[var(--xd-commit)]">
+            <ShieldCheck className="size-2.5 shrink-0" />
+            <span>
+              Antigravity ACP
+              {message.modelId
+                ? ` · ${message.modelId.replace(/^antigravity\//, '')}`
+                : ''}
+            </span>
+          </div>
+        )}
+        <div>{message.content}</div>
       </div>
     </div>
   )

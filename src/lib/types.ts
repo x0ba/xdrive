@@ -148,7 +148,12 @@ export interface MarbleDocumentFile {
   intentHistory: MarbleOpProposal[]
 }
 
-export type AIProviderId = 'opencode-go' | 'xai' | 'claude' | 'openai'
+export type AIProviderId =
+  | 'antigravity'
+  | 'opencode-go'
+  | 'xai'
+  | 'claude'
+  | 'openai'
 
 export interface AIModelSpec {
   id: string
@@ -168,7 +173,7 @@ export interface AISubscription {
   tagline: string
   planName: string
   connected: boolean
-  authMethod: 'subscription_oauth' | 'api_key' | 'cli_bridge'
+  authMethod: 'antigravity_acp' | 'subscription_oauth' | 'api_key' | 'cli_bridge'
   maskedCredential?: string
   status: 'active' | 'rate_limited' | 'disconnected'
   models: AIModelSpec[]
@@ -221,6 +226,8 @@ export interface AIMessage {
   timestamp: string
   modelId?: string
   providerId?: AIProviderId
+  runtimeSource?: 'antigravity-acp' | 'api' | 'synthesizer'
+  thoughts?: string[]
   attachedElements?: SelectedMarbleElement[]
   attachedSketches?: SketchAnnotation[]
   proposal?: MarbleOpProposal

@@ -23,7 +23,7 @@ const DEFAULT_SELECTED_ELEMENTS = DEMO_STAGE_NODES.filter((node) =>
 
 function CollaboratorDeskDemo() {
   const [mode, setMode] = useState<CanvasInteractionMode>('select')
-  const [modelId, setModelId] = useState('xai/grok-4.7')
+  const [modelId, setModelId] = useState('antigravity/default')
   const [selectedIds, setSelectedIds] = useState(['sec-abstract', 'eq-bell'])
   const [sketches, setSketches] = useState<SketchAnnotation[]>([])
   const [strokes, setStrokes] = useState<SketchStroke[]>([])

@@ -52,34 +52,20 @@ export interface ConnectedModelOption {
 
 export const PROMPT_MODELS: ConnectedModelOption[] = [
   {
+    id: 'antigravity/default',
+    providerId: 'antigravity',
+    group: 'Google Antigravity',
+    label: 'Antigravity · Gemini (Google AI Plan)',
+    modelName: 'Gemini (Antigravity)',
+    supportsVisionSketch: true,
+  },
+  {
     id: 'opencode-go/gemini-4-argon',
     providerId: 'opencode-go',
     group: 'OpenCode Go',
     label: 'Gemini 4 Argon',
     modelName: 'Gemini 4 Argon',
     supportsVisionSketch: true,
-  },
-  {
-    id: 'opencode-go/grok-4.7',
-    providerId: 'opencode-go',
-    group: 'OpenCode Go',
-    label: 'Grok 4.7 (Go)',
-    modelName: 'Grok 4.7',
-    supportsVisionSketch: true,
-  },
-  {
-    id: 'opencode-go/claude-haiku-5-5',
-    providerId: 'opencode-go',
-    group: 'OpenCode Go',
-    label: 'Claude Haiku 5.5',
-    modelName: 'Claude Haiku 5.5',
-  },
-  {
-    id: 'opencode-go/deepseek-v4.1-flash',
-    providerId: 'opencode-go',
-    group: 'OpenCode Go',
-    label: 'DeepSeek V4.1 Flash',
-    modelName: 'DeepSeek V4.1 Flash',
   },
   {
     id: 'xai/grok-4.7',

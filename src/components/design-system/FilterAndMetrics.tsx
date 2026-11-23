@@ -458,6 +458,13 @@ export const DEFAULT_COMPOSER_MODELS: Pick<
   'id' | 'name' | 'providerId' | 'badge' | 'role'
 >[] = [
   {
+    id: 'antigravity/default',
+    name: 'Gemini (Google AI Plan)',
+    providerId: 'antigravity',
+    badge: 'Antigravity',
+    role: 'implementation',
+  },
+  {
     id: 'grok-4.7',
     name: 'Grok 4.7',
     providerId: 'xai',

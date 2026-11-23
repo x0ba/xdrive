@@ -11,6 +11,7 @@
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as McpRouteImport } from './routes/mcp'
+import { Route as ApiAiRouteImport } from './routes/api.ai'
 import { Route as ApiLatexRouteImport } from './routes/api.latex'
 import { Route as ApiMarbleRouteImport } from './routes/api.marble'
 
@@ -22,6 +23,11 @@ const IndexRoute = IndexRouteImport.update({
 const McpRoute = McpRouteImport.update({
   id: '/mcp',
   path: '/mcp',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiAiRoute = ApiAiRouteImport.update({
+  id: '/api/ai',
+  path: '/api/ai',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ApiLatexRoute = ApiLatexRouteImport.update({
@@ -38,12 +44,14 @@ const ApiMarbleRoute = ApiMarbleRouteImport.update({
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/mcp': typeof McpRoute
+  '/api/ai': typeof ApiAiRoute
   '/api/latex': typeof ApiLatexRoute
   '/api/marble': typeof ApiMarbleRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/mcp': typeof McpRoute
+  '/api/ai': typeof ApiAiRoute
   '/api/latex': typeof ApiLatexRoute
   '/api/marble': typeof ApiMarbleRoute
 }
@@ -51,20 +59,22 @@ export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/mcp': typeof McpRoute
+  '/api/ai': typeof ApiAiRoute
   '/api/latex': typeof ApiLatexRoute
   '/api/marble': typeof ApiMarbleRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/mcp' | '/api/latex' | '/api/marble'
+  fullPaths: '/' | '/mcp' | '/api/ai' | '/api/latex' | '/api/marble'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/mcp' | '/api/latex' | '/api/marble'
-  id: '__root__' | '/' | '/mcp' | '/api/latex' | '/api/marble'
+  to: '/' | '/mcp' | '/api/ai' | '/api/latex' | '/api/marble'
+  id: '__root__' | '/' | '/mcp' | '/api/ai' | '/api/latex' | '/api/marble'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   McpRoute: typeof McpRoute
+  ApiAiRoute: typeof ApiAiRoute
   ApiLatexRoute: typeof ApiLatexRoute
   ApiMarbleRoute: typeof ApiMarbleRoute
 }
@@ -83,6 +93,13 @@ declare module '@tanstack/react-router' {
       path: '/mcp'
       fullPath: '/mcp'
       preLoaderRoute: typeof McpRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/ai': {
+      id: '/api/ai'
+      path: '/api/ai'
+      fullPath: '/api/ai'
+      preLoaderRoute: typeof ApiAiRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/api/latex': {
@@ -105,6 +122,7 @@ declare module '@tanstack/react-router' {
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   McpRoute: McpRoute,
+  ApiAiRoute: ApiAiRoute,
   ApiLatexRoute: ApiLatexRoute,
   ApiMarbleRoute: ApiMarbleRoute,
 }

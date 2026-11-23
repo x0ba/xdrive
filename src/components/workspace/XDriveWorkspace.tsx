@@ -59,6 +59,7 @@ import {
   DOCUMENT_DONTS_SYSTEM_SLUG,
   INITIAL_AI_SUBSCRIPTIONS,
   INITIAL_WORKSPACE_DOCS,
+  MarbleCollaborationError,
   PREDEFINED_MARBLE_TEMPLATES,
   applyMarbleOpsClient,
   buildInteractiveMarbleIframeDoc,
@@ -70,6 +71,18 @@ import {
   resolveEvergreenDesignContext,
 } from '#/lib/marble'
 import type { MarbleActionKind } from '#/lib/marble'
+import {
+  applyAntigravityStatusToSubscriptions,
+  authenticateAntigravity,
+  fetchAntigravityStatus,
+  installAntigravityBinary,
+  logoutAntigravity,
+} from '#/lib/ai/antigravity-client'
+import { toXDriveAntigravityModelId } from '#/lib/ai/antigravity-types'
+import type {
+  AntigravityAuthMethodId,
+  AntigravityRuntimeStatus,
+} from '#/lib/ai/antigravity-types'
 import type {
   AIMessage,
   AIModelSpec,
@@ -411,10 +424,14 @@ function providerFor(
 ): AIProviderId {
   const match = models.find((model) => model.id === modelId)
   if (match) return match.providerId
+  if (modelId.startsWith('antigravity/') || modelId.startsWith('gemini')) {
+    return 'antigravity'
+  }
   if (modelId.startsWith('claude')) return 'claude'
   if (modelId.includes('gpt') || modelId.includes('openai')) return 'openai'
   if (modelId.includes('grok') || modelId.startsWith('xai/')) return 'xai'
-  return 'opencode-go'
+  if (modelId.startsWith('opencode-go/')) return 'opencode-go'
+  return 'antigravity'
 }
 
 function cleanStageNote(note: string): string {
@@ -602,7 +619,15 @@ export function XDriveWorkspace({
     () => INITIAL_AI_SUBSCRIPTIONS.map(toManaged),
   )
   const [roles, setRoles] = useState<RoleAssignments>(DEFAULT_ROLE_ASSIGNMENTS)
-  const [modelId, setModelId] = useState('xai/grok-4.7')
+  const [modelId, setModelId] = useState('antigravity/default')
+  const [antigravityStatus, setAntigravityStatus] =
+    useState<AntigravityRuntimeStatus | null>(null)
+  const [antigravityBusy, setAntigravityBusy] = useState<string | null>(null)
+  const [antigravityError, setAntigravityError] = useState<string | null>(null)
+  const [thinkingState, setThinkingState] = useState<{
+    threadId: string
+    label: string
+  } | null>(null)
   const [category, setCategory] = useState<MarbleAppCategory | 'all'>('all')
   const [sortBy, setSortBy] = useState<SortOption>('updated')
   const [viewMode, setViewMode] = useState<DriveViewMode>('preview')
@@ -781,10 +806,131 @@ export function XDriveWorkspace({
       nodeCount: doc.nodeCount,
     }))
 
-  const lastMessage = thread.at(-1)
-  const stageProgress =
-    lastMessage?.stages?.filter((stage) => stage.completed).length ?? 0
-  const sidebarKey = `${activeDoc?.id ?? 'drive'}:${lastMessage?.id ?? 'empty'}:${lastMessage?.proposal?.status ?? 'none'}:${stageProgress}`
+  const sidebarKey = activeDoc?.id ?? 'drive'
+
+  function applyLiveAntigravityStatus(status: AntigravityRuntimeStatus) {
+    setAntigravityStatus(status)
+    setSubscriptions((prev) =>
+      applyAntigravityStatusToSubscriptions(prev, status),
+    )
+    if (status.authenticated) {
+      const preferred = status.currentModelId
+        ? toXDriveAntigravityModelId(status.currentModelId)
+        : status.models[0]
+          ? toXDriveAntigravityModelId(status.models[0].id)
+          : 'antigravity/default'
+      setModelId((current) =>
+        current === 'antigravity/default' || !current.startsWith('antigravity/')
+          ? preferred
+          : current,
+      )
+      setRoles((prev) => ({
+        implementation:
+          prev.implementation === 'antigravity/default'
+            ? preferred
+            : prev.implementation,
+        exploration:
+          prev.exploration === 'antigravity/default'
+            ? preferred
+            : prev.exploration,
+        review: prev.review === 'antigravity/default' ? preferred : prev.review,
+        design: prev.design === 'antigravity/default' ? preferred : prev.design,
+      }))
+    }
+  }
+
+  async function refreshAntigravity() {
+    setAntigravityBusy('refresh')
+    setAntigravityError(null)
+    try {
+      const status = await fetchAntigravityStatus()
+      applyLiveAntigravityStatus(status)
+    } catch (error) {
+      setAntigravityError(
+        error instanceof Error
+          ? error.message
+          : 'Could not reach Antigravity ACP backend.',
+      )
+    } finally {
+      setAntigravityBusy(null)
+    }
+  }
+
+  async function handleAuthenticateAntigravity(
+    methodId: AntigravityAuthMethodId | string,
+    options?: { apiKey?: string },
+  ) {
+    setAntigravityBusy(methodId)
+    setAntigravityError(null)
+    try {
+      const status = await authenticateAntigravity(methodId, options)
+      applyLiveAntigravityStatus(status)
+      if (status.authenticated) {
+        setAgentStatus(
+          `Connected Google Antigravity (${status.tier || 'Google AI Plan'}) with ${status.models.length || 1} model${status.models.length === 1 ? '' : 's'}.`,
+        )
+      }
+    } catch (error) {
+      setAntigravityError(
+        error instanceof Error
+          ? error.message
+          : 'Google Antigravity sign-in failed.',
+      )
+    } finally {
+      setAntigravityBusy(null)
+    }
+  }
+
+  async function handleLogoutAntigravity() {
+    setAntigravityBusy('logout')
+    setAntigravityError(null)
+    try {
+      const status = await logoutAntigravity()
+      applyLiveAntigravityStatus(status)
+      setAgentStatus('Signed out of Google Antigravity.')
+    } catch (error) {
+      setAntigravityError(
+        error instanceof Error ? error.message : 'Sign-out failed.',
+      )
+    } finally {
+      setAntigravityBusy(null)
+    }
+  }
+
+  async function handleInstallAntigravityBinary() {
+    setAntigravityBusy('install')
+    setAntigravityError(null)
+    try {
+      const status = await installAntigravityBinary()
+      applyLiveAntigravityStatus(status)
+      setAgentStatus(
+        'Installed official Google Antigravity ACP binary from the ACP Registry.',
+      )
+    } catch (error) {
+      setAntigravityError(
+        error instanceof Error
+          ? error.message
+          : 'Failed to install official Antigravity ACP binary.',
+      )
+    } finally {
+      setAntigravityBusy(null)
+    }
+  }
+
+  useEffect(() => {
+    let active = true
+    void fetchAntigravityStatus()
+      .then((status) => {
+        if (!active) return
+        applyLiveAntigravityStatus(status)
+      })
+      .catch(() => {
+        // Static/Storybook environments do not expose /api/ai.
+      })
+    return () => {
+      active = false
+    }
+  }, [])
 
   function patchFile(
     id: string,
@@ -1159,6 +1305,10 @@ export function XDriveWorkspace({
     }
     const threadId = input.doc?.id ?? 'drive'
     upsertThreadMessage(threadId, user)
+    setThinkingState({
+      threadId,
+      label: `Running Google Antigravity ACP (${input.model.replace(/^antigravity\//, '')})…`,
+    })
     try {
       const liveEvergreen = libraryRef.current.filter(
         (item) =>
@@ -1200,8 +1350,10 @@ export function XDriveWorkspace({
           role: 'assistant',
           content: result.proposal.note,
           timestamp: new Date().toISOString(),
-          modelId: input.model,
+          modelId: result.runtime?.modelId ?? input.model,
           providerId: input.providerId,
+          runtimeSource: result.source,
+          thoughts: result.thoughts,
           proposal: { ...result.proposal, status: 'committed' },
           stages: result.stages.map((stage) => ({ ...stage, completed: true })),
         }
@@ -1266,8 +1418,10 @@ export function XDriveWorkspace({
         role: 'assistant',
         content: result.proposal.note,
         timestamp: new Date().toISOString(),
-        modelId: input.model,
+        modelId: result.runtime?.modelId ?? input.model,
         providerId: input.providerId,
+        runtimeSource: result.source,
+        thoughts: result.thoughts,
         stages,
         proposal,
       }
@@ -1277,6 +1431,12 @@ export function XDriveWorkspace({
     } catch (error) {
       const message =
         error instanceof Error ? error.message : 'The collaborator failed'
+      if (
+        error instanceof MarbleCollaborationError &&
+        (error.code === 'AUTH_REQUIRED' || error.code === 'BINARY_MISSING')
+      ) {
+        void refreshAntigravity()
+      }
       setAgentStatus(message)
       upsertThreadMessage(threadId, {
         id: messageId('system'),
@@ -1284,6 +1444,10 @@ export function XDriveWorkspace({
         content: message,
         timestamp: new Date().toISOString(),
       })
+    } finally {
+      setThinkingState((current) =>
+        current?.threadId === threadId ? null : current,
+      )
     }
   }
 
@@ -2336,6 +2500,17 @@ export function XDriveWorkspace({
                       setSubscriptions(nextSubscriptions)
                       setRoles(nextRoles)
                     }}
+                    antigravityStatus={antigravityStatus}
+                    antigravityBusy={antigravityBusy}
+                    antigravityError={antigravityError}
+                    onRefreshAntigravity={() => void refreshAntigravity()}
+                    onAuthenticateAntigravity={(methodId, options) =>
+                      void handleAuthenticateAntigravity(methodId, options)
+                    }
+                    onLogoutAntigravity={() => void handleLogoutAntigravity()}
+                    onInstallAntigravityBinary={() =>
+                      void handleInstallAntigravityBinary()
+                    }
                   />
                 </div>
               )}
@@ -2398,6 +2573,12 @@ export function XDriveWorkspace({
             }}
             onKeep={keepProposal}
             onDiscard={discardProposal}
+            onOpenProviders={() => visit('home', 'subscriptions')}
+            isThinking={thinkingState?.threadId === (activeDoc?.id ?? 'drive')}
+            thinkingLabel={thinkingState?.label}
+            antigravityConnected={
+              antigravityStatus ? antigravityStatus.authenticated : undefined
+            }
           />
         )}
       </div>

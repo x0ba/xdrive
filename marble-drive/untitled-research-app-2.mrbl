@@ -1,0 +1,122 @@
+<!doctype html>
+<html lang="en" data-marble="1">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="marble:capabilities" content="storage; net=none">
+<meta name="marble:design-system" content="document-design-system.mrbl,document-donts-system.mrbl">
+<title>Untitled Research App</title>
+<style>
+:root { --xd-canvas:#ffffff;--xd-rail:#f7f8fa;--xd-elevated:#f1f3f7;--xd-surface-hover:#eaeef4;--xd-surface-active:#e2e7f0;--xd-ink:#0f131a;--xd-ink-secondary:#4a5568;--xd-ink-muted:#718096;--xd-border:#e3e8ee;--xd-border-strong:#cbd5e1;--xd-accent:#5e6ad2;--xd-accent-hover:#4e5ac0;--xd-accent-soft:rgba(94,106,210,0.12);--xd-accent-border:rgba(94,106,210,0.35);--xd-commit:#1f9d6b;--xd-commit-soft:rgba(31,157,107,0.12);--xd-sketch:#d9822b;--xd-sketch-soft:rgba(217,130,43,0.14);--xd-danger:#e5484d;--xd-danger-soft:rgba(229,72,77,0.12);--ink:#0f131a;--muted:#4a5568;--faint:#718096;--line:#e3e8ee;--line-strong:#cbd5e1;--paper:#ffffff;--panel:#f7f8fa;--panel-2:#f1f3f7;--accent:#5e6ad2;--accent-2:#1f9d6b;--accent-soft:rgba(94,106,210,0.12);--good:#1f9d6b;--warn:#d9822b;--danger:#e5484d;--radius:6px;--shadow:none;--serif:"Newsreader",Georgia,Cambria,"Times New Roman",serif;--sans:"Inter",-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;--mono:"JetBrains Mono",ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace; }
+@media (prefers-color-scheme: dark) { :root { --xd-canvas:#0b0c0e;--xd-rail:#101216;--xd-elevated:#161920;--xd-surface-hover:#1c2029;--xd-surface-active:#232834;--xd-ink:#f3f5f8;--xd-ink-secondary:#a2abb8;--xd-ink-muted:#6e7785;--xd-border:#22252e;--xd-border-strong:#313644;--xd-accent:#5e6ad2;--xd-accent-hover:#6e7ae2;--xd-accent-soft:rgba(94,106,210,0.16);--xd-accent-border:rgba(94,106,210,0.45);--xd-commit:#2ea071;--xd-commit-soft:rgba(46,160,113,0.16);--xd-sketch:#e59934;--xd-sketch-soft:rgba(229,153,52,0.18);--xd-danger:#e5484d;--xd-danger-soft:rgba(229,72,77,0.16);--ink:#f3f5f8;--muted:#a2abb8;--faint:#6e7785;--line:#22252e;--line-strong:#313644;--paper:#0b0c0e;--panel:#101216;--panel-2:#161920;--accent:#5e6ad2;--accent-2:#2ea071;--accent-soft:rgba(94,106,210,0.16);--good:#2ea071;--warn:#e59934;--danger:#e5484d;--radius:6px;--shadow:none; } }
+html[data-xdrive-theme="light"] { --xd-canvas:#ffffff;--xd-rail:#f7f8fa;--xd-elevated:#f1f3f7;--xd-surface-hover:#eaeef4;--xd-surface-active:#e2e7f0;--xd-ink:#0f131a;--xd-ink-secondary:#4a5568;--xd-ink-muted:#718096;--xd-border:#e3e8ee;--xd-border-strong:#cbd5e1;--xd-accent:#5e6ad2;--xd-accent-hover:#4e5ac0;--xd-accent-soft:rgba(94,106,210,0.12);--xd-accent-border:rgba(94,106,210,0.35);--xd-commit:#1f9d6b;--xd-commit-soft:rgba(31,157,107,0.12);--xd-sketch:#d9822b;--xd-sketch-soft:rgba(217,130,43,0.14);--xd-danger:#e5484d;--xd-danger-soft:rgba(229,72,77,0.12);--ink:#0f131a;--muted:#4a5568;--faint:#718096;--line:#e3e8ee;--line-strong:#cbd5e1;--paper:#ffffff;--panel:#f7f8fa;--panel-2:#f1f3f7;--accent:#5e6ad2;--accent-2:#1f9d6b;--accent-soft:rgba(94,106,210,0.12);--good:#1f9d6b;--warn:#d9822b;--danger:#e5484d;--radius:6px;--shadow:none;--serif:"Newsreader",Georgia,Cambria,"Times New Roman",serif;--sans:"Inter",-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;--mono:"JetBrains Mono",ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace; color-scheme: light; }
+html[data-xdrive-theme="dark"] { --xd-canvas:#0b0c0e;--xd-rail:#101216;--xd-elevated:#161920;--xd-surface-hover:#1c2029;--xd-surface-active:#232834;--xd-ink:#f3f5f8;--xd-ink-secondary:#a2abb8;--xd-ink-muted:#6e7785;--xd-border:#22252e;--xd-border-strong:#313644;--xd-accent:#5e6ad2;--xd-accent-hover:#6e7ae2;--xd-accent-soft:rgba(94,106,210,0.16);--xd-accent-border:rgba(94,106,210,0.45);--xd-commit:#2ea071;--xd-commit-soft:rgba(46,160,113,0.16);--xd-sketch:#e59934;--xd-sketch-soft:rgba(229,153,52,0.18);--xd-danger:#e5484d;--xd-danger-soft:rgba(229,72,77,0.16);--ink:#f3f5f8;--muted:#a2abb8;--faint:#6e7785;--line:#22252e;--line-strong:#313644;--paper:#0b0c0e;--panel:#101216;--panel-2:#161920;--accent:#5e6ad2;--accent-2:#2ea071;--accent-soft:rgba(94,106,210,0.16);--good:#2ea071;--warn:#e59934;--danger:#e5484d;--radius:6px;--shadow:none; color-scheme: dark; }
+* { box-sizing: border-box; }
+html, body { margin: 0; min-height: 100%; }
+body {
+  background: var(--paper); color: var(--ink);
+  font: 14.5px/1.6 var(--sans); letter-spacing: -0.006em;
+  -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale;
+}
+button, input, select, textarea { font: inherit; color: inherit; }
+button { cursor: pointer; }
+:focus-visible { outline: 1.5px solid var(--accent); outline-offset: 2px; }
+[data-marble-editable]:focus { outline: none; box-shadow: inset 0 -1.5px 0 var(--accent); }
+.kicker {
+  margin: 0 0 .3rem; color: var(--muted);
+  font: 500 .78rem/1.4 var(--sans); letter-spacing: -0.004em; text-transform: none;
+}
+h1 {
+  font-family: var(--serif); font-size: 2rem; font-weight: 500;
+  letter-spacing: -0.024em; line-height: 1.12; margin: 0; color: var(--ink);
+}
+h2 {
+  font-family: var(--serif); font-size: 1.25rem; font-weight: 500;
+  letter-spacing: -0.016em; line-height: 1.24; margin: 0 0 .4rem; color: var(--ink);
+}
+h3 {
+  font-family: var(--sans); font-size: .92rem; font-weight: 600;
+  letter-spacing: -0.01em; line-height: 1.35; margin: 0 0 .3rem; color: var(--ink);
+}
+p { margin: 0; max-width: 68ch; }
+.lede { color: var(--muted); max-width: 62ch; font-size: .96rem; line-height: 1.6; }
+marble-alt { display: block; }
+marble-alt > [data-marble-alt] { display: none; }
+marble-alt[data-marble-active="v1"] > [data-marble-alt="v1"],
+marble-alt[data-marble-active="v2"] > [data-marble-alt="v2"],
+marble-alt[data-marble-active="v3"] > [data-marble-alt="v3"],
+marble-alt[data-marble-active="v4"] > [data-marble-alt="v4"],
+marble-alt[data-marble-active="v5"] > [data-marble-alt="v5"],
+marble-alt[data-marble-active="v6"] > [data-marble-alt="v6"] { display: block; }
+marble-alt:not([data-marble-active]) > [data-marble-alt]:first-child { display: block; }
+[data-marble-sortable] { padding-left: 1.4rem; }
+.pill, .choose button, .tex-edit, .add {
+  border: 1px solid var(--line); background: var(--panel); border-radius: 4px;
+  padding: .2rem .55rem; font: 500 .76rem/1.35 var(--sans); color: var(--muted);
+  transition: border-color 120ms ease, color 120ms ease, background-color 120ms ease;
+}
+.pill:hover, .choose button:hover, .tex-edit:hover, .add:hover {
+  border-color: var(--line-strong); color: var(--ink);
+}
+.choose { display: inline-flex; gap: .2rem; flex-wrap: wrap; padding: 2px; border: 1px solid var(--line); border-radius: 6px; background: var(--panel); }
+.choose button { border-color: transparent; background: transparent; }
+.choose button[aria-pressed="true"] { background: var(--paper); color: var(--ink); border-color: var(--line); }
+.add { border-style: dashed; color: var(--accent); background: transparent; }
+.card, section.block {
+  background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius);
+  padding: .95rem 1.1rem; box-shadow: none;
+}
+
+main { max-width: 52rem; margin: 0 auto; padding: 2.2rem 1.5rem 4rem; }
+header.app-head { padding-bottom: 1.1rem; margin-bottom: 1.35rem; border-bottom: 1px solid var(--line); }
+h1 { margin: 0 0 .4rem; }
+.sections { display: flex; flex-direction: column; gap: .75rem; }
+button.add { margin-top: 1rem; }
+</style>
+</head>
+<body>
+<main>
+  <header class="app-head">
+    <p data-marble-id="ur83to65" class="kicker">Workspace document</p>
+    <h1 data-marble-id="fungni1q" data-marble-editable>Untitled Research App</h1>
+    <p data-marble-id="4savj73a" class="lede" data-marble-editable>a kanban board</p>
+  </header>
+  <div data-marble-id="d8zmbcwn" id="d8zmbcwn" class="sections" data-marble-sortable="sections">
+<section data-marble-id="m4pqab88" class="block" data-marble-removable data-marble-selectable><h2 data-marble-id="2g8ue6ol" data-marble-editable>Overview</h2><p data-marble-id="xp6vjrru" data-marble-editable>A kanban board.</p></section>
+<section data-marble-id="vtsbuyyv" class="block" data-marble-removable data-marble-selectable><h2 data-marble-id="88fvwnq0" data-marble-editable>Method</h2><p data-marble-id="6tldqpay" data-marble-editable>A kanban board.</p></section>
+<section data-marble-id="1ev40c4t" class="block" data-marble-removable data-marble-selectable><h2 data-marble-id="3kol1zp3" data-marble-editable>Evidence</h2><p data-marble-id="t7yq3qex" data-marble-editable>A kanban board.</p></section>
+<section data-marble-id="k3co2nqw" class="block" data-marble-removable data-marble-selectable><h2 data-marble-id="nrub1409" data-marble-editable>Open questions</h2><p data-marble-id="vf8rtyb2" data-marble-editable>A kanban board.</p></section>
+  </div>
+  <button data-marble-id="ul4qrb17" class="add" type="button" data-marble-add="#nmhf2uch" data-marble-into="#d8zmbcwn">+ Add section</button>
+  <template data-marble-id="nmhf2uch" id="nmhf2uch"><section class="block" data-marble-removable data-marble-selectable><h2 data-marble-editable>New section</h2><p data-marble-editable>State the claim, method, or observation for this section.</p></section></template>
+</main>
+<script>
+(function () {
+  function boot(start) {
+    if (window.marble) start(window.marble);
+    else document.addEventListener('marble:ready', function () { start(window.marble); }, { once: true });
+  }
+  boot(function (marble) {
+    var MID = 'data-marble-' + 'id';
+    var AFFORDANCES = [
+      'data-marble-editable',
+      'data-marble-sortable',
+      'data-marble-canvas',
+      'data-marble-resizable',
+      'data-marble-removable',
+      'data-marble-add',
+      'data-marble-toggle',
+      'data-marble-choose',
+      'data-marble-expand',
+      'data-marble-step',
+      'data-marble-note'
+    ];
+    if (marble && marble.address) {
+      marble.address(document.querySelectorAll(AFFORDANCES.map(function (a) { return '[' + a + ']'; }).join(',')));
+    }
+    marble.register(function () {});
+  });
+})();
+</script>
+</body>
+</html>

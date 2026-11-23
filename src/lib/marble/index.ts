@@ -24,6 +24,7 @@ export {
 export { INITIAL_AI_SUBSCRIPTIONS } from './subscriptions-seed'
 
 export {
+  MarbleCollaborationError,
   detectMarbleAction,
   generateMarbleCollaboration,
   resolveEvergreenDesignContext,

@@ -25,6 +25,57 @@ export const ModelsAndProviders: Story = {
   name: 'Models & Providers',
   args: {
     variant: 'page',
+    antigravityStatus: {
+      ok: true,
+      binaryAvailable: true,
+      binarySource: 'agy-cli',
+      binaryPath: '/opt/homebrew/bin/agy acp',
+      agentName: 'Antigravity ACP Server',
+      agentVersion: '1.5.12',
+      protocolVersion: 1,
+      authenticated: true,
+      activeAuthMethod: 'oauth-personal',
+      authMethods: [
+        {
+          id: 'oauth-personal',
+          name: 'Log in with Google',
+          description: 'Log in with your Google account',
+        },
+        {
+          id: 'oauth-business',
+          name: 'Log in with Gemini Enterprise',
+          description: 'Log in with your Gemini Enterprise account',
+        },
+        {
+          id: 'gemini-api-key',
+          name: 'Gemini API key',
+          description: 'Use an API key with Gemini Developer API',
+        },
+        {
+          id: 'agent-platform',
+          name: 'Gemini Enterprise Agent Platform',
+          description: 'Use Vertex AI with Application Default Credentials',
+        },
+      ],
+      tier: 'Google AI Pro',
+      models: [
+        {
+          id: 'default',
+          name: 'Gemini (Google AI Plan)',
+          description: 'Active Gemini model from your Google AI plan',
+          isDefault: true,
+        },
+      ],
+      currentModelId: 'default',
+      supportsLogout: true,
+      supportsImagePrompt: true,
+      compliance: {
+        protocol: 'ACP (JSON-RPC 2.0 over stdio)',
+        unmodifiedOfficialBinary: true,
+        nativeAuthOnly: true,
+        tokenExtraction: false,
+      },
+    },
   },
   decorators: [
     (Story) => (
