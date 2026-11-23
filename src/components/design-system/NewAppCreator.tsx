@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import {
   ArrowUp,
   Check,
@@ -106,17 +107,71 @@ export function NewAppButton({
   defaultOpen = false,
 }: NewAppButtonProps) {
   const [open, setOpen] = useState(defaultOpen)
+  const [menuPos, setMenuPos] = useState<{
+    top: number
+    left: number
+    maxHeight: number
+  } | null>(null)
   const rootRef = useRef<HTMLDivElement | null>(null)
+  const buttonRef = useRef<HTMLButtonElement | null>(null)
+  const menuRef = useRef<HTMLDivElement | null>(null)
+
+  const updatePosition = useCallback(() => {
+    const trigger = buttonRef.current
+    if (!trigger || typeof window === 'undefined') return
+    const rect = trigger.getBoundingClientRect()
+    const menuWidth = 288
+    const gap = 6
+    const margin = 8
+    const left = Math.max(
+      margin,
+      Math.min(rect.left, window.innerWidth - menuWidth - margin),
+    )
+    const availableBelow = window.innerHeight - rect.bottom - gap - margin
+    const availableAbove = rect.top - gap - margin
+    const openAbove = availableBelow < 260 && availableAbove > availableBelow
+    const top = openAbove
+      ? Math.max(margin, rect.top - gap - Math.min(440, availableAbove))
+      : rect.bottom + gap
+    const maxHeight = Math.max(
+      180,
+      openAbove ? availableAbove : availableBelow,
+    )
+    setMenuPos({ top, left, maxHeight })
+  }, [])
+
+  const useIsomorphicLayoutEffect =
+    typeof window !== 'undefined' ? useLayoutEffect : useEffect
+
+  useIsomorphicLayoutEffect(() => {
+    if (!open) {
+      setMenuPos(null)
+      return
+    }
+    updatePosition()
+    window.addEventListener('resize', updatePosition)
+    window.addEventListener('scroll', updatePosition, true)
+    return () => {
+      window.removeEventListener('resize', updatePosition)
+      window.removeEventListener('scroll', updatePosition, true)
+    }
+  }, [open, updatePosition])
 
   useEffect(() => {
     if (!open) return
     function onPointerDown(event: MouseEvent) {
-      if (rootRef.current && !rootRef.current.contains(event.target as Node)) {
+      const target = event.target as Node
+      const insideTrigger = Boolean(rootRef.current?.contains(target))
+      const insideMenu = Boolean(menuRef.current?.contains(target))
+      if (!insideTrigger && !insideMenu) {
         setOpen(false)
       }
     }
     function onKeyDown(event: KeyboardEvent) {
-      if (event.key === 'Escape') setOpen(false)
+      if (event.key === 'Escape') {
+        setOpen(false)
+        buttonRef.current?.focus()
+      }
     }
     window.addEventListener('mousedown', onPointerDown)
     window.addEventListener('keydown', onKeyDown)
@@ -127,10 +182,125 @@ export function NewAppButton({
   }, [open])
 
   const quickTemplates = templates.slice(0, 6)
+  const portalTarget =
+    typeof document !== 'undefined'
+      ? (rootRef.current?.closest('[data-component="xdrive-workspace"]') ??
+          document.body)
+      : null
+
+  const menuContent =
+    open && menuPos ? (
+      <div
+        ref={menuRef}
+        role="menu"
+        aria-label="Create new app or folder"
+        style={{
+          top: menuPos.top,
+          left: menuPos.left,
+          maxHeight: menuPos.maxHeight,
+        }}
+        className="fixed z-60 flex w-72 flex-col overflow-y-auto rounded-lg border border-[var(--xd-border-strong)] bg-[var(--xd-canvas)] py-1.5 text-[var(--xd-ink)] shadow-xl"
+      >
+        <button
+          type="button"
+          role="menuitem"
+          onClick={() => {
+            setOpen(false)
+            onOpenAIAgent?.()
+          }}
+          className="flex w-full items-start gap-2.5 px-3 py-2 text-left transition-colors hover:bg-[var(--xd-surface-hover)]"
+        >
+          <span className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded border border-[var(--xd-accent-border)] bg-[var(--xd-accent-soft)] text-[var(--xd-accent)]">
+            <Sparkles className="h-3.5 w-3.5" />
+          </span>
+          <span className="min-w-0 flex-1">
+            <span className="block text-[12.5px] font-medium text-[var(--xd-ink)]">
+              Build with AI agent
+            </span>
+            <span className="block text-[11px] leading-snug text-[var(--xd-ink-muted)]">
+              Describe a new app or document
+            </span>
+          </span>
+        </button>
+
+        <button
+          type="button"
+          role="menuitem"
+          onClick={() => {
+            setOpen(false)
+            onOpenTemplates?.()
+          }}
+          className="flex w-full items-start gap-2.5 px-3 py-2 text-left transition-colors hover:bg-[var(--xd-surface-hover)]"
+        >
+          <span className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded border border-[var(--xd-border-strong)] bg-[var(--xd-rail)] text-[var(--xd-ink-secondary)]">
+            <LayoutTemplate className="h-3.5 w-3.5" />
+          </span>
+          <span className="min-w-0 flex-1">
+            <span className="block text-[12.5px] font-medium text-[var(--xd-ink)]">
+              New from template
+            </span>
+            <span className="block text-[11px] leading-snug text-[var(--xd-ink-muted)]">
+              Start from your saved templates
+            </span>
+          </span>
+        </button>
+
+        {quickTemplates.length > 0 && (
+          <>
+            <div className="my-1.5 border-t border-[var(--xd-border)]" />
+            <div className="px-3 py-1 text-[11px] font-medium text-[var(--xd-ink-muted)]">
+              Templates
+            </div>
+            <div className="max-h-56 overflow-y-auto">
+              {quickTemplates.map((tpl) => (
+                <button
+                  key={tpl.id}
+                  type="button"
+                  role="menuitem"
+                  onClick={() => {
+                    setOpen(false)
+                    if (onQuickCreateTemplate) {
+                      onQuickCreateTemplate(tpl)
+                    } else {
+                      onOpenTemplates?.()
+                    }
+                  }}
+                  className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-[12px] text-[var(--xd-ink-secondary)] transition-colors hover:bg-[var(--xd-surface-hover)] hover:text-[var(--xd-ink)]"
+                >
+                  <span className="shrink-0 text-[var(--xd-accent)]">
+                    {getCategoryIcon(tpl.category, 'h-3.5 w-3.5')}
+                  </span>
+                  <span className="truncate">{tpl.title}</span>
+                </button>
+              ))}
+            </div>
+          </>
+        )}
+
+        {onCreateFolder && (
+          <>
+            <div className="my-1.5 border-t border-[var(--xd-border)]" />
+            <button
+              type="button"
+              role="menuitem"
+              onClick={() => {
+                setOpen(false)
+                onCreateFolder()
+              }}
+              className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-[12px] text-[var(--xd-ink-secondary)] transition-colors hover:bg-[var(--xd-surface-hover)] hover:text-[var(--xd-ink)]"
+            >
+              <FolderPlus className="h-3.5 w-3.5 shrink-0 text-[var(--xd-ink-muted)]" />
+              <span>New folder</span>
+            </button>
+          </>
+        )}
+      </div>
+    ) : null
 
   return (
     <div ref={rootRef} className="relative">
       <button
+        ref={buttonRef}
         type="button"
         aria-haspopup="menu"
         aria-expanded={open}
@@ -148,107 +318,7 @@ export function NewAppButton({
         />
       </button>
 
-      {open && (
-        <div
-          role="menu"
-          aria-label="Create new app or folder"
-          className="absolute left-0 top-10 z-40 w-64 overflow-hidden rounded-lg border border-[var(--xd-border-strong)] bg-[var(--xd-canvas)] py-1.5 shadow-xl"
-        >
-          <button
-            type="button"
-            role="menuitem"
-            onClick={() => {
-              setOpen(false)
-              onOpenAIAgent?.()
-            }}
-            className="flex w-full items-start gap-2.5 px-3 py-2 text-left transition-colors hover:bg-[var(--xd-surface-hover)]"
-          >
-            <span className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded border border-[var(--xd-accent-border)] bg-[var(--xd-accent-soft)] text-[var(--xd-accent)]">
-              <Sparkles className="h-3.5 w-3.5" />
-            </span>
-            <span className="min-w-0 flex-1">
-              <span className="block text-[12.5px] font-medium text-[var(--xd-ink)]">
-                Build with AI agent
-              </span>
-              <span className="block text-[11px] leading-snug text-[var(--xd-ink-muted)]">
-                Describe a new app or document
-              </span>
-            </span>
-          </button>
-
-          <button
-            type="button"
-            role="menuitem"
-            onClick={() => {
-              setOpen(false)
-              onOpenTemplates?.()
-            }}
-            className="flex w-full items-start gap-2.5 px-3 py-2 text-left transition-colors hover:bg-[var(--xd-surface-hover)]"
-          >
-            <span className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded border border-[var(--xd-border-strong)] bg-[var(--xd-rail)] text-[var(--xd-ink-secondary)]">
-              <LayoutTemplate className="h-3.5 w-3.5" />
-            </span>
-            <span className="min-w-0 flex-1">
-              <span className="block text-[12.5px] font-medium text-[var(--xd-ink)]">
-                New from template
-              </span>
-              <span className="block text-[11px] leading-snug text-[var(--xd-ink-muted)]">
-                Start from your saved templates
-              </span>
-            </span>
-          </button>
-
-          {quickTemplates.length > 0 && (
-            <>
-              <div className="my-1.5 border-t border-[var(--xd-border)]" />
-              <div className="px-3 py-1 text-[11px] font-medium text-[var(--xd-ink-muted)]">
-                Templates
-              </div>
-              <div className="max-h-48 overflow-y-auto">
-                {quickTemplates.map((tpl) => (
-                  <button
-                    key={tpl.id}
-                    type="button"
-                    role="menuitem"
-                    onClick={() => {
-                      setOpen(false)
-                      if (onQuickCreateTemplate) {
-                        onQuickCreateTemplate(tpl)
-                      } else {
-                        onOpenTemplates?.()
-                      }
-                    }}
-                    className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-[12px] text-[var(--xd-ink-secondary)] transition-colors hover:bg-[var(--xd-surface-hover)] hover:text-[var(--xd-ink)]"
-                  >
-                    <span className="shrink-0 text-[var(--xd-accent)]">
-                      {getCategoryIcon(tpl.category, 'h-3.5 w-3.5')}
-                    </span>
-                    <span className="truncate">{tpl.title}</span>
-                  </button>
-                ))}
-              </div>
-            </>
-          )}
-
-          {onCreateFolder && (
-            <>
-              <div className="my-1.5 border-t border-[var(--xd-border)]" />
-              <button
-                type="button"
-                role="menuitem"
-                onClick={() => {
-                  setOpen(false)
-                  onCreateFolder()
-                }}
-                className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-[12px] text-[var(--xd-ink-secondary)] transition-colors hover:bg-[var(--xd-surface-hover)] hover:text-[var(--xd-ink)]"
-              >
-                <FolderPlus className="h-3.5 w-3.5 shrink-0 text-[var(--xd-ink-muted)]" />
-                <span>New folder</span>
-              </button>
-            </>
-          )}
-        </div>
-      )}
+      {menuContent && portalTarget ? createPortal(menuContent, portalTarget) : null}
     </div>
   )
 }

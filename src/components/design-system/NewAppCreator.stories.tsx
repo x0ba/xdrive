@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import type { Meta, StoryObj } from '@storybook/tanstack-react'
+import { expect, within } from 'storybook/test'
 import { seedDriveFolders } from './DriveExplorer'
 import { SidebarRail } from './NavigationShell'
 import type { PrimaryNavId } from './NavigationShell'
@@ -172,6 +173,20 @@ type Story = StoryObj<typeof meta>
 export const TopLeftNewButtonMenu: Story = {
   name: 'Top-Left New Button & Dropdown',
   render: () => <TopLeftNewButtonMenuDemo />,
+  play: async ({ canvasElement }) => {
+    const body = within(document.body)
+    const menu = await body.findByRole('menu', {
+      name: 'Create new app or folder',
+    })
+    const sidebar = canvasElement.querySelector('aside')
+    await expect(sidebar).not.toBeNull()
+    const menuRect = menu.getBoundingClientRect()
+    const sidebarRect = sidebar!.getBoundingClientRect()
+    // Menu must render portaled outside the 208px sidebar without horizontal clipping
+    await expect(menuRect.width).toBeGreaterThanOrEqual(280)
+    await expect(menuRect.right).toBeGreaterThan(sidebarRect.right)
+    await expect(sidebar!.contains(menu)).toBe(false)
+  },
 }
 
 /**

@@ -1,0 +1,522 @@
+@import 'katex/dist/katex.min.css';
+
+/* ============================================================================
+   xDrive LaTeX PDF Paper Stylesheet
+   Crisp publication-grade academic paper styling on Letter / A4 sheets
+   ============================================================================ */
+
+.xd-latex-paper {
+  position: relative;
+  background-color: #ffffff;
+  color: #111318;
+  font-family: var(--font-serif);
+  font-size: 13.5px;
+  line-height: 1.56;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  box-shadow: 0 2px 14px rgba(0, 0, 0, 0.24);
+  border: 1px solid rgba(15, 19, 26, 0.14);
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  padding: 66px 68px 54px;
+  box-sizing: border-box;
+  overflow: hidden;
+}
+
+.xd-latex-paper.is-inverted {
+  background-color: #14171e;
+  color: #e6eaf2;
+  border-color: var(--xd-border-strong);
+  box-shadow: 0 2px 16px rgba(0, 0, 0, 0.45);
+}
+
+.xd-latex-paper-body {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.xd-latex-paper.is-twocolumn .xd-latex-paper-body {
+  column-count: 2;
+  column-gap: 24px;
+  font-size: 12px;
+  line-height: 1.48;
+}
+
+.xd-latex-paper.is-twocolumn .xd-tex-maketitle,
+.xd-latex-paper.is-twocolumn .xd-tex-abstract {
+  column-span: all;
+}
+
+/* Title block */
+.xd-tex-maketitle {
+  text-align: center;
+  margin-bottom: 20px;
+  padding-bottom: 14px;
+  border-bottom: 1px solid rgba(17, 19, 24, 0.12);
+}
+
+.is-inverted .xd-tex-maketitle {
+  border-bottom-color: rgba(230, 234, 242, 0.14);
+}
+
+.xd-tex-title {
+  font-family: var(--font-serif);
+  font-size: 21px;
+  font-weight: 600;
+  line-height: 1.2;
+  letter-spacing: -0.018em;
+  margin: 0 0 8px;
+}
+
+.xd-tex-authors {
+  font-size: 13px;
+  color: #2f3542;
+  margin-bottom: 3px;
+}
+
+.is-inverted .xd-tex-authors {
+  color: #c5cddb;
+}
+
+.xd-tex-date {
+  font-size: 11.5px;
+  color: #5a6375;
+}
+
+.is-inverted .xd-tex-date {
+  color: #8f99ab;
+}
+
+/* Abstract */
+.xd-tex-abstract {
+  margin: 0 auto 18px;
+  max-width: 88%;
+  font-size: 12.2px;
+  line-height: 1.52;
+  text-align: justify;
+}
+
+.xd-tex-abstract-title {
+  text-align: center;
+  font-weight: 600;
+  font-size: 12px;
+  margin-bottom: 5px;
+}
+
+.xd-tex-abstract p {
+  margin: 0 0 6px;
+}
+
+/* Section Headings */
+.xd-tex-h1 {
+  font-family: var(--font-serif);
+  font-size: 15.5px;
+  font-weight: 600;
+  line-height: 1.28;
+  margin: 18px 0 7px;
+  letter-spacing: -0.01em;
+}
+
+.xd-tex-h2 {
+  font-family: var(--font-serif);
+  font-size: 13.8px;
+  font-weight: 600;
+  line-height: 1.3;
+  margin: 14px 0 5px;
+}
+
+.xd-tex-h3 {
+  font-family: var(--font-serif);
+  font-size: 12.8px;
+  font-weight: 600;
+  margin: 11px 0 4px;
+}
+
+.xd-tex-h4 {
+  font-family: var(--font-serif);
+  font-size: 12.5px;
+  font-weight: 600;
+  display: inline;
+  margin-right: 6px;
+}
+
+.xd-tex-secnum {
+  margin-right: 8px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Paragraphs */
+.xd-tex-p {
+  margin: 0 0 9px;
+  text-align: justify;
+  hyphens: auto;
+}
+
+/* Equations */
+.xd-tex-eq-block {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin: 12px 0;
+  padding: 2px 34px;
+}
+
+.xd-tex-eq-math {
+  flex: 1 1 auto;
+  overflow-x: auto;
+  text-align: center;
+}
+
+.xd-tex-eq-math .katex-display {
+  margin: 0.2em 0;
+}
+
+.xd-tex-eq-num {
+  position: absolute;
+  right: 0;
+  font-size: 12.5px;
+  font-variant-numeric: tabular-nums;
+  color: #363d4a;
+}
+
+.is-inverted .xd-tex-eq-num {
+  color: #a8b1c2;
+}
+
+/* Theorem / Lemma / Definition / Proof */
+.xd-tex-theorem {
+  margin: 11px 0;
+  padding: 7px 11px;
+  border-left: 2px solid #5e6ad2;
+  background-color: rgba(94, 106, 210, 0.04);
+  border-radius: 0 3px 3px 0;
+  text-align: justify;
+}
+
+.is-inverted .xd-tex-theorem {
+  background-color: rgba(94, 106, 210, 0.1);
+}
+
+.xd-tex-theorem.is-italic {
+  font-style: italic;
+}
+
+.xd-tex-thm-head {
+  font-style: normal;
+  font-weight: 600;
+}
+
+.xd-tex-thm-opt {
+  font-weight: 500;
+}
+
+.xd-tex-proof {
+  margin: 8px 0 12px;
+  text-align: justify;
+}
+
+.xd-tex-proof-head {
+  font-style: italic;
+  font-weight: 500;
+}
+
+.xd-tex-qed {
+  float: right;
+  font-style: normal;
+  font-size: 13px;
+  line-height: 1.5;
+  margin-left: 8px;
+}
+
+/* Lists */
+.xd-tex-list {
+  margin: 7px 0 10px;
+  padding-left: 22px;
+}
+
+.xd-tex-list-itemize {
+  list-style-type: disc;
+}
+
+.xd-tex-list-enumerate {
+  list-style-type: decimal;
+}
+
+.xd-tex-list-description {
+  list-style-type: none;
+  padding-left: 12px;
+}
+
+.xd-tex-list li {
+  margin-bottom: 4px;
+}
+
+/* Tables & Booktabs */
+.xd-tex-float {
+  margin: 14px 0;
+  break-inside: avoid;
+}
+
+.xd-tex-caption {
+  font-size: 12px;
+  line-height: 1.42;
+  color: #2f3542;
+  margin: 6px 0 8px;
+  text-align: center;
+}
+
+.is-inverted .xd-tex-caption {
+  color: #c5cddb;
+}
+
+.xd-tex-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  margin: 0 auto;
+}
+
+.xd-tex-table th,
+.xd-tex-table td {
+  padding: 5px 8px;
+  vertical-align: middle;
+}
+
+.xd-tex-table th {
+  font-weight: 600;
+}
+
+.xd-tex-tr-top {
+  border-top: 1.5px solid #111318;
+}
+
+.xd-tex-tr-mid {
+  border-top: 0.75px solid #111318;
+}
+
+.xd-tex-tr-bot {
+  border-bottom: 1.5px solid #111318;
+}
+
+.xd-tex-tr-hline {
+  border-top: 0.75px solid rgba(17, 19, 24, 0.35);
+}
+
+.is-inverted .xd-tex-tr-top,
+.is-inverted .xd-tex-tr-mid,
+.is-inverted .xd-tex-tr-bot {
+  border-color: #d6dce8;
+}
+
+/* Figures */
+.xd-tex-fig-box {
+  border: 1px solid rgba(17, 19, 24, 0.14);
+  border-radius: 3px;
+  padding: 10px 12px;
+  background-color: #fafbfc;
+}
+
+.is-inverted .xd-tex-fig-box {
+  border-color: rgba(230, 234, 242, 0.16);
+  background-color: #1a1e28;
+}
+
+.xd-tex-fig-placeholder {
+  text-align: center;
+  padding: 24px 0;
+  font-family: var(--font-sans);
+  font-size: 11.5px;
+  color: #6e7785;
+}
+
+/* Verbatim & Inline code */
+.xd-tex-tt {
+  font-family: var(--font-mono);
+  font-size: 0.88em;
+}
+
+.xd-tex-verbatim {
+  font-family: var(--font-mono);
+  font-size: 11.2px;
+  line-height: 1.48;
+  background-color: #f4f6f9;
+  border: 1px solid rgba(17, 19, 24, 0.12);
+  border-radius: 3px;
+  padding: 8px 10px;
+  overflow-x: auto;
+  margin: 10px 0;
+}
+
+.is-inverted .xd-tex-verbatim {
+  background-color: #1c202a;
+  border-color: rgba(230, 234, 242, 0.14);
+}
+
+/* Quote & Center */
+.xd-tex-quote {
+  margin: 10px 24px;
+  font-style: italic;
+}
+
+.xd-tex-center {
+  text-align: center;
+  margin: 10px 0;
+}
+
+/* Links, Refs, Citations */
+.xd-tex-ref,
+.xd-tex-cite,
+.xd-tex-link {
+  color: #3f4bb8;
+  text-decoration: none;
+}
+
+.is-inverted .xd-tex-ref,
+.is-inverted .xd-tex-cite,
+.is-inverted .xd-tex-link {
+  color: #8b96f2;
+}
+
+.xd-tex-ref:hover,
+.xd-tex-cite:hover,
+.xd-tex-link:hover {
+  text-decoration: underline;
+}
+
+.xd-tex-undef {
+  color: #dc2626;
+  font-family: var(--font-mono);
+}
+
+/* TOC */
+.xd-tex-toc {
+  margin: 10px 0 16px;
+  padding: 10px 14px;
+  border: 1px solid rgba(17, 19, 24, 0.12);
+  border-radius: 3px;
+}
+
+.xd-tex-toc-title {
+  font-weight: 600;
+  font-size: 13px;
+  margin-bottom: 6px;
+}
+
+.xd-tex-toc ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.xd-tex-toc li {
+  margin: 2px 0;
+  font-size: 12px;
+}
+
+.xd-tex-toc-l2 {
+  padding-left: 16px;
+}
+
+.xd-tex-toc-l3 {
+  padding-left: 32px;
+}
+
+.xd-tex-toc a {
+  color: inherit;
+  text-decoration: none;
+  display: inline-flex;
+  gap: 8px;
+}
+
+.xd-tex-toc-num {
+  font-variant-numeric: tabular-nums;
+  color: #5a6375;
+}
+
+/* Bibliography */
+.xd-tex-bib-section {
+  margin-top: 16px;
+}
+
+.xd-tex-bib-list {
+  list-style: none;
+  margin: 6px 0 0;
+  padding: 0;
+  font-size: 11.8px;
+  line-height: 1.46;
+}
+
+.xd-tex-bib-item {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 6px;
+  text-align: left;
+}
+
+.xd-tex-bib-num {
+  flex: 0 0 auto;
+  min-width: 24px;
+  font-variant-numeric: tabular-nums;
+  color: #4a5568;
+}
+
+.is-inverted .xd-tex-bib-num {
+  color: #9ba5b8;
+}
+
+.xd-tex-bib-doi {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: #5a6375;
+}
+
+/* Footnotes & Footer */
+.xd-tex-footnotes {
+  margin-top: 16px;
+  padding-top: 8px;
+  border-top: 0.75px solid rgba(17, 19, 24, 0.25);
+  font-size: 10.8px;
+  line-height: 1.4;
+  color: #363d4a;
+}
+
+.is-inverted .xd-tex-footnotes {
+  border-top-color: rgba(230, 234, 242, 0.25);
+  color: #b4bdd0;
+}
+
+.xd-tex-page-footer {
+  margin-top: 16px;
+  text-align: center;
+  font-size: 11.5px;
+  font-variant-numeric: tabular-nums;
+  color: #5a6375;
+}
+
+.is-inverted .xd-tex-page-footer {
+  color: #8f99ab;
+}
+
+/* SyncTeX highlight pulse */
+@keyframes xdSynctexFlash {
+  0% {
+    background-color: rgba(94, 106, 210, 0.28);
+    outline: 1.5px solid rgba(94, 106, 210, 0.7);
+  }
+  100% {
+    background-color: transparent;
+    outline: 1.5px solid transparent;
+  }
+}
+
+.xd-synctex-highlight {
+  animation: xdSynctexFlash 1.4s ease-out;
+  border-radius: 3px;
+}
+
+.xd-latex-paper [data-synctex-line] {
+  cursor: text;
+}
