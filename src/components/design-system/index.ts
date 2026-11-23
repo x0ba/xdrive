@@ -65,3 +65,12 @@ export {
   type DriveFolderDialogProps,
   type DriveMoveDialogProps,
 } from './DriveExplorer'
+
+export {
+  NewAppButton,
+  NewAppModal,
+  type NewAppMode,
+  type NewAppModelOption,
+  type NewAppButtonProps,
+  type NewAppModalProps,
+} from './NewAppCreator'
