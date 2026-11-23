@@ -12,11 +12,55 @@ export default meta
 type Story = StoryObj<typeof meta>
 
 export const DriveFiles: Story = {
-  name: 'Drive Files',
   args: {
     initialTheme: 'dark',
     initialNav: 'drive',
     initialActiveTabId: 'home',
+    initialAiSidebarOpen: false,
+  },
+}
+
+export const NotesAppWorkspace: Story = {
+  name: 'Notes App (Apple Notes)',
+  args: {
+    initialTheme: 'dark',
+    initialActiveTabId: 'ws-week-12-ablations',
+    initialOpenDocIds: [
+      'ws-week-12-ablations',
+      'ws-logical-memory-spec',
+      'ws-group-meeting',
+    ],
+    initialMode: 'direct',
+    initialAiSidebarOpen: false,
+  },
+}
+
+export const DocsAppWorkspace: Story = {
+  name: 'Docs App (Google Docs)',
+  args: {
+    initialTheme: 'dark',
+    initialActiveTabId: 'ws-logical-memory-spec',
+    initialOpenDocIds: [
+      'ws-week-12-ablations',
+      'ws-logical-memory-spec',
+      'ws-group-meeting',
+    ],
+    initialMode: 'direct',
+    initialAiSidebarOpen: false,
+  },
+}
+
+export const SlidesAppWorkspace: Story = {
+  name: 'Slides App (Google Slides)',
+  args: {
+    initialTheme: 'dark',
+    initialActiveTabId: 'ws-group-meeting',
+    initialOpenDocIds: [
+      'ws-week-12-ablations',
+      'ws-logical-memory-spec',
+      'ws-group-meeting',
+    ],
+    initialMode: 'direct',
     initialAiSidebarOpen: false,
   },
 }

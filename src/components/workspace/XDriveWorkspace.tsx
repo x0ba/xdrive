@@ -42,6 +42,7 @@ import {
   nodeToElement,
   MarbleSourceInspector,
 } from '#/components/workspace/MarbleSourceInspector'
+import { DocsApp, NotesApp, SlidesApp } from '#/components/apps'
 import {
   DOCUMENT_DESIGN_SYSTEM_SLUG,
   DOCUMENT_DONTS_SYSTEM_SLUG,
@@ -95,7 +96,11 @@ type NamerState = { sourceId: string; title: string }
 type PaletteItem = { id: string; label: string; hint: string; run: () => void }
 
 const YOU = { name: 'You', initials: 'YO' }
-const DEFAULT_OPEN = ['ws-qec-threshold', 'ws-week-12-ablations']
+const DEFAULT_OPEN = [
+  'ws-week-12-ablations',
+  'ws-logical-memory-spec',
+  'ws-group-meeting',
+]
 
 const ROLE_LABEL: Record<SimulatedRole, string> = {
   owner: 'Owner',
@@ -595,6 +600,7 @@ export function XDriveWorkspace({
   >(() => {})
   const selectRef = useRef<(element: SelectedMarbleElement) => void>(() => {})
   const frameRef = useRef<HTMLIFrameElement | null>(null)
+  const richStageRef = useRef<HTMLDivElement | null>(null)
 
   const library = useMemo(() => [...docs, ...templates], [docs, templates])
   libraryRef.current = library
@@ -1404,15 +1410,119 @@ export function XDriveWorkspace({
 
   const shareDoc = findDoc(shareId)
   const frameTitle = activeDoc ? `${activeDoc.title} .mrbl app` : 'Marble app'
+  const richAppKind = activeDoc
+    ? activeDoc.category === 'notebook'
+      ? 'notes'
+      : activeDoc.category === 'slides'
+        ? 'slides'
+        : activeDoc.category === 'document' && !activeDoc.isEvergreen
+          ? 'docs'
+          : null
+    : null
 
-  const frame = (
-    <iframe
-      title={frameTitle}
-      srcDoc={frameDoc}
-      onLoad={(event) => measureFrame(event.currentTarget)}
-      className="block h-full w-full border-0 bg-[var(--xd-canvas)]"
-    />
-  )
+  const appDisplaySource = activeDoc ? (previewSource ?? activeDoc.source) : ''
+  const appReadOnly =
+    permission === 'view_only' || permission === 'comment_annotate'
+
+  function handleRichAppSourceChange(nextSource: string, label: string) {
+    if (!activeDoc) return
+    const id = activeDoc.id
+    const prior = sourceRef.current.get(id) ?? activeDoc.source
+    if (prior === nextSource) return
+    sourceRef.current.set(id, nextSource)
+    shownSourceRef.current = nextSource
+    const checkpoint: MarbleCheckpoint = {
+      sha: shortSha(),
+      label,
+      timestamp: Date.now(),
+      author: YOU.name,
+      opsCount: 1,
+      source: nextSource,
+    }
+    patchFile(id, (doc) => ({
+      ...doc,
+      source: nextSource,
+      nodeCount: countMarbleNodes(nextSource),
+      byteSize: byteSizeOf(nextSource),
+      version: doc.version + 1,
+      updatedAt: new Date().toISOString(),
+      syncState: 'saving',
+      lastEditedBy: YOU,
+      checkpoints: coalesceCheckpoint(doc.checkpoints, checkpoint, {
+        type: 'setText',
+      }),
+    }))
+    persist(id, activeDoc.slug, prior, [], nextSource)
+  }
+
+  useEffect(() => {
+    if (!richAppKind || !activeDoc) return
+    const hostEl = richStageRef.current
+    if (!hostEl) return
+    const host = hostEl.getBoundingClientRect()
+    if (host.width < 20 || host.height < 20) return
+    const els = Array.from(hostEl.querySelectorAll('[data-marble-id]'))
+    const measured: StageNode[] = []
+    for (const el of els) {
+      const id = el.getAttribute('data-marble-id')
+      if (!id) continue
+      const rect = el.getBoundingClientRect()
+      if (rect.width < 8 || rect.height < 8) continue
+      const box = {
+        left: ((rect.left - host.left) / host.width) * 100,
+        top: ((rect.top - host.top) / host.height) * 100,
+        width: (rect.width / host.width) * 100,
+        height: (rect.height / host.height) * 100,
+      }
+      if (box.top > 100 || box.left > 100 || box.top + box.height < 0) continue
+      measured.push({
+        id,
+        tagName: el.tagName.toLowerCase(),
+        textPreview: clip(el.textContent || '', 80),
+        sourceSlice: `<${el.tagName.toLowerCase()} data-marble-id="${id}">`,
+        affordances: ['editable'],
+        rect: box,
+      })
+    }
+    if (measured.length > 0) setStageNodes(measured.slice(0, 24))
+  }, [richAppKind, activeDoc, mode])
+
+  const frame =
+    richAppKind === 'notes' && activeDoc ? (
+      <div ref={richStageRef} className="h-full w-full min-h-0">
+        <NotesApp
+          key={activeDoc.id}
+          marbleSource={appDisplaySource}
+          onMarbleSourceChange={handleRichAppSourceChange}
+          readOnly={appReadOnly}
+        />
+      </div>
+    ) : richAppKind === 'docs' && activeDoc ? (
+      <div ref={richStageRef} className="h-full w-full min-h-0">
+        <DocsApp
+          key={activeDoc.id}
+          marbleSource={appDisplaySource}
+          onMarbleSourceChange={handleRichAppSourceChange}
+          readOnly={appReadOnly}
+        />
+      </div>
+    ) : richAppKind === 'slides' && activeDoc ? (
+      <div ref={richStageRef} className="h-full w-full min-h-0">
+        <SlidesApp
+          key={activeDoc.id}
+          marbleSource={appDisplaySource}
+          onMarbleSourceChange={handleRichAppSourceChange}
+          readOnly={appReadOnly}
+        />
+      </div>
+    ) : (
+      <iframe
+        title={frameTitle}
+        srcDoc={frameDoc}
+        onLoad={(event) => measureFrame(event.currentTarget)}
+        className="block h-full w-full border-0 bg-[var(--xd-canvas)]"
+      />
+    )
 
   return (
     <div
