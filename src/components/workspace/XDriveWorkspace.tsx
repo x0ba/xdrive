@@ -11,16 +11,20 @@ import {
   DriveFolderCard,
   DriveFolderDialog,
   DriveMoveDialog,
+  DrivePermanentDeleteDialog,
+  DriveTrashList,
   FilterPillBar,
   NewAppButton,
   NewAppModal,
   SidebarRail,
+  TRASH_RETENTION_DAYS,
   TemplateGalleryCard,
   getDescendantFolderIds,
   getFolderAncestors,
   getFolderItemCounts,
   getFolderPathLabel,
   getPermissionMeta,
+  purgeExpiredTrashedDocs,
   seedDriveFolders,
 } from '#/components/design-system'
 import type {
@@ -116,6 +120,8 @@ export interface XDriveWorkspaceProps {
   initialNav?: PrimaryNavId
   initialActiveTabId?: 'home' | string
   initialOpenDocIds?: string[]
+  initialTrashedDocIds?: string[]
+  trashRetentionDays?: number
   initialMode?: CanvasInteractionMode
   initialAiSidebarOpen?: boolean
   initialSimulatedRole?: SharePermissionLevel | 'owner'
@@ -130,6 +136,10 @@ type NamerState = { sourceId: string; title: string }
 type FolderModalState =
   | { mode: 'create'; parentId: string | null }
   | { mode: 'rename'; folder: DriveFolder }
+type PermanentDeleteTarget =
+  | { mode: 'single'; doc: MarbleDocumentFile }
+  | { mode: 'empty' }
+type TrashUndoBanner = { docId: string; title: string }
 type PaletteItem = { id: string; label: string; hint: string; run: () => void }
 
 const YOU = { name: 'You', initials: 'YO' }
@@ -566,29 +576,60 @@ export function XDriveWorkspace({
   initialNav = 'drive',
   initialActiveTabId = 'home',
   initialOpenDocIds,
+  initialTrashedDocIds,
+  trashRetentionDays = TRASH_RETENTION_DAYS,
   initialMode = 'direct',
   initialAiSidebarOpen = false,
   initialSimulatedRole = 'owner',
   initialSelectedIds,
 }: XDriveWorkspaceProps) {
+  const initialTrashedSet = useMemo(
+    () => new Set(initialTrashedDocIds ?? []),
+    [initialTrashedDocIds],
+  )
   const [theme, setTheme] = useState(initialTheme)
   const [nav, setNav] = useState<PrimaryNavId>(initialNav)
-  const [activeTabId, setActiveTabId] = useState<'home' | string>(
-    initialActiveTabId,
+  const [activeTabId, setActiveTabId] = useState<'home' | string>(() =>
+    initialActiveTabId !== 'home' && initialTrashedSet.has(initialActiveTabId)
+      ? 'home'
+      : initialActiveTabId,
   )
   const [openTabIds, setOpenTabIds] = useState<string[]>(() =>
-    resolveOpenIds(initialOpenDocIds, initialActiveTabId),
+    resolveOpenIds(initialOpenDocIds, initialActiveTabId).filter(
+      (id) => !initialTrashedSet.has(id),
+    ),
   )
-  const initialDrive = useMemo(
-    () => seedDriveFolders(INITIAL_WORKSPACE_DOCS.map((doc) => ({ ...doc }))),
-    [],
-  )
+  const initialDrive = useMemo(() => {
+    const nowMs = Date.now()
+    const seeded = seedDriveFolders(
+      INITIAL_WORKSPACE_DOCS.map((doc) => {
+        if (!initialTrashedSet.has(doc.id)) return { ...doc }
+        const index = (initialTrashedDocIds ?? []).indexOf(doc.id)
+        const daysAgo = index <= 0 ? 2 : Math.min(26, 2 + index * 9)
+        return {
+          ...doc,
+          trashedAt: new Date(
+            nowMs - daysAgo * 24 * 60 * 60 * 1000,
+          ).toISOString(),
+        }
+      }),
+    )
+    const { docs: prunedDocs } = purgeExpiredTrashedDocs(
+      seeded.docs,
+      nowMs,
+      trashRetentionDays,
+    )
+    return { folders: seeded.folders, docs: prunedDocs }
+  }, [initialTrashedDocIds, initialTrashedSet, trashRetentionDays])
   const [folders, setFolders] = useState<DriveFolder[]>(
     () => initialDrive.folders,
   )
   const [currentFolderId, setCurrentFolderId] = useState<string | null>(null)
   const [folderModal, setFolderModal] = useState<FolderModalState | null>(null)
   const [moveDocId, setMoveDocId] = useState<string | null>(null)
+  const [permanentDeleteTarget, setPermanentDeleteTarget] =
+    useState<PermanentDeleteTarget | null>(null)
+  const [trashUndo, setTrashUndo] = useState<TrashUndoBanner | null>(null)
   const [newAppModalMode, setNewAppModalMode] = useState<NewAppMode | null>(
     null,
   )
@@ -655,6 +696,7 @@ export function XDriveWorkspace({
   const activeTabRef = useRef(activeTabId)
   activeTabRef.current = activeTabId
   const libraryRef = useRef<MarbleDocumentFile[]>([])
+  const allDocsRef = useRef<MarbleDocumentFile[]>([])
   const sourceRef = useRef(new Map<string, string>())
   const previewRun = useRef(0)
   const shownSourceRef = useRef<string | null>(null)
@@ -668,8 +710,33 @@ export function XDriveWorkspace({
   const frameRef = useRef<HTMLIFrameElement | null>(null)
   const richStageRef = useRef<HTMLDivElement | null>(null)
 
-  const library = useMemo(() => [...docs, ...templates], [docs, templates])
+  const activeDocs = useMemo(
+    () => docs.filter((doc) => !doc.trashedAt),
+    [docs],
+  )
+  const trashedDocs = useMemo(
+    () =>
+      docs
+        .filter((doc) => Boolean(doc.trashedAt))
+        .slice()
+        .sort(
+          (a, b) =>
+            Date.parse(b.trashedAt ?? b.updatedAt) -
+            Date.parse(a.trashedAt ?? a.updatedAt),
+        ),
+    [docs],
+  )
+  const filteredTrashedDocs = useMemo(
+    () => trashedDocs.filter((doc) => matchesQuery(doc, searchQuery)),
+    [trashedDocs, searchQuery],
+  )
+
+  const library = useMemo(
+    () => [...activeDocs, ...templates],
+    [activeDocs, templates],
+  )
   libraryRef.current = library
+  allDocsRef.current = [...docs, ...templates]
   for (const doc of library) sourceRef.current.set(doc.id, doc.source)
 
   const findDoc = (id: string | null | undefined) =>
@@ -727,8 +794,8 @@ export function XDriveWorkspace({
   )
 
   const folderItemCounts = useMemo(
-    () => getFolderItemCounts(folders, docs),
-    [folders, docs],
+    () => getFolderItemCounts(folders, activeDocs),
+    [folders, activeDocs],
   )
 
   const visibleFolders = useMemo(() => {
@@ -745,35 +812,35 @@ export function XDriveWorkspace({
   const filteredDocs = useMemo(() => {
     const scoped =
       currentFolderId === null
-        ? docs
-        : docs.filter((doc) => doc.folderId === currentFolderId)
+        ? activeDocs
+        : activeDocs.filter((doc) => doc.folderId === currentFolderId)
     return scoped
       .filter((doc) => category === 'all' || doc.category === category)
       .filter((doc) => matchesQuery(doc, searchQuery))
       .slice()
       .sort((a, b) => compareDocs(a, b, sortBy))
-  }, [docs, currentFolderId, category, searchQuery, sortBy])
+  }, [activeDocs, currentFolderId, category, searchQuery, sortBy])
 
   const starredDocs = useMemo(() => {
-    return docs
+    return activeDocs
       .filter((doc) => doc.starred)
       .filter((doc) => category === 'all' || doc.category === category)
       .filter((doc) => matchesQuery(doc, searchQuery))
       .slice()
       .sort((a, b) => compareDocs(a, b, sortBy))
-  }, [docs, category, searchQuery, sortBy])
+  }, [activeDocs, category, searchQuery, sortBy])
 
-  const sharedDocs = useMemo(() => docs.filter(isShared), [docs])
+  const sharedDocs = useMemo(() => activeDocs.filter(isShared), [activeDocs])
   const blueprints = useMemo(() => templates.map(toBlueprint), [templates])
   const evergreenDocs = useMemo(
     () =>
-      docs.filter(
+      activeDocs.filter(
         (doc) =>
           doc.isEvergreen ||
           doc.slug === DOCUMENT_DESIGN_SYSTEM_SLUG ||
           doc.slug === DOCUMENT_DONTS_SYSTEM_SLUG,
       ),
-    [docs],
+    [activeDocs],
   )
   const evergreenRefs = useMemo(
     () => resolveEvergreenDesignContext(evergreenDocs).refs,
@@ -811,7 +878,7 @@ export function XDriveWorkspace({
       syncState: doc.syncState,
     }))
 
-  const pinnedApps = docs
+  const pinnedApps = activeDocs
     .filter((doc) => doc.pinned)
     .map((doc) => ({
       id: doc.id,
@@ -1440,7 +1507,7 @@ export function XDriveWorkspace({
         evergreenDocs: liveEvergreen,
       })
       if (result.newDocument) {
-        const adopted = adoptDocument(result.newDocument, libraryRef.current)
+        const adopted = adoptDocument(result.newDocument, allDocsRef.current)
         const resolvedFolderId =
           input.targetFolderId !== undefined
             ? input.targetFolderId
@@ -1602,7 +1669,7 @@ export function XDriveWorkspace({
     const targetFolder = input.folderId
       ? folders.find((f) => f.id === input.folderId)
       : null
-    const adopted = adoptDocument(copy, libraryRef.current)
+    const adopted = adoptDocument(copy, allDocsRef.current)
     const placed: MarbleDocumentFile = {
       ...adopted,
       folderId: targetFolder ? targetFolder.id : null,
@@ -1749,7 +1816,7 @@ export function XDriveWorkspace({
     const targetFolder = targetFolderId
       ? folders.find((f) => f.id === targetFolderId)
       : null
-    const adopted = adoptDocument(copy, libraryRef.current)
+    const adopted = adoptDocument(copy, allDocsRef.current)
     const placed: MarbleDocumentFile = {
       ...adopted,
       folderId: targetFolder ? targetFolder.id : null,
@@ -1835,6 +1902,153 @@ export function XDriveWorkspace({
     patchFile(id, (doc) => ({ ...doc, [flag]: !doc[flag] }))
   }
 
+  function syncTrashApi(body: Record<string, unknown>) {
+    void fetch('/api/marble', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(body),
+    }).catch(() => {
+      // Static/Storybook environments do not expose /api/marble.
+    })
+  }
+
+  function cleanupRemovedDocIds(removedIds: Set<string>) {
+    if (removedIds.size === 0) return
+    setOpenTabIds((prev) => prev.filter((id) => !removedIds.has(id)))
+    if (activeTabRef.current !== 'home' && removedIds.has(activeTabRef.current)) {
+      const remaining = openTabIds.filter((id) => !removedIds.has(id))
+      visit(remaining[remaining.length - 1] ?? 'home', nav)
+    }
+    setSelection((prev) => {
+      const next = { ...prev }
+      for (const id of removedIds) delete next[id]
+      return next
+    })
+    setSketches((prev) => {
+      const next = { ...prev }
+      for (const id of removedIds) delete next[id]
+      return next
+    })
+    setStrokes((prev) => {
+      const next = { ...prev }
+      for (const id of removedIds) delete next[id]
+      return next
+    })
+    setModes((prev) => {
+      const next = { ...prev }
+      for (const id of removedIds) delete next[id]
+      return next
+    })
+    setThreads((prev) => {
+      const next = { ...prev }
+      for (const id of removedIds) delete next[id]
+      return next
+    })
+    for (const id of removedIds) sourceRef.current.delete(id)
+    setLivePreview((prev) =>
+      prev && removedIds.has(prev.docId) ? null : prev,
+    )
+    setShareId((prev) => (prev && removedIds.has(prev) ? null : prev))
+    setMoveDocId((prev) => (prev && removedIds.has(prev) ? null : prev))
+    setTrashUndo((prev) => (prev && removedIds.has(prev.docId) ? null : prev))
+  }
+
+  function moveDocumentToTrash(docId: string) {
+    const target = docs.find((doc) => doc.id === docId)
+    if (!target || target.trashedAt || target.isTemplate) return
+    const trashedAt = new Date().toISOString()
+    setDocs((prev) =>
+      prev.map((doc) => (doc.id === docId ? { ...doc, trashedAt } : doc)),
+    )
+    if (openTabIds.includes(docId)) {
+      closeTab(docId)
+    }
+    if (livePreview?.docId === docId) setLivePreview(null)
+    if (shareId === docId) setShareId(null)
+    if (moveDocId === docId) setMoveDocId(null)
+    setTrashUndo({ docId: target.id, title: target.title })
+    syncTrashApi({ action: 'trash', slug: target.slug, trashedAt })
+  }
+
+  function restoreDocumentFromTrash(docId: string) {
+    const target = docs.find((doc) => doc.id === docId)
+    if (!target || !target.trashedAt) return
+    const parentFolder = target.folderId
+      ? folders.find((folder) => folder.id === target.folderId)
+      : null
+    const restoredFolderId = parentFolder ? parentFolder.id : null
+    const restoredFolderName = parentFolder ? parentFolder.name : 'My Drive'
+    setDocs((prev) =>
+      prev.map((doc) =>
+        doc.id === docId
+          ? {
+              ...doc,
+              trashedAt: null,
+              folderId: restoredFolderId,
+              folder: restoredFolderName,
+            }
+          : doc,
+      ),
+    )
+    setTrashUndo((prev) => (prev?.docId === docId ? null : prev))
+    setAgentStatus(`Restored "${target.title}" to ${restoredFolderName}`)
+    syncTrashApi({ action: 'restore', slug: target.slug })
+  }
+
+  function permanentlyDeleteDocument(docId: string) {
+    const target = docs.find((doc) => doc.id === docId)
+    if (!target) {
+      setPermanentDeleteTarget(null)
+      return
+    }
+    setDocs((prev) => prev.filter((doc) => doc.id !== docId))
+    cleanupRemovedDocIds(new Set([docId]))
+    setPermanentDeleteTarget(null)
+    setAgentStatus(`Permanently deleted "${target.title}"`)
+    syncTrashApi({ action: 'delete', slug: target.slug })
+  }
+
+  function emptyTrash() {
+    if (trashedDocs.length === 0) {
+      setPermanentDeleteTarget(null)
+      return
+    }
+    const removedIds = new Set(trashedDocs.map((doc) => doc.id))
+    const count = trashedDocs.length
+    setDocs((prev) => prev.filter((doc) => !removedIds.has(doc.id)))
+    cleanupRemovedDocIds(removedIds)
+    setPermanentDeleteTarget(null)
+    setAgentStatus(
+      `Permanently deleted ${count} ${count === 1 ? 'file' : 'files'} from Trash`,
+    )
+    syncTrashApi({ action: 'empty_trash' })
+  }
+
+  useEffect(() => {
+    const purgeNow = () => {
+      let purgedDocs: MarbleDocumentFile[] = []
+      setDocs((prev) => {
+        const result = purgeExpiredTrashedDocs(
+          prev,
+          Date.now(),
+          trashRetentionDays,
+        )
+        if (result.purged.length === 0) return prev
+        purgedDocs = result.purged
+        return result.docs
+      })
+      if (purgedDocs.length > 0) {
+        syncTrashApi({
+          action: 'purge_expired',
+          retentionDays: trashRetentionDays,
+        })
+      }
+    }
+    purgeNow()
+    const timer = window.setInterval(purgeNow, 60 * 60 * 1000)
+    return () => window.clearInterval(timer)
+  }, [trashRetentionDays])
+
   const paletteItems: PaletteItem[] = (() => {
     const needle = paletteQuery.trim().toLowerCase()
     const views: PaletteItem[] = [
@@ -1861,6 +2075,15 @@ export function XDriveWorkspace({
         label: 'Starred',
         hint: 'Starred files',
         run: () => visit('home', 'starred'),
+      },
+      {
+        id: 'nav-trash',
+        label: 'Trash',
+        hint:
+          trashedDocs.length > 0
+            ? `${trashedDocs.length} trashed · clears after ${trashRetentionDays}d`
+            : `Auto-clears after ${trashRetentionDays} days`,
+        run: () => visit('home', 'trash'),
       },
       {
         id: 'nav-templates',
@@ -2090,6 +2313,8 @@ export function XDriveWorkspace({
             setFolderModal({ mode: 'create', parentId })
           }
           onDropDocOnFolder={moveDocumentToFolder}
+          trashCount={trashedDocs.length}
+          onDropDocOnTrash={moveDocumentToTrash}
           pinnedApps={pinnedApps}
           activeAppId={activeDoc?.id}
           onSelectApp={openDocument}
@@ -2118,6 +2343,11 @@ export function XDriveWorkspace({
                   })
                 }
                 onOpenShare={() => setShareId(activeDoc.id)}
+                onMoveToTrash={
+                  !activeDoc.isTemplate
+                    ? () => moveDocumentToTrash(activeDoc.id)
+                    : undefined
+                }
                 sharePermission={
                   simulatedRole === 'owner'
                     ? activeDoc.share.publicPermission
@@ -2326,6 +2556,7 @@ export function XDriveWorkspace({
                       onShareDoc={(doc) => setShareId(doc.id)}
                       onToggleStar={(doc) => toggleFlag(doc.id, 'starred')}
                       onTogglePin={(doc) => toggleFlag(doc.id, 'pinned')}
+                      onDeleteDoc={(doc) => moveDocumentToTrash(doc.id)}
                     />
                   ) : (
                     <div className="space-y-6">
@@ -2394,6 +2625,7 @@ export function XDriveWorkspace({
                                   onTogglePin={() =>
                                     toggleFlag(doc.id, 'pinned')
                                   }
+                                  onDelete={() => moveDocumentToTrash(doc.id)}
                                 />
                               ))}
                             </div>
@@ -2418,6 +2650,7 @@ export function XDriveWorkspace({
                                   onTogglePin={() =>
                                     toggleFlag(doc.id, 'pinned')
                                   }
+                                  onDelete={() => moveDocumentToTrash(doc.id)}
                                 />
                               ))}
                             </div>
@@ -2474,6 +2707,7 @@ export function XDriveWorkspace({
                       onShareDoc={(doc) => setShareId(doc.id)}
                       onToggleStar={(doc) => toggleFlag(doc.id, 'starred')}
                       onTogglePin={(doc) => toggleFlag(doc.id, 'pinned')}
+                      onDeleteDoc={(doc) => moveDocumentToTrash(doc.id)}
                     />
                   ) : viewMode === 'icon' ? (
                     <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6">
@@ -2492,6 +2726,7 @@ export function XDriveWorkspace({
                           onShare={() => setShareId(doc.id)}
                           onToggleStar={() => toggleFlag(doc.id, 'starred')}
                           onTogglePin={() => toggleFlag(doc.id, 'pinned')}
+                          onDelete={() => moveDocumentToTrash(doc.id)}
                         />
                       ))}
                     </div>
@@ -2517,10 +2752,72 @@ export function XDriveWorkspace({
                           onShare={() => setShareId(doc.id)}
                           onToggleStar={() => toggleFlag(doc.id, 'starred')}
                           onTogglePin={() => toggleFlag(doc.id, 'pinned')}
+                          onDelete={() => moveDocumentToTrash(doc.id)}
                         />
                       ))}
                     </div>
                   )}
+                </div>
+              )}
+
+              {nav === 'trash' && (
+                <div className="mx-auto flex w-full max-w-6xl flex-col gap-5 px-6 py-6">
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <div className="flex items-center gap-2.5">
+                      <h1 className="text-[16px] font-semibold tracking-tight">
+                        Trash
+                      </h1>
+                      <span className="xd-tabular text-[12px] text-[var(--xd-ink-muted)]">
+                        {trashedDocs.length}{' '}
+                        {trashedDocs.length === 1 ? 'file' : 'files'}
+                      </span>
+                    </div>
+
+                    {trashedDocs.length > 0 && (
+                      <div className="relative w-full max-w-xs">
+                        <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-[var(--xd-ink-muted)]" />
+                        <input
+                          type="search"
+                          value={searchQuery}
+                          onChange={(e) => setSearchQuery(e.target.value)}
+                          placeholder="Search in Trash…"
+                          aria-label="Search in Trash"
+                          className="h-7 w-full rounded border border-[var(--xd-border)] bg-[var(--xd-rail)] pl-8 pr-2.5 text-[12px] text-[var(--xd-ink)] placeholder:text-[var(--xd-ink-muted)] focus:border-[var(--xd-accent)] focus:outline-none"
+                        />
+                      </div>
+                    )}
+                  </div>
+
+                  {agentStatus && (
+                    <div className="flex items-center justify-between rounded-md border border-[var(--xd-border)] bg-[var(--xd-rail)] px-3 py-2 text-[12px] text-[var(--xd-ink-secondary)]">
+                      <span>{agentStatus}</span>
+                      <button
+                        type="button"
+                        onClick={() => setAgentStatus(null)}
+                        aria-label="Dismiss status"
+                        className="text-[var(--xd-ink-muted)] hover:text-[var(--xd-ink)]"
+                      >
+                        <X className="h-3.5 w-3.5" />
+                      </button>
+                    </div>
+                  )}
+
+                  <DriveTrashList
+                    docs={filteredTrashedDocs}
+                    totalCount={trashedDocs.length}
+                    retentionDays={trashRetentionDays}
+                    resolveFolderLabel={(doc) =>
+                      getFolderPathLabel(folders, doc.folderId, doc.folder)
+                    }
+                    formatTrashedAt={relativeTime}
+                    onRestoreDoc={(doc) => restoreDocumentFromTrash(doc.id)}
+                    onDeleteForeverDoc={(doc) =>
+                      setPermanentDeleteTarget({ mode: 'single', doc })
+                    }
+                    onEmptyTrash={() =>
+                      setPermanentDeleteTarget({ mode: 'empty' })
+                    }
+                  />
                 </div>
               )}
 
@@ -2767,6 +3064,62 @@ export function XDriveWorkspace({
             moveDocumentToFolder(moveDocId, targetFolderId)
           }
         />
+      )}
+      <DrivePermanentDeleteDialog
+        open={permanentDeleteTarget !== null}
+        mode={permanentDeleteTarget?.mode ?? 'single'}
+        fileName={
+          permanentDeleteTarget?.mode === 'single'
+            ? permanentDeleteTarget.doc.title
+            : undefined
+        }
+        itemCount={trashedDocs.length}
+        onClose={() => setPermanentDeleteTarget(null)}
+        onConfirm={() => {
+          if (!permanentDeleteTarget) return
+          if (permanentDeleteTarget.mode === 'empty') {
+            emptyTrash()
+          } else {
+            permanentlyDeleteDocument(permanentDeleteTarget.doc.id)
+          }
+        }}
+      />
+      {trashUndo && (
+        <div
+          role="status"
+          aria-live="polite"
+          className="fixed bottom-4 left-1/2 z-40 flex -translate-x-1/2 items-center gap-3 rounded-lg border border-[var(--xd-border-strong)] bg-[var(--xd-elevated)] px-3.5 py-2 text-[12px] text-[var(--xd-ink)] shadow-xl"
+        >
+          <span className="max-w-[260px] truncate">
+            Moved <strong className="font-medium">{trashUndo.title}</strong> to
+            Trash
+          </span>
+          <button
+            type="button"
+            onClick={() => restoreDocumentFromTrash(trashUndo.docId)}
+            className="font-medium text-[var(--xd-accent)] transition-colors hover:underline"
+          >
+            Undo
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              setTrashUndo(null)
+              visit('home', 'trash')
+            }}
+            className="text-[var(--xd-ink-secondary)] transition-colors hover:text-[var(--xd-ink)]"
+          >
+            View trash
+          </button>
+          <button
+            type="button"
+            onClick={() => setTrashUndo(null)}
+            aria-label="Dismiss notification"
+            className="inline-flex h-5 w-5 items-center justify-center rounded text-[var(--xd-ink-muted)] hover:bg-[var(--xd-surface-hover)] hover:text-[var(--xd-ink)]"
+          >
+            <X className="h-3.5 w-3.5" />
+          </button>
+        </div>
       )}
       {shareDoc && (
         <ShareModal

@@ -31,6 +31,22 @@ export const DriveFiles: Story = {
 }
 
 /**
+ * Trash view pre-populated with recently deleted files showing 30-day retention, restore, and permanent delete.
+ *
+ * @summary Drive Trash view with restore and permanent delete
+ */
+export const TrashWorkspace: Story = {
+  name: 'Drive · Trash',
+  args: {
+    initialTheme: 'dark',
+    initialNav: 'trash',
+    initialActiveTabId: 'home',
+    initialTrashedDocIds: ['ws-qec-threshold', 'ws-group-meeting'],
+    initialAiSidebarOpen: false,
+  },
+}
+
+/**
  * Workspace focused on an open Apple Notes-parity .mrbl note tab.
  *
  * @summary Open Notes app tab in workspace

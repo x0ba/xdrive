@@ -143,6 +143,7 @@ export interface MarbleDocumentFile {
   tags: string[]
   folder: string
   folderId?: string | null
+  trashedAt?: string | null
   share: ShareConfig
   checkpoints: MarbleCheckpoint[]
   intentHistory: MarbleOpProposal[]

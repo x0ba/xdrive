@@ -107,6 +107,7 @@ function LeftNavigationRailDemo() {
           setActiveFolderId(folderId)
         }}
         onCreateFolder={() => {}}
+        trashCount={2}
         pinnedApps={MOCK_PINNED_APPS}
         activeAppId={activeAppId}
         onSelectApp={setActiveAppId}

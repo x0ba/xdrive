@@ -31,6 +31,7 @@ import {
   Lock,
   Globe,
   ShieldAlert,
+  Trash2,
 } from 'lucide-react'
 import type {
   DriveFolder,
@@ -360,6 +361,7 @@ export type PrimaryNavId =
   | 'templates'
   | 'shared'
   | 'starred'
+  | 'trash'
   | 'subscriptions'
 
 export interface SidebarRailProps {
@@ -372,6 +374,8 @@ export interface SidebarRailProps {
   onSelectFolder?: (folderId: string | null) => void
   onCreateFolder?: (parentId: string | null) => void
   onDropDocOnFolder?: (docId: string, folderId: string | null) => void
+  trashCount?: number
+  onDropDocOnTrash?: (docId: string) => void
   pinnedApps?: Array<{
     id: string
     title: string
@@ -405,6 +409,8 @@ export function SidebarRail({
   onSelectFolder,
   onCreateFolder,
   onDropDocOnFolder,
+  trashCount = 0,
+  onDropDocOnTrash,
   pinnedApps = [],
   activeAppId,
   onSelectApp,
@@ -413,7 +419,9 @@ export function SidebarRail({
   const [expandedFolderIds, setExpandedFolderIds] = useState<Set<string>>(
     () => new Set(),
   )
-  const [dropTargetId, setDropTargetId] = useState<string | 'root' | null>(null)
+  const [dropTargetId, setDropTargetId] = useState<
+    string | 'root' | 'trash' | null
+  >(null)
 
   const toggleExpandFolder = (folderId: string) => {
     setExpandedFolderIds((prev) => {
@@ -426,9 +434,13 @@ export function SidebarRail({
 
   const handleDragOver = (
     event: React.DragEvent,
-    target: string | 'root',
+    target: string | 'root' | 'trash',
   ) => {
-    if (!onDropDocOnFolder) return
+    if (target === 'trash') {
+      if (!onDropDocOnTrash) return
+    } else if (!onDropDocOnFolder) {
+      return
+    }
     event.preventDefault()
     event.dataTransfer.dropEffect = 'move'
     setDropTargetId(target)
@@ -442,6 +454,17 @@ export function SidebarRail({
       event.dataTransfer.getData('text/plain')
     if (docId.trim() && onDropDocOnFolder) {
       onDropDocOnFolder(docId.trim(), folderId)
+    }
+  }
+
+  const handleDropOnTrash = (event: React.DragEvent) => {
+    event.preventDefault()
+    setDropTargetId(null)
+    const docId =
+      event.dataTransfer.getData('application/x-xdrive-doc-id') ||
+      event.dataTransfer.getData('text/plain')
+    if (docId.trim() && onDropDocOnTrash) {
+      onDropDocOnTrash(docId.trim())
     }
   }
 
@@ -531,6 +554,11 @@ export function SidebarRail({
       id: 'starred',
       label: 'Starred',
       icon: <Star className="h-3.5 w-3.5" />,
+    },
+    {
+      id: 'trash',
+      label: 'Trash',
+      icon: <Trash2 className="h-3.5 w-3.5" />,
     },
     {
       id: 'templates',
@@ -653,27 +681,45 @@ export function SidebarRail({
 
         {secondaryNavItems.map((item) => {
           const active = activeNav === item.id && !activeAppId
+          const isTrash = item.id === 'trash'
+          const isTrashDropTarget = isTrash && dropTargetId === 'trash'
           return (
             <button
               key={item.id}
               type="button"
               onClick={() => onSelectNav?.(item.id)}
-              className={`flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-[12.5px] transition-colors ${
-                active
-                  ? 'bg-[var(--xd-surface-active)] font-medium text-[var(--xd-ink)]'
-                  : 'text-[var(--xd-ink-secondary)] hover:bg-[var(--xd-surface-hover)] hover:text-[var(--xd-ink)]'
+              onDragOver={
+                isTrash ? (e) => handleDragOver(e, 'trash') : undefined
+              }
+              onDragLeave={isTrash ? () => setDropTargetId(null) : undefined}
+              onDrop={isTrash ? handleDropOnTrash : undefined}
+              className={`flex w-full items-center justify-between gap-2 rounded px-2 py-1.5 text-left text-[12.5px] transition-colors ${
+                isTrashDropTarget
+                  ? 'bg-[var(--xd-danger-soft)] text-[var(--xd-danger)] ring-1 ring-[var(--xd-danger)]'
+                  : active
+                    ? 'bg-[var(--xd-surface-active)] font-medium text-[var(--xd-ink)]'
+                    : 'text-[var(--xd-ink-secondary)] hover:bg-[var(--xd-surface-hover)] hover:text-[var(--xd-ink)]'
               }`}
             >
-              <span
-                className={
-                  active
-                    ? 'text-[var(--xd-ink)]'
-                    : 'text-[var(--xd-ink-muted)]'
-                }
-              >
-                {item.icon}
+              <span className="flex min-w-0 items-center gap-2">
+                <span
+                  className={
+                    isTrashDropTarget
+                      ? 'text-[var(--xd-danger)]'
+                      : active
+                        ? 'text-[var(--xd-ink)]'
+                        : 'text-[var(--xd-ink-muted)]'
+                  }
+                >
+                  {item.icon}
+                </span>
+                <span className="truncate">{item.label}</span>
               </span>
-              <span className="truncate">{item.label}</span>
+              {isTrash && trashCount > 0 && (
+                <span className="xd-tabular rounded bg-[var(--xd-surface-hover)] px-1.5 py-0.5 text-[10.5px] font-medium text-[var(--xd-ink-muted)]">
+                  {trashCount}
+                </span>
+              )}
             </button>
           )
         })}
@@ -728,6 +774,7 @@ export interface DocumentBreadcrumbHeaderProps {
   onChangeInteractionMode?: (mode: CanvasInteractionMode) => void
   onDuplicate?: () => void
   onOpenShare?: () => void
+  onMoveToTrash?: () => void
   sharePermission: SharePermissionLevel
   isPublicLinkEnabled?: boolean
 }
@@ -741,6 +788,7 @@ export function DocumentBreadcrumbHeader({
   onChangeInteractionMode,
   onDuplicate,
   onOpenShare,
+  onMoveToTrash,
   isPublicLinkEnabled = true,
 }: DocumentBreadcrumbHeaderProps) {
   const modeOptions: Array<{
@@ -852,6 +900,18 @@ export function DocumentBreadcrumbHeader({
           )}
           <span>Share</span>
         </button>
+
+        {onMoveToTrash && (
+          <button
+            type="button"
+            onClick={onMoveToTrash}
+            title="Move to trash"
+            aria-label="Move to trash"
+            className="inline-flex h-7 w-7 items-center justify-center rounded border border-[var(--xd-border)] text-[var(--xd-ink-muted)] transition-colors hover:border-[var(--xd-danger)]/40 hover:bg-[var(--xd-danger-soft)] hover:text-[var(--xd-danger)]"
+          >
+            <Trash2 className="h-3.5 w-3.5" />
+          </button>
+        )}
       </div>
     </header>
   )

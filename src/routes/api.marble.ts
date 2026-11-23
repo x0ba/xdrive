@@ -55,6 +55,9 @@ const sliceOf = marblePatcher.sliceOf as (
 ) => MarbleSlice
 
 const DRIVE_DIR = path.resolve(process.cwd(), 'marble-drive')
+const TRASH_DIR = path.resolve(DRIVE_DIR, '.trash')
+const DEFAULT_TRASH_RETENTION_DAYS = 30
+const DAY_MS = 24 * 60 * 60 * 1000
 const SLUG_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/
 const GUARDED_TYPES = new Set([
   'setText',
@@ -127,6 +130,215 @@ function mrblPath(slug: string) {
     fail(400, 'Invalid slug')
   }
   return full
+}
+
+function trashPath(slug: string) {
+  const fileName = fileNameFor(slug)
+  const full = path.resolve(TRASH_DIR, fileName)
+  if (path.dirname(full) !== path.resolve(TRASH_DIR)) {
+    fail(400, 'Invalid slug')
+  }
+  return full
+}
+
+function trashMetaPath(slug: string) {
+  const full = path.resolve(TRASH_DIR, `${assertSlug(slug)}.meta.json`)
+  if (path.dirname(full) !== path.resolve(TRASH_DIR)) {
+    fail(400, 'Invalid slug')
+  }
+  return full
+}
+
+async function readTrashMeta(slug: string): Promise<{ trashedAt: string } | null> {
+  try {
+    const raw = await readFile(trashMetaPath(slug), 'utf8')
+    const parsed = JSON.parse(raw) as { trashedAt?: unknown }
+    if (typeof parsed.trashedAt === 'string' && !Number.isNaN(Date.parse(parsed.trashedAt))) {
+      return { trashedAt: parsed.trashedAt }
+    }
+    return null
+  } catch (error) {
+    if (isEnoent(error)) return null
+    return null
+  }
+}
+
+async function purgeExpiredTrash(retentionDays = DEFAULT_TRASH_RETENTION_DAYS) {
+  let names: string[]
+  try {
+    names = await readdir(TRASH_DIR)
+  } catch (error) {
+    if (isEnoent(error)) return [] as string[]
+    throw error
+  }
+
+  const now = Date.now()
+  const cutoffMs = retentionDays * DAY_MS
+  const purged: string[] = []
+
+  for (const fileName of names) {
+    if (!fileName.endsWith('.mrbl')) continue
+    const slug = fileName.slice(0, -'.mrbl'.length)
+    if (!SLUG_PATTERN.test(slug) || slug.includes('..')) continue
+    const full = trashPath(slug)
+    const meta = await readTrashMeta(slug)
+    let trashedMs = meta ? Date.parse(meta.trashedAt) : Number.NaN
+    if (Number.isNaN(trashedMs)) {
+      try {
+        const info = await stat(full)
+        trashedMs = info.mtimeMs
+      } catch (error) {
+        if (isEnoent(error)) continue
+        throw error
+      }
+    }
+    if (now - trashedMs >= cutoffMs) {
+      await Promise.all([
+        rm(full, { force: true }),
+        rm(trashMetaPath(slug), { force: true }),
+      ])
+      purged.push(slug)
+    }
+  }
+
+  return purged
+}
+
+async function listTrash(retentionDays = DEFAULT_TRASH_RETENTION_DAYS) {
+  const purged = await purgeExpiredTrash(retentionDays)
+  let names: string[]
+  try {
+    names = await readdir(TRASH_DIR)
+  } catch (error) {
+    if (isEnoent(error)) {
+      return json({
+        ok: true,
+        retentionDays,
+        purged,
+        documents: [],
+      })
+    }
+    throw error
+  }
+
+  const now = Date.now()
+  const documents = (
+    await Promise.all(
+      names
+        .filter((name) => name.endsWith('.mrbl'))
+        .map(async (fileName) => {
+          const slug = fileName.slice(0, -'.mrbl'.length)
+          if (!SLUG_PATTERN.test(slug) || slug.includes('..')) return null
+          const full = trashPath(slug)
+          const [source, info, meta] = await Promise.all([
+            readFile(full, 'utf8'),
+            stat(full),
+            readTrashMeta(slug),
+          ])
+          const trashedAt = meta?.trashedAt ?? info.mtime.toISOString()
+          const trashedMs = Date.parse(trashedAt)
+          const expiresAt = new Date(
+            trashedMs + retentionDays * DAY_MS,
+          ).toISOString()
+          const daysRemaining = Math.max(
+            0,
+            Math.ceil((trashedMs + retentionDays * DAY_MS - now) / DAY_MS),
+          )
+          return {
+            slug,
+            fileName,
+            title: titleOf(source, slug),
+            nodeCount: nodeCountOf(source),
+            byteSize: byteSizeOf(source),
+            trashedAt,
+            expiresAt,
+            daysRemaining,
+          }
+        }),
+    )
+  ).filter((document) => document !== null)
+
+  documents.sort((a, b) => (a.trashedAt < b.trashedAt ? 1 : -1))
+  return json({ ok: true, retentionDays, purged, documents })
+}
+
+async function trashDocument(slug: string, trashedAtIso?: string) {
+  const validSlug = assertSlug(slug)
+  const trashedAt =
+    trashedAtIso && !Number.isNaN(Date.parse(trashedAtIso))
+      ? trashedAtIso
+      : new Date().toISOString()
+  await mkdir(TRASH_DIR, { recursive: true })
+  const src = mrblPath(validSlug)
+  const dst = trashPath(validSlug)
+  let existedOnDisk = false
+  try {
+    await rename(src, dst)
+    existedOnDisk = true
+  } catch (error) {
+    if (!isEnoent(error)) throw error
+  }
+  if (existedOnDisk) {
+    await writeFile(
+      trashMetaPath(validSlug),
+      JSON.stringify({ slug: validSlug, trashedAt }, null, 2),
+      'utf8',
+    )
+  }
+  return {
+    ok: true as const,
+    slug: validSlug,
+    trashedAt,
+    existedOnDisk,
+    retentionDays: DEFAULT_TRASH_RETENTION_DAYS,
+  }
+}
+
+async function restoreDocument(slug: string) {
+  const validSlug = assertSlug(slug)
+  const src = trashPath(validSlug)
+  const dst = mrblPath(validSlug)
+  let restoredOnDisk = false
+  try {
+    await mkdir(DRIVE_DIR, { recursive: true })
+    await rename(src, dst)
+    restoredOnDisk = true
+  } catch (error) {
+    if (!isEnoent(error)) throw error
+  }
+  await rm(trashMetaPath(validSlug), { force: true })
+  return {
+    ok: true as const,
+    slug: validSlug,
+    restoredOnDisk,
+  }
+}
+
+async function deleteDocumentPermanently(slug: string) {
+  const validSlug = assertSlug(slug)
+  await Promise.all([
+    rm(trashPath(validSlug), { force: true }),
+    rm(trashMetaPath(validSlug), { force: true }),
+    rm(mrblPath(validSlug), { force: true }),
+  ])
+  return { ok: true as const, slug: validSlug, deleted: true }
+}
+
+async function emptyTrashOnDisk() {
+  let names: string[]
+  try {
+    names = await readdir(TRASH_DIR)
+  } catch (error) {
+    if (isEnoent(error)) return { ok: true as const, deletedCount: 0 }
+    throw error
+  }
+  let deletedCount = 0
+  for (const name of names) {
+    if (!name.endsWith('.mrbl') && !name.endsWith('.meta.json')) continue
+    await rm(path.resolve(TRASH_DIR, name), { force: true })
+    if (name.endsWith('.mrbl')) deletedCount += 1
+  }
+  return { ok: true as const, deletedCount }
 }
 
 function titleOf(source: string, slug: string) {
@@ -209,6 +421,7 @@ function savedPayload(slug: string, source: string) {
 }
 
 async function listDrive() {
+  await purgeExpiredTrash()
   let names: string[]
   try {
     names = await readdir(DRIVE_DIR)
@@ -354,6 +567,7 @@ export async function GET({ request }: { request: Request }) {
   try {
     const action = url.searchParams.get('action')
     if (action === 'list') return await listDrive()
+    if (action === 'trash') return await listTrash()
     if (action === 'read') return await readDrive(url.searchParams.get('slug'))
     if (action === 'slice') {
       return await sliceDrive(
@@ -364,7 +578,7 @@ export async function GET({ request }: { request: Request }) {
     return json(
       {
         ok: false,
-        error: 'Expected action=list, action=read, or action=slice',
+        error: 'Expected action=list, action=trash, action=read, or action=slice',
       },
       400,
     )
@@ -399,6 +613,37 @@ export async function POST({ request }: { request: Request }) {
         doctor: examine(fileName, nextSource),
       })
     }
+    if (action === 'trash') {
+      if (typeof body.slug !== 'string') {
+        fail(400, 'trash requires a slug string')
+      }
+      const trashedAt =
+        typeof body.trashedAt === 'string' ? body.trashedAt : undefined
+      return json(await trashDocument(body.slug, trashedAt))
+    }
+    if (action === 'restore') {
+      if (typeof body.slug !== 'string') {
+        fail(400, 'restore requires a slug string')
+      }
+      return json(await restoreDocument(body.slug))
+    }
+    if (action === 'delete') {
+      if (typeof body.slug !== 'string') {
+        fail(400, 'delete requires a slug string')
+      }
+      return json(await deleteDocumentPermanently(body.slug))
+    }
+    if (action === 'empty_trash') {
+      return json(await emptyTrashOnDisk())
+    }
+    if (action === 'purge_expired') {
+      const retentionDays =
+        typeof body.retentionDays === 'number' && body.retentionDays > 0
+          ? body.retentionDays
+          : DEFAULT_TRASH_RETENTION_DAYS
+      const purged = await purgeExpiredTrash(retentionDays)
+      return json({ ok: true, retentionDays, purged })
+    }
     if (action === 'doctor') {
       if (
         typeof body.fileName !== 'string' ||
@@ -417,10 +662,24 @@ export async function POST({ request }: { request: Request }) {
     return json(
       {
         ok: false,
-        error: 'Expected action save, apply_ops, doctor, or diff',
+        error:
+          'Expected action save, apply_ops, trash, restore, delete, empty_trash, purge_expired, doctor, or diff',
       },
       400,
     )
+  } catch (error) {
+    return errorResponse(error)
+  }
+}
+
+export async function DELETE({ request }: { request: Request }) {
+  const url = new URL(request.url)
+  try {
+    if (url.searchParams.get('empty') === '1') {
+      return json(await emptyTrashOnDisk())
+    }
+    const slug = requireSlug(url.searchParams.get('slug'))
+    return json(await deleteDocumentPermanently(slug))
   } catch (error) {
     return errorResponse(error)
   }
@@ -431,6 +690,7 @@ export const Route = createFileRoute('/api/marble')({
     handlers: {
       GET,
       POST,
+      DELETE,
     },
   },
 })
