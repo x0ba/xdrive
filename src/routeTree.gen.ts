@@ -11,6 +11,7 @@
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as McpRouteImport } from './routes/mcp'
+import { Route as ApiLatexRouteImport } from './routes/api.latex'
 import { Route as ApiMarbleRouteImport } from './routes/api.marble'
 
 const IndexRoute = IndexRouteImport.update({
@@ -23,6 +24,11 @@ const McpRoute = McpRouteImport.update({
   path: '/mcp',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiLatexRoute = ApiLatexRouteImport.update({
+  id: '/api/latex',
+  path: '/api/latex',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ApiMarbleRoute = ApiMarbleRouteImport.update({
   id: '/api/marble',
   path: '/api/marble',
@@ -32,30 +38,34 @@ const ApiMarbleRoute = ApiMarbleRouteImport.update({
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/mcp': typeof McpRoute
+  '/api/latex': typeof ApiLatexRoute
   '/api/marble': typeof ApiMarbleRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/mcp': typeof McpRoute
+  '/api/latex': typeof ApiLatexRoute
   '/api/marble': typeof ApiMarbleRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/mcp': typeof McpRoute
+  '/api/latex': typeof ApiLatexRoute
   '/api/marble': typeof ApiMarbleRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/mcp' | '/api/marble'
+  fullPaths: '/' | '/mcp' | '/api/latex' | '/api/marble'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/mcp' | '/api/marble'
-  id: '__root__' | '/' | '/mcp' | '/api/marble'
+  to: '/' | '/mcp' | '/api/latex' | '/api/marble'
+  id: '__root__' | '/' | '/mcp' | '/api/latex' | '/api/marble'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   McpRoute: typeof McpRoute
+  ApiLatexRoute: typeof ApiLatexRoute
   ApiMarbleRoute: typeof ApiMarbleRoute
 }
 
@@ -75,6 +85,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof McpRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/latex': {
+      id: '/api/latex'
+      path: '/api/latex'
+      fullPath: '/api/latex'
+      preLoaderRoute: typeof ApiLatexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/api/marble': {
       id: '/api/marble'
       path: '/api/marble'
@@ -88,6 +105,7 @@ declare module '@tanstack/react-router' {
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   McpRoute: McpRoute,
+  ApiLatexRoute: ApiLatexRoute,
   ApiMarbleRoute: ApiMarbleRoute,
 }
 export const routeTree = rootRouteImport

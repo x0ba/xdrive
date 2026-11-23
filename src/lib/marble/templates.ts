@@ -1440,7 +1440,7 @@ export const PREDEFINED_MARBLE_TEMPLATES: MarbleDocumentFile[] = [
     fileName: 'latex-studio.mrbl',
     title: 'LaTeX Paper & Theorem Studio',
     description:
-      'A paper composer: candidate titles, editable TeX, sortable sections, and a citation list.',
+      'Overleaf-parity split LaTeX IDE with autocomplete, multi-file BibTeX & KaTeX compiler, live PDF preview, SyncTeX, and .tex/.pdf export.',
     category: 'latex',
     source: latexSource(),
     starred: true,

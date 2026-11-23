@@ -53,7 +53,7 @@ import {
   nodeToElement,
   MarbleSourceInspector,
 } from '#/components/workspace/MarbleSourceInspector'
-import { DocsApp, NotesApp, SlidesApp } from '#/components/apps'
+import { DocsApp, LatexApp, NotesApp, SlidesApp } from '#/components/apps'
 import {
   DOCUMENT_DESIGN_SYSTEM_SLUG,
   DOCUMENT_DONTS_SYSTEM_SLUG,
@@ -1626,9 +1626,11 @@ export function XDriveWorkspace({
       ? 'notes'
       : activeDoc.category === 'slides'
         ? 'slides'
-        : activeDoc.category === 'document' && !activeDoc.isEvergreen
-          ? 'docs'
-          : null
+        : activeDoc.category === 'latex'
+          ? 'latex'
+          : activeDoc.category === 'document' && !activeDoc.isEvergreen
+            ? 'docs'
+            : null
     : null
 
   const appDisplaySource = activeDoc ? (previewSource ?? activeDoc.source) : ''
@@ -1720,6 +1722,15 @@ export function XDriveWorkspace({
     ) : richAppKind === 'slides' && activeDoc ? (
       <div ref={richStageRef} className="h-full w-full min-h-0">
         <SlidesApp
+          key={activeDoc.id}
+          marbleSource={appDisplaySource}
+          onMarbleSourceChange={handleRichAppSourceChange}
+          readOnly={appReadOnly}
+        />
+      </div>
+    ) : richAppKind === 'latex' && activeDoc ? (
+      <div ref={richStageRef} className="h-full w-full min-h-0">
+        <LatexApp
           key={activeDoc.id}
           marbleSource={appDisplaySource}
           onMarbleSourceChange={handleRichAppSourceChange}
