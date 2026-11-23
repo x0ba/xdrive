@@ -1554,7 +1554,7 @@ async function askMarbleApi(
 ): Promise<CollaborationResult | null> {
   if (typeof fetch !== 'function') return null
   const controller = new AbortController()
-  const timer = setTimeout(() => controller.abort(), 125_000)
+  const timer = setTimeout(() => controller.abort(), 310_000)
   try {
     const response = await fetch('/api/ai', {
       method: 'POST',

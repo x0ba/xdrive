@@ -11,7 +11,9 @@
 // - Fetches live Go models from `/inference/go/v1/models` and verifies account
 //   entitlement and rolling/weekly/monthly usage from `/inference/go/v1/usage`.
 // - Routes each model to its native Go API family (`chat-completions`,
-//   `responses`, `messages`, or `generate-content`).
+//   `responses`, `messages`, or `generate-content`) using SSE streaming so
+//   long reasoning/app-generation responses keep bytes flowing and avoid
+//   intermediary idle timeouts.
 
 import {
   DEFAULT_OPENCODE_GO_MODELS,
@@ -31,7 +33,8 @@ const MODELS_URL = `${OPENCODE_GO_ENDPOINT_BASE_URL}/v1/models`
 const USAGE_URL = `${OPENCODE_GO_ENDPOINT_BASE_URL}/v1/usage`
 const USER_AGENT = 'xdrive/1.0'
 const CATALOG_TTL_MS = 5 * 60 * 1000
-const REQUEST_TIMEOUT_MS = 120_000
+const REQUEST_TIMEOUT_MS = 300_000
+const STREAM_IDLE_TIMEOUT_MS = 90_000
 const META_TIMEOUT_MS = 12_000
 
 export interface OpenCodeGoPromptInput {
@@ -81,7 +84,7 @@ interface RawCatalogModel {
     input?: unknown
   }
   capabilities?: {
-    reasoning?: { supported?: unknown } | unknown
+    reasoning?: { supported?: unknown; effort?: unknown } | unknown
   }
   limit?: {
     context?: unknown
@@ -290,6 +293,14 @@ function normalizeCatalogModel(raw: RawCatalogModel): OpenCodeGoModelOption | nu
             typeof reasoningCap === 'object' &&
             (reasoningCap as { supported?: unknown }).supported,
         )
+  const reasoningEfforts =
+    reasoningCap &&
+    typeof reasoningCap === 'object' &&
+    Array.isArray((reasoningCap as { effort?: unknown }).effort)
+      ? (reasoningCap as { effort: unknown[] }).effort.filter(
+          (value): value is string => typeof value === 'string',
+        )
+      : undefined
 
   const { protocol, baseUrl } = resolveProtocolFromCatalog(raw)
 
@@ -309,6 +320,7 @@ function normalizeCatalogModel(raw: RawCatalogModel): OpenCodeGoModelOption | nu
         : 16_384,
     supportsVision,
     reasoning,
+    reasoningEfforts,
     featured: Boolean(raw.go?.featured),
     apiProtocol: protocol,
     baseUrl,
@@ -326,13 +338,24 @@ function normalizeCatalogModel(raw: RawCatalogModel): OpenCodeGoModelOption | nu
   }
 }
 
+function pickBalancedReasoningEffort(efforts?: string[]): string | undefined {
+  if (!efforts || efforts.length === 0) return undefined
+  // Prefer 'low' over 'max' so full .mrbl app generations stay responsive
+  // without burning several minutes on extended thinking before emitting JSON.
+  if (efforts.includes('low')) return 'low'
+  if (efforts.includes('medium')) return 'medium'
+  return undefined
+}
+
 function combineSignals(
   timeoutMs: number,
   externalSignal?: AbortSignal,
-): { signal: AbortSignal; cleanup: () => void } {
+): { signal: AbortSignal; controller: AbortController; cleanup: () => void } {
   const controller = new AbortController()
   const timer = setTimeout(() => {
-    controller.abort(new Error(`OpenCode Go request timed out after ${timeoutMs}ms`))
+    controller.abort(
+      new Error(`OpenCode Go request timed out after ${timeoutMs}ms`),
+    )
   }, timeoutMs)
 
   const onExternalAbort = () => {
@@ -349,12 +372,113 @@ function combineSignals(
 
   return {
     signal: controller.signal,
+    controller,
     cleanup: () => {
       clearTimeout(timer)
       if (externalSignal) {
         externalSignal.removeEventListener('abort', onExternalAbort)
       }
     },
+  }
+}
+
+function isEventStream(response: Response): boolean {
+  const contentType = response.headers.get('content-type') ?? ''
+  return contentType.toLowerCase().includes('text/event-stream')
+}
+
+async function readSseEvents(
+  response: Response,
+  controller: AbortController,
+  onData: (payload: unknown, eventName: string | null) => void,
+): Promise<void> {
+  const body = response.body
+  if (!body) return
+
+  const reader = body.getReader()
+  const decoder = new TextDecoder()
+  let buffer = ''
+  let currentEvent: string | null = null
+  let dataLines: string[] = []
+  const armIdleTimer = () =>
+    setTimeout(() => {
+      controller.abort(
+        new Error(
+          `OpenCode Go stream was idle for ${Math.round(STREAM_IDLE_TIMEOUT_MS / 1000)}s`,
+        ),
+      )
+    }, STREAM_IDLE_TIMEOUT_MS)
+
+  let idleTimer: ReturnType<typeof setTimeout> = armIdleTimer()
+
+  const resetIdleTimer = () => {
+    clearTimeout(idleTimer)
+    idleTimer = armIdleTimer()
+  }
+
+  const flushEvent = () => {
+    if (dataLines.length === 0) {
+      currentEvent = null
+      return
+    }
+    const rawData = dataLines.join('\n').trim()
+    const eventName = currentEvent
+    dataLines = []
+    currentEvent = null
+    if (!rawData || rawData === '[DONE]') return
+
+    let parsed: unknown
+    try {
+      parsed = JSON.parse(rawData)
+    } catch {
+      return
+    }
+    onData(parsed, eventName)
+  }
+
+  const processLine = (line: string) => {
+    const clean = line.endsWith('\r') ? line.slice(0, -1) : line
+    if (clean === '') {
+      flushEvent()
+      return
+    }
+    if (clean.startsWith(':')) return
+    if (clean.startsWith('event:')) {
+      currentEvent = clean.slice('event:'.length).trim()
+      return
+    }
+    if (clean.startsWith('data:')) {
+      dataLines.push(clean.slice('data:'.length).trimStart())
+    }
+  }
+
+  try {
+    for (;;) {
+      const { done, value } = await reader.read()
+      if (done) break
+      resetIdleTimer()
+      buffer += decoder.decode(value, { stream: true })
+      let newlineIndex = buffer.indexOf('\n')
+      while (newlineIndex !== -1) {
+        processLine(buffer.slice(0, newlineIndex))
+        buffer = buffer.slice(newlineIndex + 1)
+        newlineIndex = buffer.indexOf('\n')
+      }
+    }
+    buffer += decoder.decode()
+    if (buffer.length > 0) {
+      for (const line of buffer.split('\n')) {
+        processLine(line)
+      }
+    }
+    flushEvent()
+  } finally {
+    clearTimeout(idleTimer)
+    try {
+      reader.releaseLock()
+    } catch {
+      // Ignore lock release errors on aborted streams.
+    }
   }
 }
 
@@ -663,12 +787,18 @@ class OpenCodeGoManager {
     )
     const supportsVision = catalogEntry?.supportsVision ?? true
     const maxTokens = Math.min(catalogEntry?.outputLimit ?? 16_384, 16_384)
+    const reasoningEffort = pickBalancedReasoningEffort(
+      catalogEntry?.reasoningEfforts,
+    )
     const sessionHeader = sanitizeSessionId(input.sessionId)
     const images = supportsVision
       ? (input.imageDataUrls ?? []).filter(Boolean)
       : []
 
-    const { signal, cleanup } = combineSignals(REQUEST_TIMEOUT_MS, input.signal)
+    const { signal, controller, cleanup } = combineSignals(
+      REQUEST_TIMEOUT_MS,
+      input.signal,
+    )
     try {
       if (protocol === 'messages') {
         return await this.callAnthropicMessages({
@@ -680,6 +810,7 @@ class OpenCodeGoManager {
           maxTokens,
           sessionHeader,
           signal,
+          controller,
         })
       }
       if (protocol === 'responses') {
@@ -689,8 +820,10 @@ class OpenCodeGoManager {
           modelId: rawModelId,
           prompt: input.prompt,
           images,
+          reasoningEffort,
           sessionHeader,
           signal,
+          controller,
         })
       }
       if (protocol === 'generate-content') {
@@ -702,6 +835,7 @@ class OpenCodeGoManager {
           images,
           sessionHeader,
           signal,
+          controller,
         })
       }
       return await this.callOpenAiChatCompletions({
@@ -710,14 +844,16 @@ class OpenCodeGoManager {
         modelId: rawModelId,
         prompt: input.prompt,
         images,
+        reasoningEffort,
         sessionHeader,
         signal,
+        controller,
       })
     } catch (error) {
       if (error instanceof OpenCodeGoError) throw error
       if (
         error instanceof Error &&
-        (error.name === 'AbortError' || /timed out/i.test(error.message))
+        (error.name === 'AbortError' || /timed out|idle/i.test(error.message))
       ) {
         throw new OpenCodeGoError(
           'TIMEOUT',
@@ -755,7 +891,11 @@ class OpenCodeGoManager {
     if (response.status === 429) {
       throw new OpenCodeGoError('RATE_LIMITED', message, 429)
     }
-    throw new OpenCodeGoError('API_ERROR', message, response.status >= 400 ? response.status : 502)
+    throw new OpenCodeGoError(
+      'API_ERROR',
+      message,
+      response.status >= 400 ? response.status : 502,
+    )
   }
 
   private async callOpenAiChatCompletions(params: {
@@ -764,8 +904,10 @@ class OpenCodeGoManager {
     modelId: string
     prompt: string
     images: string[]
+    reasoningEffort?: string
     sessionHeader: string
     signal: AbortSignal
+    controller: AbortController
   }): Promise<OpenCodeGoPromptOutput> {
     const content =
       params.images.length > 0
@@ -778,20 +920,25 @@ class OpenCodeGoManager {
           ]
         : params.prompt
 
+    const body: Record<string, unknown> = {
+      model: params.modelId,
+      messages: [{ role: 'user', content }],
+      stream: true,
+    }
+    if (params.reasoningEffort) {
+      body.reasoning_effort = params.reasoningEffort
+    }
+
     const response = await fetch(`${params.baseUrl}/chat/completions`, {
       method: 'POST',
       headers: {
         authorization: `Bearer ${params.apiKey}`,
         'content-type': 'application/json',
-        accept: 'application/json',
+        accept: 'text/event-stream, application/json',
         'user-agent': USER_AGENT,
         'x-opencode-session': params.sessionHeader,
       },
-      body: JSON.stringify({
-        model: params.modelId,
-        messages: [{ role: 'user', content }],
-        stream: false,
-      }),
+      body: JSON.stringify(body),
       signal: params.signal,
     })
 
@@ -799,42 +946,95 @@ class OpenCodeGoManager {
       await this.handleErrorStatus(response, params.modelId)
     }
 
-    const payload = (await response.json()) as {
-      choices?: Array<{
-        finish_reason?: string | null
-        message?: {
-          content?:
-            | string
-            | Array<{ type?: string; text?: string }>
-            | null
-          reasoning_content?: string | null
-          reasoning?: string | null
-        }
-      }>
+    if (!isEventStream(response)) {
+      const payload = (await response.json()) as {
+        choices?: Array<{
+          finish_reason?: string | null
+          message?: {
+            content?:
+              | string
+              | Array<{ type?: string; text?: string }>
+              | null
+            reasoning_content?: string | null
+            reasoning?: string | null
+          }
+        }>
+      }
+      const choice = payload.choices?.[0]
+      const rawContent = choice?.message?.content
+      const text =
+        typeof rawContent === 'string'
+          ? rawContent
+          : Array.isArray(rawContent)
+            ? rawContent
+                .map((part) => (typeof part.text === 'string' ? part.text : ''))
+                .join('')
+            : ''
+      const reasoning =
+        choice?.message?.reasoning_content ?? choice?.message?.reasoning
+      return {
+        text,
+        thoughts:
+          typeof reasoning === 'string' && reasoning.trim()
+            ? [reasoning.trim()]
+            : [],
+        stopReason: choice?.finish_reason ?? 'stop',
+        modelId: params.modelId,
+        apiProtocol: 'chat-completions',
+      }
     }
 
-    const choice = payload.choices?.[0]
-    const rawContent = choice?.message?.content
     let text = ''
-    if (typeof rawContent === 'string') {
-      text = rawContent
-    } else if (Array.isArray(rawContent)) {
-      text = rawContent
-        .map((part) => (typeof part.text === 'string' ? part.text : ''))
-        .join('')
-    }
+    let reasoningText = ''
+    let stopReason = 'stop'
 
-    const thoughts: string[] = []
-    const reasoning =
-      choice?.message?.reasoning_content ?? choice?.message?.reasoning
-    if (typeof reasoning === 'string' && reasoning.trim()) {
-      thoughts.push(reasoning.trim())
-    }
+    await readSseEvents(response, params.controller, (chunk) => {
+      if (!chunk || typeof chunk !== 'object') return
+      const record = chunk as {
+        error?: unknown
+        choices?: Array<{
+          finish_reason?: string | null
+          delta?: {
+            content?: string | Array<{ type?: string; text?: string }> | null
+            reasoning_content?: string | null
+            reasoning?: string | null
+          }
+        }>
+      }
+      if (record.error) {
+        throw new OpenCodeGoError(
+          'API_ERROR',
+          extractUpstreamErrorMessage(
+            record,
+            `OpenCode Go stream error for "${params.modelId}".`,
+          ),
+          502,
+        )
+      }
+      const choice = record.choices?.[0]
+      if (!choice) return
+      if (typeof choice.finish_reason === 'string' && choice.finish_reason) {
+        stopReason = choice.finish_reason
+      }
+      const delta = choice.delta
+      if (!delta) return
+      if (typeof delta.content === 'string') {
+        text += delta.content
+      } else if (Array.isArray(delta.content)) {
+        for (const part of delta.content) {
+          if (typeof part.text === 'string') text += part.text
+        }
+      }
+      const reasoningDelta = delta.reasoning_content ?? delta.reasoning
+      if (typeof reasoningDelta === 'string') {
+        reasoningText += reasoningDelta
+      }
+    })
 
     return {
       text,
-      thoughts,
-      stopReason: choice?.finish_reason ?? 'stop',
+      thoughts: reasoningText.trim() ? [reasoningText.trim()] : [],
+      stopReason,
       modelId: params.modelId,
       apiProtocol: 'chat-completions',
     }
@@ -846,8 +1046,10 @@ class OpenCodeGoManager {
     modelId: string
     prompt: string
     images: string[]
+    reasoningEffort?: string
     sessionHeader: string
     signal: AbortSignal
+    controller: AbortController
   }): Promise<OpenCodeGoPromptOutput> {
     const contentParts: Array<Record<string, unknown>> = [
       { type: 'input_text', text: params.prompt },
@@ -857,20 +1059,25 @@ class OpenCodeGoManager {
       })),
     ]
 
+    const body: Record<string, unknown> = {
+      model: params.modelId,
+      input: [{ role: 'user', content: contentParts }],
+      stream: true,
+    }
+    if (params.reasoningEffort) {
+      body.reasoning = { effort: params.reasoningEffort }
+    }
+
     const response = await fetch(`${params.baseUrl}/responses`, {
       method: 'POST',
       headers: {
         authorization: `Bearer ${params.apiKey}`,
         'content-type': 'application/json',
-        accept: 'application/json',
+        accept: 'text/event-stream, application/json',
         'user-agent': USER_AGENT,
         'x-opencode-session': params.sessionHeader,
       },
-      body: JSON.stringify({
-        model: params.modelId,
-        input: [{ role: 'user', content: contentParts }],
-        stream: false,
-      }),
+      body: JSON.stringify(body),
       signal: params.signal,
     })
 
@@ -878,7 +1085,7 @@ class OpenCodeGoManager {
       await this.handleErrorStatus(response, params.modelId)
     }
 
-    const payload = (await response.json()) as {
+    const extractResponseObject = (payload: {
       status?: string
       output_text?: string
       output?: Array<{
@@ -886,37 +1093,101 @@ class OpenCodeGoManager {
         content?: Array<{ type?: string; text?: string }>
         summary?: Array<{ type?: string; text?: string }>
       }>
-    }
-
-    let text = typeof payload.output_text === 'string' ? payload.output_text : ''
-    const thoughts: string[] = []
-
-    if (Array.isArray(payload.output)) {
-      for (const item of payload.output) {
+    }) => {
+      let outText =
+        typeof payload.output_text === 'string' ? payload.output_text : ''
+      const outThoughts: string[] = []
+      for (const item of payload.output ?? []) {
         if (item.type === 'reasoning' && Array.isArray(item.summary)) {
           for (const part of item.summary) {
             if (typeof part.text === 'string' && part.text.trim()) {
-              thoughts.push(part.text.trim())
+              outThoughts.push(part.text.trim())
             }
           }
         }
-        if (!text && Array.isArray(item.content)) {
+        if (!outText && Array.isArray(item.content)) {
           for (const part of item.content) {
             if (
               (part.type === 'output_text' || part.type === 'text') &&
               typeof part.text === 'string'
             ) {
-              text += part.text
+              outText += part.text
             }
           }
         }
       }
+      return {
+        text: outText,
+        thoughts: outThoughts,
+        stopReason: payload.status ?? 'completed',
+      }
     }
+
+    if (!isEventStream(response)) {
+      const payload = (await response.json()) as Parameters<
+        typeof extractResponseObject
+      >[0]
+      const extracted = extractResponseObject(payload)
+      return {
+        ...extracted,
+        modelId: params.modelId,
+        apiProtocol: 'responses',
+      }
+    }
+
+    let text = ''
+    let reasoningText = ''
+    let stopReason = 'completed'
+
+    await readSseEvents(response, params.controller, (chunk, eventName) => {
+      if (!chunk || typeof chunk !== 'object') return
+      const record = chunk as {
+        type?: string
+        delta?: string
+        error?: unknown
+        response?: Parameters<typeof extractResponseObject>[0] & {
+          error?: unknown
+        }
+      }
+      const kind = record.type ?? eventName ?? ''
+      if (kind === 'error' || kind === 'response.failed' || record.error) {
+        throw new OpenCodeGoError(
+          'API_ERROR',
+          extractUpstreamErrorMessage(
+            record.response?.error ? record.response : record,
+            `OpenCode Go stream error for "${params.modelId}".`,
+          ),
+          502,
+        )
+      }
+      if (
+        kind === 'response.output_text.delta' &&
+        typeof record.delta === 'string'
+      ) {
+        text += record.delta
+      } else if (
+        (kind === 'response.reasoning_summary_text.delta' ||
+          kind === 'response.reasoning_text.delta') &&
+        typeof record.delta === 'string'
+      ) {
+        reasoningText += record.delta
+      } else if (
+        (kind === 'response.completed' || kind === 'response.incomplete') &&
+        record.response
+      ) {
+        const extracted = extractResponseObject(record.response)
+        if (!text && extracted.text) text = extracted.text
+        if (!reasoningText && extracted.thoughts.length > 0) {
+          reasoningText = extracted.thoughts.join('\n')
+        }
+        stopReason = extracted.stopReason
+      }
+    })
 
     return {
       text,
-      thoughts,
-      stopReason: payload.status ?? 'completed',
+      thoughts: reasoningText.trim() ? [reasoningText.trim()] : [],
+      stopReason,
       modelId: params.modelId,
       apiProtocol: 'responses',
     }
@@ -931,6 +1202,7 @@ class OpenCodeGoManager {
     maxTokens: number
     sessionHeader: string
     signal: AbortSignal
+    controller: AbortController
   }): Promise<OpenCodeGoPromptOutput> {
     const contentBlocks: Array<Record<string, unknown>> = [
       { type: 'text', text: params.prompt },
@@ -956,7 +1228,7 @@ class OpenCodeGoManager {
         'x-api-key': params.apiKey,
         'anthropic-version': '2023-06-01',
         'content-type': 'application/json',
-        accept: 'application/json',
+        accept: 'text/event-stream, application/json',
         'user-agent': USER_AGENT,
         'x-opencode-session': params.sessionHeader,
       },
@@ -964,6 +1236,7 @@ class OpenCodeGoManager {
         model: params.modelId,
         max_tokens: params.maxTokens,
         messages: [{ role: 'user', content: contentBlocks }],
+        stream: true,
       }),
       signal: params.signal,
     })
@@ -972,25 +1245,85 @@ class OpenCodeGoManager {
       await this.handleErrorStatus(response, params.modelId)
     }
 
-    const payload = (await response.json()) as {
-      stop_reason?: string | null
-      content?: Array<{ type?: string; text?: string; thinking?: string }>
-    }
-
-    let text = ''
-    const thoughts: string[] = []
-    for (const block of payload.content ?? []) {
-      if (block.type === 'text' && typeof block.text === 'string') {
-        text += block.text
-      } else if (block.type === 'thinking' && typeof block.thinking === 'string') {
-        if (block.thinking.trim()) thoughts.push(block.thinking.trim())
+    if (!isEventStream(response)) {
+      const payload = (await response.json()) as {
+        stop_reason?: string | null
+        content?: Array<{ type?: string; text?: string; thinking?: string }>
+      }
+      let text = ''
+      const thoughts: string[] = []
+      for (const block of payload.content ?? []) {
+        if (block.type === 'text' && typeof block.text === 'string') {
+          text += block.text
+        } else if (
+          block.type === 'thinking' &&
+          typeof block.thinking === 'string' &&
+          block.thinking.trim()
+        ) {
+          thoughts.push(block.thinking.trim())
+        }
+      }
+      return {
+        text,
+        thoughts,
+        stopReason: payload.stop_reason ?? 'end_turn',
+        modelId: params.modelId,
+        apiProtocol: 'messages',
       }
     }
 
+    let text = ''
+    let reasoningText = ''
+    let stopReason = 'end_turn'
+
+    await readSseEvents(response, params.controller, (chunk, eventName) => {
+      if (!chunk || typeof chunk !== 'object') return
+      const record = chunk as {
+        type?: string
+        error?: unknown
+        delta?: {
+          type?: string
+          text?: string
+          thinking?: string
+          stop_reason?: string | null
+        }
+      }
+      const kind = record.type ?? eventName ?? ''
+      if (kind === 'error' || record.error) {
+        throw new OpenCodeGoError(
+          'API_ERROR',
+          extractUpstreamErrorMessage(
+            record,
+            `OpenCode Go stream error for "${params.modelId}".`,
+          ),
+          502,
+        )
+      }
+      if (kind === 'content_block_delta' && record.delta) {
+        if (
+          record.delta.type === 'text_delta' &&
+          typeof record.delta.text === 'string'
+        ) {
+          text += record.delta.text
+        } else if (
+          record.delta.type === 'thinking_delta' &&
+          typeof record.delta.thinking === 'string'
+        ) {
+          reasoningText += record.delta.thinking
+        }
+      } else if (
+        kind === 'message_delta' &&
+        typeof record.delta?.stop_reason === 'string' &&
+        record.delta.stop_reason
+      ) {
+        stopReason = record.delta.stop_reason
+      }
+    })
+
     return {
       text,
-      thoughts,
-      stopReason: payload.stop_reason ?? 'end_turn',
+      thoughts: reasoningText.trim() ? [reasoningText.trim()] : [],
+      stopReason,
       modelId: params.modelId,
       apiProtocol: 'messages',
     }
@@ -1004,6 +1337,7 @@ class OpenCodeGoManager {
     images: string[]
     sessionHeader: string
     signal: AbortSignal
+    controller: AbortController
   }): Promise<OpenCodeGoPromptOutput> {
     const parts: Array<Record<string, unknown>> = [{ text: params.prompt }]
     for (const dataUrl of params.images) {
@@ -1018,14 +1352,14 @@ class OpenCodeGoManager {
       }
     }
 
-    const url = `${params.baseUrl}/models/${encodeURIComponent(params.modelId)}:generateContent`
+    const url = `${params.baseUrl}/models/${encodeURIComponent(params.modelId)}:streamGenerateContent?alt=sse`
     const response = await fetch(url, {
       method: 'POST',
       headers: {
         authorization: `Bearer ${params.apiKey}`,
         'x-goog-api-key': params.apiKey,
         'content-type': 'application/json',
-        accept: 'application/json',
+        accept: 'text/event-stream, application/json',
         'user-agent': USER_AGENT,
         'x-opencode-session': params.sessionHeader,
       },
@@ -1039,31 +1373,61 @@ class OpenCodeGoManager {
       await this.handleErrorStatus(response, params.modelId)
     }
 
-    const payload = (await response.json()) as {
-      candidates?: Array<{
-        finishReason?: string
-        content?: {
-          parts?: Array<{ text?: string; thought?: boolean }>
+    let text = ''
+    let reasoningText = ''
+    let stopReason = 'STOP'
+
+    const consumeCandidateChunk = (chunk: unknown) => {
+      if (!chunk || typeof chunk !== 'object') return
+      const record = chunk as {
+        error?: unknown
+        candidates?: Array<{
+          finishReason?: string
+          content?: {
+            parts?: Array<{ text?: string; thought?: boolean }>
+          }
+        }>
+      }
+      if (record.error) {
+        throw new OpenCodeGoError(
+          'API_ERROR',
+          extractUpstreamErrorMessage(
+            record,
+            `OpenCode Go stream error for "${params.modelId}".`,
+          ),
+          502,
+        )
+      }
+      const candidate = record.candidates?.[0]
+      if (!candidate) return
+      if (candidate.finishReason) stopReason = candidate.finishReason
+      for (const part of candidate.content?.parts ?? []) {
+        if (typeof part.text !== 'string') continue
+        if (part.thought) {
+          reasoningText += part.text
+        } else {
+          text += part.text
         }
-      }>
+      }
     }
 
-    const candidate = payload.candidates?.[0]
-    let text = ''
-    const thoughts: string[] = []
-    for (const part of candidate?.content?.parts ?? []) {
-      if (typeof part.text !== 'string') continue
-      if (part.thought) {
-        if (part.text.trim()) thoughts.push(part.text.trim())
+    if (!isEventStream(response)) {
+      const payload: unknown = await response.json()
+      if (Array.isArray(payload)) {
+        for (const item of payload) consumeCandidateChunk(item)
       } else {
-        text += part.text
+        consumeCandidateChunk(payload)
       }
+    } else {
+      await readSseEvents(response, params.controller, (chunk) => {
+        consumeCandidateChunk(chunk)
+      })
     }
 
     return {
       text,
-      thoughts,
-      stopReason: candidate?.finishReason ?? 'STOP',
+      thoughts: reasoningText.trim() ? [reasoningText.trim()] : [],
+      stopReason,
       modelId: params.modelId,
       apiProtocol: 'generate-content',
     }

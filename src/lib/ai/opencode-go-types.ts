@@ -21,6 +21,7 @@ export interface OpenCodeGoModelOption {
   outputLimit?: number
   supportsVision: boolean
   reasoning: boolean
+  reasoningEfforts?: string[]
   featured?: boolean
   apiProtocol: OpenCodeGoApiProtocol
   baseUrl: string
@@ -95,6 +96,7 @@ export const DEFAULT_OPENCODE_GO_MODELS: OpenCodeGoModelOption[] = [
     outputLimit: 131_072,
     supportsVision: false,
     reasoning: true,
+    reasoningEfforts: ['low', 'high', 'max'],
     featured: true,
     apiProtocol: 'chat-completions',
     baseUrl: 'https://opencode.ai/inference/go/openai/v1',
@@ -109,6 +111,7 @@ export const DEFAULT_OPENCODE_GO_MODELS: OpenCodeGoModelOption[] = [
     outputLimit: 131_072,
     supportsVision: true,
     reasoning: true,
+    reasoningEfforts: ['low', 'high', 'max'],
     featured: true,
     apiProtocol: 'chat-completions',
     baseUrl: 'https://opencode.ai/inference/go/openai/v1',
@@ -123,6 +126,7 @@ export const DEFAULT_OPENCODE_GO_MODELS: OpenCodeGoModelOption[] = [
     outputLimit: 131_072,
     supportsVision: true,
     reasoning: true,
+    reasoningEfforts: ['low', 'high', 'max'],
     featured: true,
     apiProtocol: 'chat-completions',
     baseUrl: 'https://opencode.ai/inference/go/openai/v1',
