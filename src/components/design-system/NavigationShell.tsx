@@ -1,9 +1,13 @@
-import React from 'react'
+import React, { useState } from 'react'
 import {
+  ChevronDown,
   ChevronLeft,
   ChevronRight,
+  Folder,
+  FolderPlus,
   HardDrive,
   Plus,
+  Star,
   X,
   Sun,
   Moon,
@@ -29,6 +33,8 @@ import {
   ShieldAlert,
 } from 'lucide-react'
 import type {
+  DriveFolder,
+  DriveFolderColor,
   MarbleAppCategory,
   MarbleDocumentFile,
   CanvasInteractionMode,
@@ -36,6 +42,21 @@ import type {
   AISubscription,
 } from '#/lib/types'
 import { MarbleSyncBadge } from './DesignTokensShowcase'
+
+function sidebarFolderColorClass(color?: DriveFolderColor): string {
+  switch (color) {
+    case 'accent':
+      return 'text-[var(--xd-accent)]'
+    case 'commit':
+      return 'text-[var(--xd-commit)]'
+    case 'sketch':
+      return 'text-[var(--xd-sketch)]'
+    case 'danger':
+      return 'text-[var(--xd-danger)]'
+    default:
+      return 'text-[var(--xd-ink-muted)]'
+  }
+}
 
 export function getCategoryIcon(
   category: MarbleAppCategory,
@@ -338,12 +359,18 @@ export type PrimaryNavId =
   | 'agent-studio'
   | 'templates'
   | 'shared'
+  | 'starred'
   | 'subscriptions'
 
 export interface SidebarRailProps {
   activeNav: PrimaryNavId
   onSelectNav?: (nav: PrimaryNavId) => void
   onOpenCommandPalette?: () => void
+  folders?: DriveFolder[]
+  activeFolderId?: string | null
+  onSelectFolder?: (folderId: string | null) => void
+  onCreateFolder?: (parentId: string | null) => void
+  onDropDocOnFolder?: (docId: string, folderId: string | null) => void
   pinnedApps?: Array<{
     id: string
     title: string
@@ -371,29 +398,142 @@ export function SidebarRail({
   activeNav,
   onSelectNav,
   onOpenCommandPalette,
+  folders = [],
+  activeFolderId = null,
+  onSelectFolder,
+  onCreateFolder,
+  onDropDocOnFolder,
   pinnedApps = [],
   activeAppId,
   onSelectApp,
 }: SidebarRailProps) {
-  const navItems: Array<{
+  const [driveExpanded, setDriveExpanded] = useState(true)
+  const [expandedFolderIds, setExpandedFolderIds] = useState<Set<string>>(
+    () => new Set(),
+  )
+  const [dropTargetId, setDropTargetId] = useState<string | 'root' | null>(null)
+
+  const toggleExpandFolder = (folderId: string) => {
+    setExpandedFolderIds((prev) => {
+      const next = new Set(prev)
+      if (next.has(folderId)) next.delete(folderId)
+      else next.add(folderId)
+      return next
+    })
+  }
+
+  const handleDragOver = (
+    event: React.DragEvent,
+    target: string | 'root',
+  ) => {
+    if (!onDropDocOnFolder) return
+    event.preventDefault()
+    event.dataTransfer.dropEffect = 'move'
+    setDropTargetId(target)
+  }
+
+  const handleDrop = (event: React.DragEvent, folderId: string | null) => {
+    event.preventDefault()
+    setDropTargetId(null)
+    const docId =
+      event.dataTransfer.getData('application/x-xdrive-doc-id') ||
+      event.dataTransfer.getData('text/plain')
+    if (docId.trim() && onDropDocOnFolder) {
+      onDropDocOnFolder(docId.trim(), folderId)
+    }
+  }
+
+  const renderFolderTree = (
+    parentId: string | null,
+    depth: number,
+  ): React.ReactNode => {
+    const children = folders
+      .filter((folder) => folder.parentId === parentId)
+      .sort((a, b) => a.name.localeCompare(b.name))
+    if (children.length === 0) return null
+
+    return children.map((folder) => {
+      const hasChildren = folders.some((item) => item.parentId === folder.id)
+      const isExpanded = expandedFolderIds.has(folder.id)
+      const isSelected =
+        (activeNav === 'drive' || activeNav === 'agent-studio') &&
+        !activeAppId &&
+        activeFolderId === folder.id
+
+      return (
+        <div key={folder.id}>
+          <div
+            onDragOver={(e) => handleDragOver(e, folder.id)}
+            onDragLeave={() => setDropTargetId(null)}
+            onDrop={(e) => handleDrop(e, folder.id)}
+            style={{ paddingLeft: `${12 + depth * 12}px` }}
+            className={`group flex items-center gap-1 rounded pr-1 py-1 text-[12px] transition-colors ${
+              dropTargetId === folder.id
+                ? 'bg-[var(--xd-accent-soft)] ring-1 ring-[var(--xd-accent)]'
+                : isSelected
+                  ? 'bg-[var(--xd-surface-active)] font-medium text-[var(--xd-ink)]'
+                  : 'text-[var(--xd-ink-secondary)] hover:bg-[var(--xd-surface-hover)] hover:text-[var(--xd-ink)]'
+            }`}
+          >
+            {hasChildren ? (
+              <button
+                type="button"
+                aria-label={isExpanded ? 'Collapse folder' : 'Expand folder'}
+                onClick={(e) => {
+                  e.stopPropagation()
+                  toggleExpandFolder(folder.id)
+                }}
+                className="inline-flex h-4 w-4 shrink-0 items-center justify-center rounded text-[var(--xd-ink-muted)] hover:text-[var(--xd-ink)]"
+              >
+                {isExpanded ? (
+                  <ChevronDown className="h-3 w-3" />
+                ) : (
+                  <ChevronRight className="h-3 w-3" />
+                )}
+              </button>
+            ) : (
+              <span className="h-4 w-4 shrink-0" />
+            )}
+
+            <button
+              type="button"
+              onClick={() => {
+                onSelectNav?.('drive')
+                onSelectFolder?.(folder.id)
+              }}
+              className="flex min-w-0 flex-1 items-center gap-1.5 text-left"
+            >
+              <Folder
+                className={`h-3.5 w-3.5 shrink-0 ${sidebarFolderColorClass(folder.color)}`}
+              />
+              <span className="truncate">{folder.name}</span>
+            </button>
+          </div>
+          {hasChildren && isExpanded && renderFolderTree(folder.id, depth + 1)}
+        </div>
+      )
+    })
+  }
+
+  const secondaryNavItems: Array<{
     id: PrimaryNavId
     label: string
     icon: React.ReactNode
   }> = [
     {
-      id: 'drive',
-      label: 'Files',
-      icon: <HardDrive className="h-3.5 w-3.5" />,
+      id: 'shared',
+      label: 'Shared',
+      icon: <Users className="h-3.5 w-3.5" />,
+    },
+    {
+      id: 'starred',
+      label: 'Starred',
+      icon: <Star className="h-3.5 w-3.5" />,
     },
     {
       id: 'templates',
       label: 'Templates',
       icon: <LayoutTemplate className="h-3.5 w-3.5" />,
-    },
-    {
-      id: 'shared',
-      label: 'Shared',
-      icon: <Users className="h-3.5 w-3.5" />,
     },
     {
       id: 'subscriptions',
@@ -402,8 +542,13 @@ export function SidebarRail({
     },
   ]
 
+  const isMyDriveRootActive =
+    (activeNav === 'drive' || activeNav === 'agent-studio') &&
+    !activeAppId &&
+    activeFolderId === null
+
   return (
-    <aside className="flex h-full w-48 shrink-0 select-none flex-col border-r border-[var(--xd-border)] bg-[var(--xd-rail)] p-2 text-[12.5px]">
+    <aside className="flex h-full w-52 shrink-0 select-none flex-col overflow-y-auto border-r border-[var(--xd-border)] bg-[var(--xd-rail)] p-2 text-[12.5px]">
       <div className="flex items-center justify-between px-2 py-1">
         <div className="flex items-center gap-2">
           <span className="flex h-4 w-4 shrink-0 items-center justify-center rounded-xs bg-[var(--xd-ink)] text-[10px] font-bold text-[var(--xd-canvas)]">
@@ -429,10 +574,81 @@ export function SidebarRail({
         className="mt-2 space-y-0.5"
         aria-label="Primary Workspace Navigation"
       >
-        {navItems.map((item) => {
-          const active =
-            activeNav === item.id ||
-            (item.id === 'drive' && activeNav === 'agent-studio')
+        <div>
+          <div
+            onDragOver={(e) => handleDragOver(e, 'root')}
+            onDragLeave={() => setDropTargetId(null)}
+            onDrop={(e) => handleDrop(e, null)}
+            className={`group flex items-center gap-1 rounded px-1.5 py-1.5 text-[12.5px] transition-colors ${
+              dropTargetId === 'root'
+                ? 'bg-[var(--xd-accent-soft)] ring-1 ring-[var(--xd-accent)]'
+                : isMyDriveRootActive
+                  ? 'bg-[var(--xd-surface-active)] font-medium text-[var(--xd-ink)]'
+                  : 'text-[var(--xd-ink-secondary)] hover:bg-[var(--xd-surface-hover)] hover:text-[var(--xd-ink)]'
+            }`}
+          >
+            {folders.length > 0 ? (
+              <button
+                type="button"
+                aria-label={
+                  driveExpanded ? 'Collapse My Drive' : 'Expand My Drive'
+                }
+                onClick={() => setDriveExpanded((prev) => !prev)}
+                className="inline-flex h-4 w-4 shrink-0 items-center justify-center rounded text-[var(--xd-ink-muted)] hover:text-[var(--xd-ink)]"
+              >
+                {driveExpanded ? (
+                  <ChevronDown className="h-3 w-3" />
+                ) : (
+                  <ChevronRight className="h-3 w-3" />
+                )}
+              </button>
+            ) : (
+              <span className="w-1 shrink-0" />
+            )}
+
+            <button
+              type="button"
+              onClick={() => {
+                onSelectNav?.('drive')
+                onSelectFolder?.(null)
+              }}
+              className="flex min-w-0 flex-1 items-center gap-2 text-left"
+            >
+              <span
+                className={
+                  isMyDriveRootActive
+                    ? 'text-[var(--xd-ink)]'
+                    : 'text-[var(--xd-ink-muted)]'
+                }
+              >
+                <HardDrive className="h-3.5 w-3.5" />
+              </span>
+              <span className="truncate">My Drive</span>
+            </button>
+
+            {onCreateFolder && (
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation()
+                  onCreateFolder(null)
+                }}
+                aria-label="New folder in My Drive"
+                title="New folder"
+                className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded text-[var(--xd-ink-muted)] opacity-0 transition-opacity hover:bg-[var(--xd-surface-active)] hover:text-[var(--xd-ink)] group-hover:opacity-100 focus:opacity-100"
+              >
+                <FolderPlus className="h-3 w-3" />
+              </button>
+            )}
+          </div>
+
+          {folders.length > 0 && driveExpanded && (
+            <div className="mt-0.5 space-y-0.5">{renderFolderTree(null, 0)}</div>
+          )}
+        </div>
+
+        {secondaryNavItems.map((item) => {
+          const active = activeNav === item.id && !activeAppId
           return (
             <button
               key={item.id}
@@ -498,6 +714,7 @@ export function SidebarRail({
 
 export interface DocumentBreadcrumbHeaderProps {
   folder: string
+  onClickFolder?: () => void
   category: MarbleAppCategory
   fileName: string
   nodeCount?: number
@@ -513,6 +730,7 @@ export interface DocumentBreadcrumbHeaderProps {
 
 export function DocumentBreadcrumbHeader({
   folder,
+  onClickFolder,
   fileName,
   syncState,
   interactionMode,
@@ -560,7 +778,19 @@ export function DocumentBreadcrumbHeader({
           aria-label="Document Breadcrumb"
           className="flex items-center gap-1.5 truncate"
         >
-          <span className="truncate text-[var(--xd-ink-muted)]">{folder}</span>
+          {onClickFolder ? (
+            <button
+              type="button"
+              onClick={onClickFolder}
+              className="truncate text-[var(--xd-ink-muted)] transition-colors hover:text-[var(--xd-ink)]"
+            >
+              {folder}
+            </button>
+          ) : (
+            <span className="truncate text-[var(--xd-ink-muted)]">
+              {folder}
+            </span>
+          )}
           <span className="text-[var(--xd-ink-subtle)]">/</span>
           <span className="xd-mono truncate font-medium text-[var(--xd-ink)]">
             {fileName}

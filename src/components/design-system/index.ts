@@ -40,3 +40,28 @@ export {
   type TemplateGalleryCardProps,
   type AgentHeroComposerProps,
 } from './FilterAndMetrics'
+
+export {
+  DRIVE_FOLDER_COLORS,
+  getFolderIconClass,
+  seedDriveFolders,
+  getFolderAncestors,
+  getFolderPathLabel,
+  getDescendantFolderIds,
+  getFolderItemCounts,
+  readDraggedDocId,
+  DriveBreadcrumbBar,
+  DriveFolderCard,
+  DriveDocumentThumbnail,
+  DriveFilePreviewCard,
+  DriveFileIconTile,
+  DriveFileListTable,
+  DriveFolderDialog,
+  DriveMoveDialog,
+  type DriveBreadcrumbBarProps,
+  type DriveFolderCardProps,
+  type DriveFileCardProps,
+  type DriveFileListTableProps,
+  type DriveFolderDialogProps,
+  type DriveMoveDialogProps,
+} from './DriveExplorer'
