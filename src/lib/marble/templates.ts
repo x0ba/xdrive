@@ -1558,6 +1558,7 @@ function workspaceFrom(
 
 const latex = () => PREDEFINED_MARBLE_TEMPLATES[0]
 const notebook = () => PREDEFINED_MARBLE_TEMPLATES[1]
+const richDoc = () => PREDEFINED_MARBLE_TEMPLATES[2]
 const slides = () => PREDEFINED_MARBLE_TEMPLATES[3]
 const sandbox = () => PREDEFINED_MARBLE_TEMPLATES[5]
 
@@ -1609,12 +1610,30 @@ export const INITIAL_WORKSPACE_DOCS: MarbleDocumentFile[] = [
       slug: 'week-12-head-ablations',
       fileName: 'week-12-head-ablations.mrbl',
       description:
-        'Opens on the probe note. The hypothesis checklist is still the protocol for the next sweep.',
+        'Apple Notes-style lab notebook with right-click note actions, folders, pin/lock, formatting bar, and live Markdown.',
       category: 'notebook',
       starred: true,
-      pinned: false,
-      tags: ['ablation', 'probes', 'week-12'],
+      pinned: true,
+      tags: ['ablation', 'probes', 'notes'],
       folder: 'Lab',
+    },
+  ),
+  workspaceFrom(
+    richDoc(),
+    'Logical Memory Specification',
+    '2026-11-16T10:20:00.000Z',
+    [],
+    {
+      id: 'ws-logical-memory-spec',
+      slug: 'logical-memory-spec',
+      fileName: 'logical-memory-spec.mrbl',
+      description:
+        'Collaborative Google Docs-style specification with menu bar, ruler, outline, pageless mode, find & replace, and comments.',
+      category: 'document',
+      starred: true,
+      pinned: true,
+      tags: ['spec', 'docs', 'qec'],
+      folder: 'Specs',
     },
   ),
   workspaceFrom(
