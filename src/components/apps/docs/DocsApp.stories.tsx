@@ -1,6 +1,16 @@
 import type { Meta, StoryObj } from '@storybook/tanstack-react'
-import { DEFAULT_DOCS_SEED, DocsApp } from '#/components/apps/docs'
+import { DEFAULT_DOCS_SEED, DocsApp } from './index'
 
+const PAGELESS_DOCS_SEED = {
+  ...DEFAULT_DOCS_SEED,
+  pageSetup: { ...DEFAULT_DOCS_SEED.pageSetup, pageless: true },
+}
+
+/**
+ * Google Docs parity rich-text word processor built in the xDrive design language.
+ *
+ * @summary Rich-text word processor with paginated/pageless modes, outline, and comments
+ */
 const meta = {
   title: 'xDrive Apps/Docs App (Google Docs)',
   component: DocsApp,
@@ -26,6 +36,11 @@ const meta = {
 export default meta
 type Story = StoryObj<typeof meta>
 
+/**
+ * Standard paginated editing layout with document outline and comment rail open.
+ *
+ * @summary Paginated editing view with outline and comments
+ */
 export const PaginatedResearchDocument: Story = {
   args: {
     initialState: DEFAULT_DOCS_SEED,
@@ -35,6 +50,11 @@ export const PaginatedResearchDocument: Story = {
   },
 }
 
+/**
+ * Review workflow with suggesting mode active and comments rail visible.
+ *
+ * @summary Suggesting mode with review comments
+ */
 export const SuggestingModeReview: Story = {
   args: {
     initialState: DEFAULT_DOCS_SEED,
@@ -44,12 +64,14 @@ export const SuggestingModeReview: Story = {
   },
 }
 
+/**
+ * Continuous pageless layout with the Find & Replace dialog open.
+ *
+ * @summary Pageless layout with Find & Replace open
+ */
 export const PagelessWithFindAndReplace: Story = {
   args: {
-    initialState: {
-      ...DEFAULT_DOCS_SEED,
-      pageSetup: { ...DEFAULT_DOCS_SEED.pageSetup, pageless: true },
-    },
+    initialState: PAGELESS_DOCS_SEED,
     initialEditMode: 'editing',
     initialShowOutline: true,
     initialShowComments: false,
@@ -57,6 +79,11 @@ export const PagelessWithFindAndReplace: Story = {
   },
 }
 
+/**
+ * Read-only viewing mode preserving outline navigation and comment inspection.
+ *
+ * @summary Read-only document viewing mode
+ */
 export const ViewingMode: Story = {
   args: {
     initialState: DEFAULT_DOCS_SEED,

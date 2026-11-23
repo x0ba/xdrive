@@ -15,7 +15,8 @@
     "check": "prettier --check .",
     "start": "node --import ./.output/server/instrument.server.mjs .output/server/index.mjs",
     "storybook": "storybook dev -p 6006",
-    "build-storybook": "storybook build"
+    "build-storybook": "storybook build",
+    "test:storybook": "vitest run --project=storybook"
   },
   "dependencies": {
     "@bdhmin/marble": "^0.2.6",

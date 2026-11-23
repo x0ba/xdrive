@@ -1,79 +1,27 @@
 import { useState } from 'react'
 import type { Meta, StoryObj } from '@storybook/tanstack-react'
+import { CursorAISidebar } from './CursorAISidebar'
+import type { MarbleIntentRequest } from './FloatingPromptBar'
 import {
-  CursorAISidebar,
   DEMO_STAGE_NODES,
-  FloatingPromptBar,
   SelectionSketchOverlay,
-  connectedModelsFromSubscriptions,
   toSelectedElement,
-} from '#/components/collaborator'
-import type { MarbleIntentRequest } from '#/components/collaborator'
-import { DEFAULT_SUBSCRIPTIONS } from '#/components/collaborator/SubscriptionModal'
+} from './SelectionSketchOverlay'
+import {
+  DEFAULT_SUBSCRIPTIONS,
+  connectedModelsFromSubscriptions,
+} from './SubscriptionModal'
 import type {
   CanvasInteractionMode,
   SketchAnnotation,
   SketchStroke,
 } from '#/lib/types'
 
-const TARGETS = DEMO_STAGE_NODES.filter((node) =>
-  ['sec-abstract', 'eq-bell', 'fig-1'].includes(node.id),
+const DEFAULT_SELECTED_ELEMENTS = DEMO_STAGE_NODES.filter((node) =>
+  ['sec-abstract', 'eq-bell'].includes(node.id),
 ).map(toSelectedElement)
 
-const meta = {
-  title: 'xDrive Collaborator/AI Collaborator',
-  parameters: { layout: 'fullscreen' },
-  tags: ['autodocs'],
-} satisfies Meta
-
-export default meta
-type Story = StoryObj<typeof meta>
-
-export const PromptBar: Story = {
-  name: 'Floating prompt bar',
-  render: () => (
-    <div className="flex min-h-screen flex-col items-center gap-4 bg-[var(--xd-canvas)] p-8 text-[var(--xd-ink)]">
-      <FloatingPromptBar
-        selectedElements={TARGETS}
-        permission="edit_with_ai_shared"
-      />
-      <FloatingPromptBar
-        selectedElements={TARGETS}
-        permission="comment_annotate"
-      />
-      <FloatingPromptBar selectedElements={TARGETS} permission="view_only" />
-    </div>
-  ),
-}
-
-export const SelectMode: Story = {
-  name: 'Select mode',
-  render: () => (
-    <div className="h-screen bg-[var(--xd-canvas)]">
-      <SelectionSketchOverlay
-        mode="select"
-        initialSelectedIds={['sec-abstract', 'eq-bell']}
-        permission="edit_with_ai_shared"
-      />
-    </div>
-  ),
-}
-
-export const SketchMode: Story = {
-  name: 'Sketch mode',
-  render: () => (
-    <div className="h-screen bg-[var(--xd-canvas)]">
-      <SelectionSketchOverlay mode="sketch" permission="edit_with_ai_byok" />
-    </div>
-  ),
-}
-
-export const CollaboratorDesk: Story = {
-  name: 'Stage + Collaborator Sidebar',
-  render: () => <Desk />,
-}
-
-function Desk() {
+function CollaboratorDeskDemo() {
   const [mode, setMode] = useState<CanvasInteractionMode>('select')
   const [modelId, setModelId] = useState('xai/grok-4.7')
   const [selectedIds, setSelectedIds] = useState(['sec-abstract', 'eq-bell'])
@@ -148,4 +96,48 @@ function Desk() {
       </div>
     </div>
   )
+}
+
+/**
+ * Right-hand AI collaborator rail showing staged `.mrbl` operation proposals, checkpoints, attached selections, and evergreen design-system rules.
+ *
+ * @summary AI collaborator sidebar with staged op proposals and checkpoint timeline
+ */
+const meta = {
+  title: 'xDrive Collaborator/Cursor AI Sidebar',
+  component: CursorAISidebar,
+  parameters: { layout: 'fullscreen' },
+  tags: ['autodocs'],
+} satisfies Meta<typeof CursorAISidebar>
+
+export default meta
+type Story = StoryObj<typeof meta>
+
+/**
+ * Standalone collaborator sidebar with two attached manuscript selections and active proposals.
+ *
+ * @summary Standalone AI collaborator sidebar
+ */
+export const Default: Story = {
+  args: {
+    permission: 'edit_with_ai_shared',
+    selectedElements: DEFAULT_SELECTED_ELEMENTS,
+  },
+  decorators: [
+    (Story) => (
+      <div className="flex h-[680px] justify-end bg-[var(--xd-canvas)]">
+        <Story />
+      </div>
+    ),
+  ],
+}
+
+/**
+ * End-to-end interactive stage paired with the collaborator sidebar, live selection chips, and sketch routing.
+ *
+ * @summary Stage paired with live collaborator sidebar
+ */
+export const CollaboratorDesk: Story = {
+  name: 'Stage + Collaborator Sidebar',
+  render: () => <CollaboratorDeskDemo />,
 }

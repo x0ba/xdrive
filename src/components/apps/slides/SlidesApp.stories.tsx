@@ -1,6 +1,16 @@
 import type { Meta, StoryObj } from '@storybook/tanstack-react'
-import { DEFAULT_SLIDES_DECK, SlidesApp } from '#/components/apps/slides'
+import { DEFAULT_SLIDES_DECK, SlidesApp } from './index'
 
+const BENCH_SLIDE_DECK = {
+  ...DEFAULT_SLIDES_DECK,
+  activeSlideId: 'slide-bench',
+}
+
+/**
+ * Google Slides parity presentation editor with interactive 16:9 canvas, filmstrip, inspectors, and presenter mode.
+ *
+ * @summary Presentation deck editor with filmstrip, inspectors, and grid sorter
+ */
 const meta = {
   title: 'xDrive Apps/Slides App (Google Slides)',
   component: SlidesApp,
@@ -26,6 +36,11 @@ const meta = {
 export default meta
 type Story = StoryObj<typeof meta>
 
+/**
+ * Default presentation stage with live filmstrip and closed right inspector.
+ *
+ * @summary Default interactive slide deck stage
+ */
 export const InteractiveDeckStage: Story = {
   args: {
     initialDeck: DEFAULT_SLIDES_DECK,
@@ -34,6 +49,11 @@ export const InteractiveDeckStage: Story = {
   },
 }
 
+/**
+ * Slide deck with the Theme inspector panel open for live theme switching.
+ *
+ * @summary Theme inspector panel open
+ */
 export const ThemeInspectorOpen: Story = {
   args: {
     initialDeck: DEFAULT_SLIDES_DECK,
@@ -41,16 +61,23 @@ export const ThemeInspectorOpen: Story = {
   },
 }
 
+/**
+ * Benchmark slide focused with the Transition & Motion inspector open.
+ *
+ * @summary Transition & motion inspector on benchmark slide
+ */
 export const TransitionMotionInspector: Story = {
   args: {
-    initialDeck: {
-      ...DEFAULT_SLIDES_DECK,
-      activeSlideId: 'slide-bench',
-    },
+    initialDeck: BENCH_SLIDE_DECK,
     initialInspector: 'transition',
   },
 }
 
+/**
+ * Multi-slide overview in Grid Sorter layout.
+ *
+ * @summary Slide sorter grid view
+ */
 export const SlideSorterGridView: Story = {
   args: {
     initialDeck: DEFAULT_SLIDES_DECK,

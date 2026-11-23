@@ -1,13 +1,22 @@
 import type { Meta, StoryObj } from '@storybook/tanstack-react'
 import {
   DesignTokensShowcase,
-  MarbleSyncBadge,
   MarbleOpBadge,
-} from '#/components/design-system'
+  MarbleSyncBadge,
+} from './DesignTokensShowcase'
 
+/**
+ * xDrive color system, typography scale, spacing tokens, and Marble status/operation badges.
+ *
+ * @summary Design tokens showcase with Obsidian Studio dark and Alabaster Lab light themes
+ */
 const meta = {
   title: 'xDrive Design System/Design Tokens',
   component: DesignTokensShowcase,
+  subcomponents: {
+    MarbleSyncBadge,
+    MarbleOpBadge,
+  },
   parameters: {
     layout: 'fullscreen',
   },
@@ -17,19 +26,34 @@ const meta = {
 export default meta
 type Story = StoryObj<typeof meta>
 
+/**
+ * Obsidian Studio dark theme token palette and typography showcase.
+ *
+ * @summary Dark theme design tokens
+ */
 export const DarkTheme: Story = {
   args: {
     initialTheme: 'dark',
   },
 }
 
+/**
+ * Alabaster Lab light theme token palette and typography showcase.
+ *
+ * @summary Light theme design tokens
+ */
 export const LightTheme: Story = {
   args: {
     initialTheme: 'light',
   },
 }
 
-export const Badges: StoryObj = {
+/**
+ * Sync status badges (`saved`, `saving`, `proposed`, `retrying`, `offline`) and semantic Marble op badges.
+ *
+ * @summary Marble sync and operation badges
+ */
+export const Badges: Story = {
   render: () => (
     <div className="space-y-4 bg-[var(--xd-canvas)] p-6 text-[var(--xd-ink)]">
       <div className="flex flex-wrap gap-2">

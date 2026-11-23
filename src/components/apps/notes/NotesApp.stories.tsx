@@ -1,6 +1,15 @@
 import type { Meta, StoryObj } from '@storybook/tanstack-react'
-import { DEFAULT_NOTES_SEED, NotesApp } from '#/components/apps/notes'
+import { DEFAULT_NOTES_SEED, NotesApp } from './index'
 
+const LOCKED_NOTES_SEED = DEFAULT_NOTES_SEED.map((note, idx) =>
+  idx === 0 ? { ...note, locked: true } : note,
+)
+
+/**
+ * Apple Notes-inspired note-taking application with Markdown write, split, and preview modes.
+ *
+ * @summary Markdown notes workspace with grouped sidebar and formatting toolbar
+ */
 const meta = {
   title: 'xDrive Apps/Notes App (Apple Notes)',
   component: NotesApp,
@@ -26,6 +35,11 @@ const meta = {
 export default meta
 type Story = StoryObj<typeof meta>
 
+/**
+ * Side-by-side Markdown editor and live rendered preview.
+ *
+ * @summary Split Markdown write and preview view
+ */
 export const SplitMarkdownMode: Story = {
   args: {
     initialNotes: DEFAULT_NOTES_SEED,
@@ -35,6 +49,11 @@ export const SplitMarkdownMode: Story = {
   },
 }
 
+/**
+ * Distraction-free Markdown authoring view.
+ *
+ * @summary Focused Markdown writing mode
+ */
 export const CleanWriteMode: Story = {
   args: {
     initialNotes: DEFAULT_NOTES_SEED,
@@ -44,6 +63,11 @@ export const CleanWriteMode: Story = {
   },
 }
 
+/**
+ * Interactive rendered preview with checkable task lists and styled Markdown blocks.
+ *
+ * @summary Interactive Markdown preview mode
+ */
 export const InteractivePreviewMode: Story = {
   args: {
     initialNotes: DEFAULT_NOTES_SEED,
@@ -53,11 +77,14 @@ export const InteractivePreviewMode: Story = {
   },
 }
 
+/**
+ * Locked note state demonstrating access guard UI in the active editor pane.
+ *
+ * @summary Locked note state
+ */
 export const LockedNoteState: Story = {
   args: {
-    initialNotes: DEFAULT_NOTES_SEED.map((note, idx) =>
-      idx === 0 ? { ...note, locked: true } : note,
-    ),
+    initialNotes: LOCKED_NOTES_SEED,
     initialActiveNoteId: 'note-hypothesis',
     initialViewMode: 'split',
   },

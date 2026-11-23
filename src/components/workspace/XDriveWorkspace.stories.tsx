@@ -1,6 +1,11 @@
 import type { Meta, StoryObj } from '@storybook/tanstack-react'
-import { XDriveWorkspace } from '#/components/workspace'
+import { XDriveWorkspace } from './XDriveWorkspace'
 
+/**
+ * Full xDrive research cloud workspace combining Drive browser, tabbed .mrbl apps, and the AI collaborator sidebar.
+ *
+ * @summary Full xDrive workspace shell across Drive, Notes, Docs, Slides, and .mrbl apps
+ */
 const meta = {
   title: 'xDrive Workspace/Workspace',
   component: XDriveWorkspace,
@@ -11,6 +16,11 @@ const meta = {
 export default meta
 type Story = StoryObj<typeof meta>
 
+/**
+ * Default My Drive landing view in dark theme.
+ *
+ * @summary Drive files browser landing view
+ */
 export const DriveFiles: Story = {
   args: {
     initialTheme: 'dark',
@@ -20,6 +30,11 @@ export const DriveFiles: Story = {
   },
 }
 
+/**
+ * Workspace focused on an open Apple Notes-parity .mrbl note tab.
+ *
+ * @summary Open Notes app tab in workspace
+ */
 export const NotesAppWorkspace: Story = {
   name: 'Notes App (Apple Notes)',
   args: {
@@ -35,6 +50,11 @@ export const NotesAppWorkspace: Story = {
   },
 }
 
+/**
+ * Workspace focused on an open Google Docs-parity .mrbl document tab.
+ *
+ * @summary Open Docs app tab in workspace
+ */
 export const DocsAppWorkspace: Story = {
   name: 'Docs App (Google Docs)',
   args: {
@@ -50,6 +70,11 @@ export const DocsAppWorkspace: Story = {
   },
 }
 
+/**
+ * Workspace focused on an open Google Slides-parity presentation deck tab.
+ *
+ * @summary Open Slides app tab in workspace
+ */
 export const SlidesAppWorkspace: Story = {
   name: 'Slides App (Google Slides)',
   args: {
@@ -65,6 +90,11 @@ export const SlidesAppWorkspace: Story = {
   },
 }
 
+/**
+ * Interactive two-column LaTeX manuscript rendered inside the workspace tab strip.
+ *
+ * @summary Interactive LaTeX manuscript view
+ */
 export const LiveLatexDocument: Story = {
   name: 'LaTeX Manuscript',
   args: {
@@ -76,6 +106,11 @@ export const LiveLatexDocument: Story = {
   },
 }
 
+/**
+ * Research notebook paired with the open AI collaborator sidebar.
+ *
+ * @summary Lab notebook with AI collaborator sidebar
+ */
 export const LiveNotebookWithCollaborator: Story = {
   name: 'Lab Notebook + AI Sidebar',
   args: {
@@ -87,6 +122,11 @@ export const LiveNotebookWithCollaborator: Story = {
   },
 }
 
+/**
+ * Sketch & annotate interaction mode with a selected manuscript section and AI sidebar open.
+ *
+ * @summary Sketch and annotate mode with selected target
+ */
 export const SketchAndAnnotateMode: Story = {
   name: 'Sketch & Annotate',
   args: {
@@ -99,6 +139,11 @@ export const SketchAndAnnotateMode: Story = {
   },
 }
 
+/**
+ * Evergreen document design system reference open alongside the AI collaborator.
+ *
+ * @summary Evergreen document design system view
+ */
 export const EvergreenDesignSystem: Story = {
   name: 'Evergreen · Document Design System',
   args: {
@@ -113,6 +158,11 @@ export const EvergreenDesignSystem: Story = {
   },
 }
 
+/**
+ * Evergreen anti-slop document guardrails open alongside the AI collaborator.
+ *
+ * @summary Evergreen document anti-slop guardrails view
+ */
 export const EvergreenDontsSystem: Story = {
   name: 'Evergreen · Document Don’ts (Anti-Slop)',
   args: {

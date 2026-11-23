@@ -4,20 +4,20 @@ import {
   DriveFileIconTile,
   DriveFileListTable,
   DriveFilePreviewCard,
+} from './DriveExplorer'
+import {
+  AgentHeroComposer,
   FilterPillBar,
   MarbleAppCard,
+  MetricOverviewStrip,
   TemplateGalleryCard,
-  AgentHeroComposer,
-} from '#/components/design-system'
+} from './FilterAndMetrics'
 import type {
+  DriveViewMode,
   MarbleTemplateBlueprint,
   SortOption,
-  DriveViewMode,
-} from '#/components/design-system'
-import type {
-  MarbleDocumentFile,
-  MarbleAppCategory,
-} from '#/lib/types'
+} from './FilterAndMetrics'
+import type { MarbleAppCategory, MarbleDocumentFile } from '#/lib/types'
 
 const MOCK_RESEARCH_DOCUMENTS: MarbleDocumentFile[] = [
   {
@@ -208,7 +208,11 @@ const MOCK_TEMPLATE_BLUEPRINTS: MarbleTemplateBlueprint[] = [
       'Self-contained academic manuscript with numbered theorem environments and alternative derivation branches.',
     nodeCount: 142,
     byteSize: 34200,
-    affordances: ['data-marble-editable', 'data-marble-sortable', '<marble-alt>'],
+    affordances: [
+      'data-marble-editable',
+      'data-marble-sortable',
+      '<marble-alt>',
+    ],
     recommendedModel: 'Grok 4.7',
     previewHighlights: [],
   },
@@ -240,9 +244,98 @@ const MOCK_TEMPLATE_BLUEPRINTS: MarbleTemplateBlueprint[] = [
   },
 ]
 
+function DriveFileIndexDemo() {
+  const [category, setCategory] = useState<MarbleAppCategory | 'all'>('all')
+  const [sortBy, setSortBy] = useState<SortOption>('updated')
+  const [viewMode, setViewMode] = useState<DriveViewMode>('preview')
+  const [searchQuery, setSearchQuery] = useState('')
+  const [docs, setDocs] = useState(MOCK_RESEARCH_DOCUMENTS)
+
+  const filteredDocs = docs.filter((d) => {
+    if (category !== 'all' && d.category !== category) return false
+    if (
+      searchQuery.trim() &&
+      !`${d.title} ${d.fileName} ${d.description}`
+        .toLowerCase()
+        .includes(searchQuery.toLowerCase())
+    ) {
+      return false
+    }
+    return true
+  })
+
+  const toggleStar = (target: MarbleDocumentFile) => {
+    setDocs((prev) =>
+      prev.map((item) =>
+        item.id === target.id ? { ...item, starred: !item.starred } : item,
+      ),
+    )
+  }
+
+  return (
+    <div className="mx-auto max-w-5xl space-y-5 bg-[var(--xd-canvas)] p-6 text-[var(--xd-ink)]">
+      <AgentHeroComposer />
+
+      <FilterPillBar
+        selectedCategory={category}
+        onSelectCategory={setCategory}
+        sortBy={sortBy}
+        onSelectSort={setSortBy}
+        viewMode={viewMode}
+        onChangeViewMode={setViewMode}
+        searchQuery={searchQuery}
+        onChangeSearchQuery={setSearchQuery}
+      />
+
+      {viewMode === 'list' ? (
+        <DriveFileListTable
+          folders={[]}
+          docs={filteredDocs}
+          onToggleStar={toggleStar}
+        />
+      ) : viewMode === 'icon' ? (
+        <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+          {filteredDocs.map((doc) => (
+            <DriveFileIconTile
+              key={doc.id}
+              doc={doc}
+              onToggleStar={toggleStar}
+            />
+          ))}
+        </div>
+      ) : (
+        <div className="grid grid-cols-1 gap-3.5 sm:grid-cols-2 lg:grid-cols-3">
+          {filteredDocs.map((doc) => (
+            <DriveFilePreviewCard
+              key={doc.id}
+              doc={doc}
+              folderLabel={doc.folder}
+              onToggleStar={toggleStar}
+            />
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+/**
+ * Drive document cards, category filter pills, hero agent composer, and template blueprint gallery cards.
+ *
+ * @summary Drive cards, filters, hero composer, and template gallery primitives
+ */
 const meta = {
   title: 'xDrive Design System/Drive Cards & Filters',
   component: MarbleAppCard,
+  subcomponents: {
+    AgentHeroComposer,
+    FilterPillBar,
+    MetricOverviewStrip,
+    TemplateGalleryCard,
+  },
+  args: {
+    doc: MOCK_RESEARCH_DOCUMENTS[0],
+  },
   parameters: {
     layout: 'fullscreen',
   },
@@ -252,10 +345,12 @@ const meta = {
 export default meta
 type Story = StoryObj<typeof meta>
 
+/**
+ * Single research manuscript card displaying category badge, sync state, and metadata.
+ *
+ * @summary Single Marble app card
+ */
 export const SingleMarbleAppCard: Story = {
-  args: {
-    doc: MOCK_RESEARCH_DOCUMENTS[0],
-  },
   decorators: [
     (StoryComponent) => (
       <div className="max-w-md bg-[var(--xd-canvas)] p-6">
@@ -265,84 +360,21 @@ export const SingleMarbleAppCard: Story = {
   ],
 }
 
-export const DriveFileIndex: StoryObj = {
-  render: () => {
-    const [category, setCategory] = useState<MarbleAppCategory | 'all'>('all')
-    const [sortBy, setSortBy] = useState<SortOption>('updated')
-    const [viewMode, setViewMode] = useState<DriveViewMode>('preview')
-    const [searchQuery, setSearchQuery] = useState('')
-    const [docs, setDocs] = useState(MOCK_RESEARCH_DOCUMENTS)
-
-    const filteredDocs = docs.filter((d) => {
-      if (category !== 'all' && d.category !== category) return false
-      if (
-        searchQuery.trim() &&
-        !`${d.title} ${d.fileName} ${d.description}`
-          .toLowerCase()
-          .includes(searchQuery.toLowerCase())
-      ) {
-        return false
-      }
-      return true
-    })
-
-    const toggleStar = (target: MarbleDocumentFile) => {
-      setDocs((prev) =>
-        prev.map((item) =>
-          item.id === target.id ? { ...item, starred: !item.starred } : item,
-        ),
-      )
-    }
-
-    return (
-      <div className="mx-auto max-w-5xl space-y-5 bg-[var(--xd-canvas)] p-6 text-[var(--xd-ink)]">
-        <AgentHeroComposer />
-
-        <FilterPillBar
-          selectedCategory={category}
-          onSelectCategory={setCategory}
-          sortBy={sortBy}
-          onSelectSort={setSortBy}
-          viewMode={viewMode}
-          onChangeViewMode={setViewMode}
-          searchQuery={searchQuery}
-          onChangeSearchQuery={setSearchQuery}
-        />
-
-        {viewMode === 'list' ? (
-          <DriveFileListTable
-            folders={[]}
-            docs={filteredDocs}
-            onToggleStar={toggleStar}
-          />
-        ) : viewMode === 'icon' ? (
-          <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-            {filteredDocs.map((doc) => (
-              <DriveFileIconTile
-                key={doc.id}
-                doc={doc}
-                onToggleStar={toggleStar}
-              />
-            ))}
-          </div>
-        ) : (
-          <div className="grid grid-cols-1 gap-3.5 sm:grid-cols-2 lg:grid-cols-3">
-            {filteredDocs.map((doc) => (
-              <DriveFilePreviewCard
-                key={doc.id}
-                doc={doc}
-                folderLabel={doc.folder}
-                onToggleStar={toggleStar}
-              />
-            ))}
-          </div>
-        )}
-      </div>
-    )
-  },
+/**
+ * Interactive Drive file index combining hero composer, filter pill bar, and preview/icon/list view modes.
+ *
+ * @summary Interactive Drive file index with filters and view modes
+ */
+export const DriveFileIndex: Story = {
+  render: () => <DriveFileIndexDemo />,
 }
 
-export const TemplateGallery: StoryObj = {
+/**
+ * Three-column template blueprint gallery showcasing `.mrbl` starter apps.
+ *
+ * @summary Starter template blueprint gallery
+ */
+export const TemplateGallery: Story = {
   render: () => (
     <div className="mx-auto max-w-5xl space-y-4 bg-[var(--xd-canvas)] p-6 text-[var(--xd-ink)]">
       <div className="grid grid-cols-1 gap-3 lg:grid-cols-3">
