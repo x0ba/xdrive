@@ -23,7 +23,7 @@ const config = defineConfig({
           devtools(),
           nitro({
             rollupConfig: {
-              external: [/^@sentry\//],
+              external: [/^@sentry\//, /^@bdhmin\/marble/],
             },
           }),
           tanstackStart({

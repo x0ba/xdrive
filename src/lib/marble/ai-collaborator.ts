@@ -56,10 +56,13 @@ export interface CollaborationRequest {
   instruction: string
   selectedElements?: SelectedMarbleElement[]
   sketchAnnotations?: SketchAnnotation[]
+  sketchDataUrl?: string
   modelId: string
   providerId: AIProviderId
   action?: MarbleActionKind
   evergreenDocs?: MarbleDocumentFile[]
+  /** Allow deterministic local synthesizer fallback only when /api/ai is absent (e.g. static Storybook). */
+  allowOfflineFallback?: boolean
 }
 
 export interface CollaborationResult {
@@ -67,7 +70,32 @@ export interface CollaborationResult {
   stages: NonNullable<AIMessage['stages']>
   newDocument?: MarbleDocumentFile
   evergreenContext: EvergreenDesignContext
-  source: 'api' | 'synthesizer'
+  source: 'antigravity-acp' | 'api' | 'synthesizer'
+  thoughts?: string[]
+  runtime?: {
+    protocol: string
+    agentName: string
+    agentVersion: string
+    modelId: string
+    stopReason: string
+  }
+}
+
+export class MarbleCollaborationError extends Error {
+  readonly code:
+    | 'AUTH_REQUIRED'
+    | 'BINARY_MISSING'
+    | 'PROVIDER_UNAVAILABLE'
+    | 'AI_ERROR'
+
+  constructor(
+    code: MarbleCollaborationError['code'],
+    message: string,
+  ) {
+    super(message)
+    this.name = 'MarbleCollaborationError'
+    this.code = code
+  }
 }
 
 const OP_TYPES = new Set([
@@ -255,7 +283,13 @@ export async function generateMarbleCollaboration(
   const evergreenContext = resolveEvergreenDesignContext(request.evergreenDocs)
   const fromApi = await askMarbleApi(request, evergreenContext)
   if (fromApi) return fromApi
-  return synthesizeMarbleOps(request, evergreenContext)
+  if (request.allowOfflineFallback) {
+    return synthesizeMarbleOps(request, evergreenContext)
+  }
+  throw new MarbleCollaborationError(
+    'AI_ERROR',
+    'AI backend (/api/ai) is unreachable. Start the xDrive server and connect Google Antigravity in Models & Providers.',
+  )
 }
 
 export function synthesizeMarbleOps(
@@ -1517,26 +1551,63 @@ async function askMarbleApi(
 ): Promise<CollaborationResult | null> {
   if (typeof fetch !== 'function') return null
   const controller = new AbortController()
-  const timer = setTimeout(() => controller.abort(), 800)
+  const timer = setTimeout(() => controller.abort(), 125_000)
   try {
-    const response = await fetch('/api/marble', {
+    const response = await fetch('/api/ai', {
       method: 'POST',
       headers: {
         'content-type': 'application/json',
         accept: 'application/json',
       },
       body: JSON.stringify({
-        ...request,
+        action: 'collaborate',
+        actionKind: request.action,
+        source: request.source,
+        instruction: request.instruction,
+        selectedElements: request.selectedElements,
+        sketchAnnotations: request.sketchAnnotations,
+        sketchDataUrl: request.sketchDataUrl,
+        modelId: request.modelId,
+        providerId: request.providerId,
         evergreenRefs: evergreenContext.refs,
         designContracts: evergreenContext.designSystem.contracts,
         dontsGuardrails: evergreenContext.dontsSystem.guardrails,
       }),
       signal: controller.signal,
     })
-    if (!response.ok) return null
-    const data: unknown = await response.json()
+    if (response.status === 404) {
+      // Static environments (such as Storybook without TanStack Start server).
+      return null
+    }
+    const data: unknown = await response.json().catch(() => null)
+    if (!response.ok) {
+      const payload = (data ?? {}) as {
+        code?: string
+        authRequired?: boolean
+        binaryMissing?: boolean
+        error?: string
+      }
+      const code = payload.authRequired || payload.code === 'AUTH_REQUIRED'
+        ? 'AUTH_REQUIRED'
+        : payload.binaryMissing || payload.code === 'BINARY_MISSING'
+          ? 'BINARY_MISSING'
+          : payload.code === 'PROVIDER_UNAVAILABLE'
+            ? 'PROVIDER_UNAVAILABLE'
+            : 'AI_ERROR'
+      throw new MarbleCollaborationError(
+        code,
+        payload.error || `AI collaboration failed (HTTP ${response.status}).`,
+      )
+    }
     return normalizeApi(data, request, evergreenContext)
-  } catch {
+  } catch (error) {
+    if (error instanceof MarbleCollaborationError) throw error
+    if (error instanceof Error && error.name === 'AbortError') {
+      throw new MarbleCollaborationError(
+        'AI_ERROR',
+        'Antigravity request timed out before returning a Marble proposal.',
+      )
+    }
     return null
   } finally {
     clearTimeout(timer)
@@ -1555,7 +1626,12 @@ function normalizeApi(
     newDocument?: MarbleDocumentFile
     ops?: MarbleOp[]
     note?: string
+    source?: 'antigravity-acp' | 'api' | 'synthesizer'
+    thoughts?: string[]
+    runtime?: CollaborationResult['runtime']
   }
+  const responseSource =
+    record.source === 'antigravity-acp' ? 'antigravity-acp' : 'api'
   if (
     record.proposal &&
     Array.isArray(record.proposal.ops) &&
@@ -1597,7 +1673,9 @@ function normalizeApi(
           }
         : undefined,
       evergreenContext,
-      source: 'api',
+      source: responseSource,
+      thoughts: Array.isArray(record.thoughts) ? record.thoughts : undefined,
+      runtime: record.runtime,
     }
   }
   if (Array.isArray(record.ops) && validOps(record.ops)) {
@@ -1635,7 +1713,9 @@ function normalizeApi(
           }
         : undefined,
       evergreenContext,
-      source: 'api',
+      source: responseSource,
+      thoughts: Array.isArray(record.thoughts) ? record.thoughts : undefined,
+      runtime: record.runtime,
     }
   }
   if (record.newDocument?.source) {
@@ -1661,7 +1741,9 @@ function normalizeApi(
         ),
       },
       evergreenContext,
-      source: 'api',
+      source: responseSource,
+      thoughts: Array.isArray(record.thoughts) ? record.thoughts : undefined,
+      runtime: record.runtime,
     }
   }
   return null

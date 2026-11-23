@@ -8,6 +8,9 @@ importers:
 
   .:
     dependencies:
+      '@agentclientprotocol/sdk':
+        specifier: ^2.9.1
+        version: 2.9.1(zod@4.6.7)
       '@bdhmin/marble':
         specifier: ^0.2.6
         version: 0.2.6
@@ -183,6 +186,9 @@ importers:
       '@tanstack/eslint-config':
         specifier: 0.5.0
         version: 0.5.0(@typescript-eslint/utils@8.73.0(eslint@9.39.5(jiti@2.7.0)(supports-color@7.2.0))(supports-color@7.2.0)(typescript@6.0.3))(eslint@9.39.5(jiti@2.7.0)(supports-color@7.2.0))(supports-color@7.2.0)(typescript@6.0.3)
+      '@tanstack/intent':
+        specifier: ^0.5.6
+        version: 0.5.6
       '@tanstack/react-query':
         specifier: latest
         version: 5.108.2(@types/react@19.3.0)(react@19.3.1)
@@ -243,6 +249,15 @@ packages:
       zod: ^3.25.18 || ^4.0.0
     peerDependenciesMeta:
       zod:
+        optional: true
+
+  '@agentclientprotocol/sdk@2.9.1':
+    resolution: {integrity: sha512-8iJdxGa3SunLfzqLLb3RfQFmr4hnmWeAyeAK6MbkJiXJbrRlMRgKsVnDl/7Hu48yu/30gAlytNDzh5W77rv5SA==}
+    peerDependencies:
+      '@modelcontextprotocol/server': ^2.4.0
+      zod: ^3.25.76 || ^4.0.0
+    peerDependenciesMeta:
+      '@modelcontextprotocol/server':
         optional: true
 
   '@anthropic-ai/sdk@0.135.0':
@@ -2599,6 +2614,11 @@ packages:
   '@tanstack/history@1.162.5':
     resolution: {integrity: sha512-w1+YvwmTkwt5n8yUqEH3IWZ9DsmorCZW/EQ3KYHnqEgIkOZpH54NvW6/Epq3Dzb8H0ifIeYX8PExvrNLIH5FIA==}
     engines: {node: '>=20.19'}
+
+  '@tanstack/intent@0.5.6':
+    resolution: {integrity: sha512-9Ta/GMGPcqBIqlbrqeYyqBVKEP7XyAXy6nn90bPiE2oHB6KPgjEweUbHNXLQ6Pim01VtMMNf0dmUFMGKKHXmlw==}
+    engines: {node: '>=20.12.0'}
+    hasBin: true
 
   '@tanstack/markdown@1.2.1':
     resolution: {integrity: sha512-D/W8VHZe39mTGh74E5ZdmUPz9f/Gqso7ogKab3TRt3Mcto/IUGP94FTeI53hcNz1djwmo/s4hwU1og0rCPinOQ==}
@@ -5718,6 +5738,10 @@ snapshots:
     optionalDependencies:
       zod: 4.6.7
 
+  '@agentclientprotocol/sdk@2.9.1(zod@4.6.7)':
+    dependencies:
+      zod: 4.6.7
+
   '@anthropic-ai/sdk@0.135.0(zod@4.6.7)':
     dependencies:
       '@opentelemetry/api': 1.10.0
@@ -7965,6 +7989,8 @@ snapshots:
       '@tanstack/store': 0.11.2
 
   '@tanstack/history@1.162.5': {}
+
+  '@tanstack/intent@0.5.6': {}
 
   '@tanstack/markdown@1.2.1(react@19.3.1)':
     optionalDependencies:

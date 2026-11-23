@@ -19,6 +19,7 @@
     "test:storybook": "vitest run --project=storybook"
   },
   "dependencies": {
+    "@agentclientprotocol/sdk": "^2.9.1",
     "@bdhmin/marble": "^0.2.6",
     "@clerk/tanstack-react-start": "^1.4.21",
     "@codemirror/autocomplete": "^6.20.4",
@@ -79,6 +80,7 @@
     "@tanstack/devtools-event-client": "0.5.1",
     "@tanstack/devtools-vite": "0.8.7",
     "@tanstack/eslint-config": "0.5.0",
+    "@tanstack/intent": "^0.5.6",
     "@tanstack/react-query": "latest",
     "@types/katex": "^0.16.8",
     "@types/node": "^22.10.2",
