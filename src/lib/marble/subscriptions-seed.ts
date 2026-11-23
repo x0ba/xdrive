@@ -1,13 +1,17 @@
 import type { AISubscription } from '../types'
+import { DEFAULT_OPENCODE_GO_MODELS } from '../ai/opencode-go-types'
+import { openCodeGoModelsToSpecs } from '../ai/opencode-go-client'
 
-// Primary live AI provider: Google Antigravity via the official Agent Client
-// Protocol (ACP) runtime (`agy acp` / ACP Registry binary), using native Google
-// OAuth for personal Google AI plans (Pro / Ultra / Free), Gemini Enterprise,
-// or Gemini API key — matching T3 Code's Google-ToS-compliant architecture.
+// Live AI providers:
+// 1. Google Antigravity via the official Agent Client Protocol (ACP) runtime
+//    (`agy acp` / ACP Registry binary), using native Google OAuth for personal
+//    Google AI plans (Pro / Ultra / Free), Gemini Enterprise, or Gemini API key.
+// 2. OpenCode Go via the official OpenCode Go inference API
+//    (`https://opencode.ai/inference/go`), authenticating with OPENCODE_API_KEY
+//    or a personal/service-account key entered in Models & Providers.
 //
-// Live connection state and exact available Gemini models are populated from
-// GET /api/ai after the ACP handshake. Other third-party providers start
-// honestly disconnected rather than showing stubbed credentials.
+// Live connection state, usage meters, and exact available models are populated
+// from GET /api/ai. Other third-party providers start honestly disconnected.
 export const INITIAL_AI_SUBSCRIPTIONS: AISubscription[] = [
   {
     providerId: 'antigravity',
@@ -34,6 +38,20 @@ export const INITIAL_AI_SUBSCRIPTIONS: AISubscription[] = [
         recommendedFor: 'Sign in via Antigravity ACP to load your plan models',
       },
     ],
+  },
+  {
+    providerId: 'opencode-go',
+    name: 'OpenCode Go',
+    tagline:
+      'Unified subscription routing across GLM, Kimi, DeepSeek, Gemini, Claude, GPT, and Qwen via opencode.ai/inference/go.',
+    planName: 'Go Subscription',
+    connected: false,
+    authMethod: 'api_key',
+    status: 'disconnected',
+    defaultModelId: 'opencode-go/glm-5.3',
+    endpointUrl: 'https://opencode.ai/inference/go',
+    usageThisMonth: { opsGenerated: 0, appsBuilt: 0, quotaPercent: 0 },
+    models: openCodeGoModelsToSpecs(DEFAULT_OPENCODE_GO_MODELS),
   },
   {
     providerId: 'openai',

@@ -123,6 +123,31 @@ function listKnownIds(source: string): string[] {
   }
 }
 
+function providerMeta(providerId: ServerCollaborateInput['providerId']): {
+  name: string
+  runtimeLabel: string
+  initials: string
+  tag: string
+  defaultSlug: string
+} {
+  if (providerId === 'opencode-go') {
+    return {
+      name: 'OpenCode Go',
+      runtimeLabel: 'OpenCode Go',
+      initials: 'OG',
+      tag: 'opencode-go',
+      defaultSlug: 'opencode-go-app',
+    }
+  }
+  return {
+    name: 'Google Antigravity',
+    runtimeLabel: 'the official Google Antigravity ACP runtime',
+    initials: 'AG',
+    tag: 'antigravity',
+    defaultSlug: 'antigravity-app',
+  }
+}
+
 export function buildMarbleAcpPrompt(input: ServerCollaborateInput): string {
   const fallbackContext = resolveEvergreenDesignContext()
   const designContracts =
@@ -138,9 +163,10 @@ export function buildMarbleAcpPrompt(input: ServerCollaborateInput): string {
   const selected = input.selectedElements ?? []
   const sketches = input.sketchAnnotations ?? []
   const existingIds = input.source ? listKnownIds(input.source) : []
+  const provider = providerMeta(input.providerId)
 
   const sections: string[] = [
-    'You are the xDrive Marble (.mrbl) AI Collaborator running inside xDrive via the official Google Antigravity ACP runtime.',
+    `You are the xDrive Marble (.mrbl) AI Collaborator running inside xDrive via ${provider.runtimeLabel}.`,
     'CRITICAL RULES:',
     '1. Do NOT invoke any filesystem, shell, terminal, search, or external tools. All document context is provided directly below.',
     '2. Respond ONLY with a single valid JSON object (no markdown fences, no commentary before or after the JSON).',
@@ -332,23 +358,25 @@ function validateAndFilterStages(
   }))
 }
 
-function slugify(value: string): string {
+function slugify(value: string, fallback = 'antigravity-app'): string {
   return (
     value
       .toLowerCase()
       .replace(/[^a-z0-9]+/g, '-')
       .replace(/^-+|-+$/g, '')
-      .slice(0, 64) || 'antigravity-app'
+      .slice(0, 64) || fallback
   )
 }
 
 function buildDocumentFromAi(
   docPayload: NonNullable<RawAiResponse['newDocument']>,
   modelId: string,
+  providerId: ServerCollaborateInput['providerId'],
   instruction: string,
 ): MarbleDocumentFile {
+  const provider = providerMeta(providerId)
   const title = (docPayload.title || 'Untitled Research App').trim()
-  const slug = slugify(docPayload.slug || title)
+  const slug = slugify(docPayload.slug || title, provider.defaultSlug)
   const rawCategory = (docPayload.category || 'custom') as MarbleAppCategory
   const category: MarbleAppCategory = VALID_CATEGORIES.has(rawCategory)
     ? rawCategory
@@ -369,7 +397,7 @@ function buildDocumentFromAi(
     title,
     description:
       docPayload.description?.trim() ||
-      `Built with Google Antigravity (${modelId}) from "${instruction.slice(0, 80)}"`,
+      `Built with ${provider.name} (${modelId}) from "${instruction.slice(0, 80)}"`,
     category,
     isTemplate: false,
     source,
@@ -381,13 +409,13 @@ function buildDocumentFromAi(
     updatedAt: now,
     createdBy: {
       name: modelId,
-      initials: 'AG',
+      initials: provider.initials,
       isAi: true,
       modelBadge: modelId,
     },
     lastEditedBy: {
       name: modelId,
-      initials: 'AG',
+      initials: provider.initials,
       isAi: true,
       modelBadge: modelId,
     },
@@ -396,7 +424,7 @@ function buildDocumentFromAi(
     tags:
       Array.isArray(docPayload.tags) && docPayload.tags.length > 0
         ? docPayload.tags.filter((t): t is string => typeof t === 'string').slice(0, 6)
-        : ['antigravity', category],
+        : [provider.tag, category],
     folder: 'My Drive',
     folderId: null,
     share: {
@@ -451,10 +479,11 @@ export function parseMarbleAcpResponse(
     ? input.evergreenRefs
     : fallbackContext.refs
 
+  const provider = providerMeta(input.providerId)
   const parsed = extractJsonObject(rawText)
   if (!parsed) {
     throw new Error(
-      `Antigravity returned a non-JSON response that could not be applied as Marble ops: "${rawText.slice(0, 220)}"`,
+      `${provider.name} returned a non-JSON response that could not be applied as Marble ops: "${rawText.slice(0, 220)}"`,
     )
   }
 
@@ -475,12 +504,13 @@ export function parseMarbleAcpResponse(
     const newDocument = buildDocumentFromAi(
       docCandidate,
       resolvedModelId,
+      input.providerId,
       input.instruction,
     )
     const note =
       parsed.note?.trim() ||
       parsed.summary?.trim() ||
-      `Built “${newDocument.title}” with Google Antigravity.`
+      `Built “${newDocument.title}” with ${provider.name}.`
     const stages: NonNullable<AIMessage['stages']> = [
       {
         stageNumber: 1,
@@ -548,14 +578,14 @@ export function parseMarbleAcpResponse(
     const fallbackNote =
       parsed.note?.trim() ||
       parsed.summary?.trim() ||
-      'Antigravity responded without any applicable Marble DOM operations for the current document.'
+      `${provider.name} responded without any applicable Marble DOM operations for the current document.`
     throw new Error(fallbackNote)
   }
 
   const note =
     parsed.note?.trim() ||
     parsed.summary?.trim() ||
-    `Proposed ${ops.length} Marble operation${ops.length === 1 ? '' : 's'} via Google Antigravity.`
+    `Proposed ${ops.length} Marble operation${ops.length === 1 ? '' : 's'} via ${provider.name}.`
 
   const proposal: MarbleOpProposal = {
     id: `prop-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`,

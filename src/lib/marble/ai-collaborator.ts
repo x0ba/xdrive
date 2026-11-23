@@ -59,6 +59,7 @@ export interface CollaborationRequest {
   sketchDataUrl?: string
   modelId: string
   providerId: AIProviderId
+  sessionId?: string
   action?: MarbleActionKind
   evergreenDocs?: MarbleDocumentFile[]
   /** Allow deterministic local synthesizer fallback only when /api/ai is absent (e.g. static Storybook). */
@@ -70,7 +71,7 @@ export interface CollaborationResult {
   stages: NonNullable<AIMessage['stages']>
   newDocument?: MarbleDocumentFile
   evergreenContext: EvergreenDesignContext
-  source: 'antigravity-acp' | 'api' | 'synthesizer'
+  source: 'antigravity-acp' | 'opencode-go' | 'api' | 'synthesizer'
   thoughts?: string[]
   runtime?: {
     protocol: string
@@ -84,6 +85,8 @@ export interface CollaborationResult {
 export class MarbleCollaborationError extends Error {
   readonly code:
     | 'AUTH_REQUIRED'
+    | 'ENTITLEMENT_REQUIRED'
+    | 'RATE_LIMITED'
     | 'BINARY_MISSING'
     | 'PROVIDER_UNAVAILABLE'
     | 'AI_ERROR'
@@ -288,7 +291,7 @@ export async function generateMarbleCollaboration(
   }
   throw new MarbleCollaborationError(
     'AI_ERROR',
-    'AI backend (/api/ai) is unreachable. Start the xDrive server and connect Google Antigravity in Models & Providers.',
+    'AI backend (/api/ai) is unreachable. Start the xDrive server and connect Google Antigravity or OpenCode Go in Models & Providers.',
   )
 }
 
@@ -1569,6 +1572,7 @@ async function askMarbleApi(
         sketchDataUrl: request.sketchDataUrl,
         modelId: request.modelId,
         providerId: request.providerId,
+        sessionId: request.sessionId,
         evergreenRefs: evergreenContext.refs,
         designContracts: evergreenContext.designSystem.contracts,
         dontsGuardrails: evergreenContext.dontsSystem.guardrails,
@@ -1584,16 +1588,23 @@ async function askMarbleApi(
       const payload = (data ?? {}) as {
         code?: string
         authRequired?: boolean
+        entitlementRequired?: boolean
+        rateLimited?: boolean
         binaryMissing?: boolean
         error?: string
       }
       const code = payload.authRequired || payload.code === 'AUTH_REQUIRED'
         ? 'AUTH_REQUIRED'
-        : payload.binaryMissing || payload.code === 'BINARY_MISSING'
-          ? 'BINARY_MISSING'
-          : payload.code === 'PROVIDER_UNAVAILABLE'
-            ? 'PROVIDER_UNAVAILABLE'
-            : 'AI_ERROR'
+        : payload.entitlementRequired ||
+            payload.code === 'ENTITLEMENT_REQUIRED'
+          ? 'ENTITLEMENT_REQUIRED'
+          : payload.rateLimited || payload.code === 'RATE_LIMITED'
+            ? 'RATE_LIMITED'
+            : payload.binaryMissing || payload.code === 'BINARY_MISSING'
+              ? 'BINARY_MISSING'
+              : payload.code === 'PROVIDER_UNAVAILABLE'
+                ? 'PROVIDER_UNAVAILABLE'
+                : 'AI_ERROR'
       throw new MarbleCollaborationError(
         code,
         payload.error || `AI collaboration failed (HTTP ${response.status}).`,
@@ -1603,9 +1614,11 @@ async function askMarbleApi(
   } catch (error) {
     if (error instanceof MarbleCollaborationError) throw error
     if (error instanceof Error && error.name === 'AbortError') {
+      const label =
+        request.providerId === 'opencode-go' ? 'OpenCode Go' : 'Antigravity'
       throw new MarbleCollaborationError(
         'AI_ERROR',
-        'Antigravity request timed out before returning a Marble proposal.',
+        `${label} request timed out before returning a Marble proposal.`,
       )
     }
     return null
@@ -1626,12 +1639,14 @@ function normalizeApi(
     newDocument?: MarbleDocumentFile
     ops?: MarbleOp[]
     note?: string
-    source?: 'antigravity-acp' | 'api' | 'synthesizer'
+    source?: 'antigravity-acp' | 'opencode-go' | 'api' | 'synthesizer'
     thoughts?: string[]
     runtime?: CollaborationResult['runtime']
   }
   const responseSource =
-    record.source === 'antigravity-acp' ? 'antigravity-acp' : 'api'
+    record.source === 'antigravity-acp' || record.source === 'opencode-go'
+      ? record.source
+      : 'api'
   if (
     record.proposal &&
     Array.isArray(record.proposal.ops) &&

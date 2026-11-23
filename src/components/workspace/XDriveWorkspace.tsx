@@ -83,6 +83,14 @@ import type {
   AntigravityAuthMethodId,
   AntigravityRuntimeStatus,
 } from '#/lib/ai/antigravity-types'
+import {
+  applyOpenCodeGoStatusToSubscriptions,
+  authenticateOpenCodeGo,
+  fetchOpenCodeGoStatus,
+  logoutOpenCodeGo,
+} from '#/lib/ai/opencode-go-client'
+import { toXDriveOpenCodeGoModelId } from '#/lib/ai/opencode-go-types'
+import type { OpenCodeGoRuntimeStatus } from '#/lib/ai/opencode-go-types'
 import type {
   AIMessage,
   AIModelSpec,
@@ -424,13 +432,13 @@ function providerFor(
 ): AIProviderId {
   const match = models.find((model) => model.id === modelId)
   if (match) return match.providerId
+  if (modelId.startsWith('opencode-go/')) return 'opencode-go'
   if (modelId.startsWith('antigravity/') || modelId.startsWith('gemini')) {
     return 'antigravity'
   }
   if (modelId.startsWith('claude')) return 'claude'
   if (modelId.includes('gpt') || modelId.includes('openai')) return 'openai'
   if (modelId.includes('grok') || modelId.startsWith('xai/')) return 'xai'
-  if (modelId.startsWith('opencode-go/')) return 'opencode-go'
   return 'antigravity'
 }
 
@@ -624,6 +632,10 @@ export function XDriveWorkspace({
     useState<AntigravityRuntimeStatus | null>(null)
   const [antigravityBusy, setAntigravityBusy] = useState<string | null>(null)
   const [antigravityError, setAntigravityError] = useState<string | null>(null)
+  const [openCodeGoStatus, setOpenCodeGoStatus] =
+    useState<OpenCodeGoRuntimeStatus | null>(null)
+  const [openCodeGoBusy, setOpenCodeGoBusy] = useState<string | null>(null)
+  const [openCodeGoError, setOpenCodeGoError] = useState<string | null>(null)
   const [thinkingState, setThinkingState] = useState<{
     threadId: string
     label: string
@@ -692,19 +704,22 @@ export function XDriveWorkspace({
 
   const composerModels = useMemo<
     Pick<AIModelSpec, 'id' | 'name' | 'providerId' | 'badge' | 'role'>[]
-  >(
-    () =>
-      subscriptions.flatMap((subscription) =>
-        subscription.models.map((model) => ({
-          id: model.id,
-          name: model.name,
-          providerId: model.providerId,
-          badge: subscription.name,
-          role: model.role,
-        })),
-      ),
-    [subscriptions],
-  )
+  >(() => {
+    const connected = subscriptions.filter(
+      (subscription) =>
+        subscription.connected && subscription.status !== 'disconnected',
+    )
+    const source = connected.length > 0 ? connected : subscriptions
+    return source.flatMap((subscription) =>
+      subscription.models.map((model) => ({
+        id: model.id,
+        name: `${model.name} (${subscription.name})`,
+        providerId: model.providerId,
+        badge: subscription.name,
+        role: model.role,
+      })),
+    )
+  }, [subscriptions])
 
   const folderAncestors = useMemo(
     () => getFolderAncestors(folders, currentFolderId),
@@ -820,7 +835,9 @@ export function XDriveWorkspace({
           ? toXDriveAntigravityModelId(status.models[0].id)
           : 'antigravity/default'
       setModelId((current) =>
-        current === 'antigravity/default' || !current.startsWith('antigravity/')
+        current === 'antigravity/default' ||
+        (!current.startsWith('antigravity/') &&
+          !current.startsWith('opencode-go/'))
           ? preferred
           : current,
       )
@@ -836,6 +853,90 @@ export function XDriveWorkspace({
         review: prev.review === 'antigravity/default' ? preferred : prev.review,
         design: prev.design === 'antigravity/default' ? preferred : prev.design,
       }))
+    }
+  }
+
+  function applyLiveOpenCodeGoStatus(status: OpenCodeGoRuntimeStatus) {
+    setOpenCodeGoStatus(status)
+    setSubscriptions((prev) =>
+      applyOpenCodeGoStatusToSubscriptions(prev, status),
+    )
+    if (status.authenticated && status.entitled) {
+      const preferred = status.currentModelId
+        ? toXDriveOpenCodeGoModelId(status.currentModelId)
+        : status.models[0]
+          ? toXDriveOpenCodeGoModelId(status.models[0].id)
+          : 'opencode-go/glm-5.3'
+      setModelId((current) =>
+        current === 'antigravity/default' ? preferred : current,
+      )
+      setRoles((prev) => ({
+        implementation:
+          prev.implementation === 'antigravity/default'
+            ? preferred
+            : prev.implementation,
+        exploration:
+          prev.exploration === 'antigravity/default'
+            ? preferred
+            : prev.exploration,
+        review: prev.review === 'antigravity/default' ? preferred : prev.review,
+        design: prev.design === 'antigravity/default' ? preferred : prev.design,
+      }))
+    }
+  }
+
+  async function refreshOpenCodeGo() {
+    setOpenCodeGoBusy('refresh')
+    setOpenCodeGoError(null)
+    try {
+      const status = await fetchOpenCodeGoStatus()
+      applyLiveOpenCodeGoStatus(status)
+    } catch (error) {
+      setOpenCodeGoError(
+        error instanceof Error
+          ? error.message
+          : 'Could not reach OpenCode Go backend.',
+      )
+    } finally {
+      setOpenCodeGoBusy(null)
+    }
+  }
+
+  async function handleAuthenticateOpenCodeGo(options?: { apiKey?: string }) {
+    setOpenCodeGoBusy('authenticate')
+    setOpenCodeGoError(null)
+    try {
+      const status = await authenticateOpenCodeGo(options)
+      applyLiveOpenCodeGoStatus(status)
+      if (status.authenticated && status.entitled) {
+        setAgentStatus(
+          `Connected OpenCode Go with ${status.models.length} model${status.models.length === 1 ? '' : 's'}.`,
+        )
+      }
+    } catch (error) {
+      setOpenCodeGoError(
+        error instanceof Error
+          ? error.message
+          : 'OpenCode Go connection failed.',
+      )
+    } finally {
+      setOpenCodeGoBusy(null)
+    }
+  }
+
+  async function handleLogoutOpenCodeGo() {
+    setOpenCodeGoBusy('logout')
+    setOpenCodeGoError(null)
+    try {
+      const status = await logoutOpenCodeGo()
+      applyLiveOpenCodeGoStatus(status)
+      setAgentStatus('Disconnected OpenCode Go.')
+    } catch (error) {
+      setOpenCodeGoError(
+        error instanceof Error ? error.message : 'Disconnect failed.',
+      )
+    } finally {
+      setOpenCodeGoBusy(null)
     }
   }
 
@@ -923,6 +1024,14 @@ export function XDriveWorkspace({
       .then((status) => {
         if (!active) return
         applyLiveAntigravityStatus(status)
+      })
+      .catch(() => {
+        // Static/Storybook environments do not expose /api/ai.
+      })
+    void fetchOpenCodeGoStatus()
+      .then((status) => {
+        if (!active) return
+        applyLiveOpenCodeGoStatus(status)
       })
       .catch(() => {
         // Static/Storybook environments do not expose /api/ai.
@@ -1307,7 +1416,10 @@ export function XDriveWorkspace({
     upsertThreadMessage(threadId, user)
     setThinkingState({
       threadId,
-      label: `Running Google Antigravity ACP (${input.model.replace(/^antigravity\//, '')})…`,
+      label:
+        input.providerId === 'opencode-go'
+          ? `Running OpenCode Go (${input.model.replace(/^opencode-go\//, '')})…`
+          : `Running Google Antigravity ACP (${input.model.replace(/^antigravity\//, '')})…`,
     })
     try {
       const liveEvergreen = libraryRef.current.filter(
@@ -1321,6 +1433,7 @@ export function XDriveWorkspace({
         instruction,
         modelId: input.model,
         providerId: input.providerId,
+        sessionId: input.doc?.slug ?? threadId,
         action: input.action,
         selectedElements: input.selectedElements,
         sketchAnnotations: input.sketchAnnotations,
@@ -1431,11 +1544,20 @@ export function XDriveWorkspace({
     } catch (error) {
       const message =
         error instanceof Error ? error.message : 'The collaborator failed'
-      if (
-        error instanceof MarbleCollaborationError &&
-        (error.code === 'AUTH_REQUIRED' || error.code === 'BINARY_MISSING')
-      ) {
-        void refreshAntigravity()
+      if (error instanceof MarbleCollaborationError) {
+        if (
+          input.providerId === 'opencode-go' &&
+          (error.code === 'AUTH_REQUIRED' ||
+            error.code === 'ENTITLEMENT_REQUIRED' ||
+            error.code === 'RATE_LIMITED')
+        ) {
+          void refreshOpenCodeGo()
+        } else if (
+          error.code === 'AUTH_REQUIRED' ||
+          error.code === 'BINARY_MISSING'
+        ) {
+          void refreshAntigravity()
+        }
       }
       setAgentStatus(message)
       upsertThreadMessage(threadId, {
@@ -2511,6 +2633,14 @@ export function XDriveWorkspace({
                     onInstallAntigravityBinary={() =>
                       void handleInstallAntigravityBinary()
                     }
+                    openCodeGoStatus={openCodeGoStatus}
+                    openCodeGoBusy={openCodeGoBusy}
+                    openCodeGoError={openCodeGoError}
+                    onRefreshOpenCodeGo={() => void refreshOpenCodeGo()}
+                    onAuthenticateOpenCodeGo={(options) =>
+                      void handleAuthenticateOpenCodeGo(options)
+                    }
+                    onLogoutOpenCodeGo={() => void handleLogoutOpenCodeGo()}
                   />
                 </div>
               )}
@@ -2578,6 +2708,15 @@ export function XDriveWorkspace({
             thinkingLabel={thinkingState?.label}
             antigravityConnected={
               antigravityStatus ? antigravityStatus.authenticated : undefined
+            }
+            hasConnectedProvider={
+              antigravityStatus || openCodeGoStatus
+                ? Boolean(
+                    antigravityStatus?.authenticated ||
+                      (openCodeGoStatus?.authenticated &&
+                        openCodeGoStatus.entitled),
+                  )
+                : undefined
             }
           />
         )}

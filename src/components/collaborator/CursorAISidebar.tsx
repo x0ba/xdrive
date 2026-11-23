@@ -261,6 +261,7 @@ export interface CursorAISidebarProps {
   isThinking?: boolean
   thinkingLabel?: string
   antigravityConnected?: boolean
+  hasConnectedProvider?: boolean
   pendingIntent?: MarbleIntentRequest | null
   width?: number
   className?: string
@@ -502,6 +503,7 @@ export function CursorAISidebar({
   isThinking = false,
   thinkingLabel,
   antigravityConnected,
+  hasConnectedProvider,
   pendingIntent = null,
   width: widthProp,
   className,
@@ -857,21 +859,25 @@ export function CursorAISidebar({
         </p>
       )}
 
-      {!blocked && antigravityConnected === false && onOpenProviders && (
-        <div className="flex items-center justify-between gap-2 border-b border-[var(--xd-border)] bg-[var(--xd-accent-soft)]/50 px-2.5 py-1.5 text-[11px]">
-          <span className="inline-flex min-w-0 items-center gap-1.5 text-[var(--xd-ink-secondary)]">
-            <ShieldCheck className="size-3.5 shrink-0 text-[var(--xd-accent)]" />
-            <span className="truncate">Sign in to Google Antigravity</span>
-          </span>
-          <button
-            type="button"
-            onClick={onOpenProviders}
-            className="shrink-0 rounded bg-[var(--xd-accent)] px-2 py-0.5 text-[10.5px] font-medium text-white hover:bg-[var(--xd-accent-hover)]"
-          >
-            Connect
-          </button>
-        </div>
-      )}
+      {!blocked &&
+        (hasConnectedProvider ?? antigravityConnected) === false &&
+        onOpenProviders && (
+          <div className="flex items-center justify-between gap-2 border-b border-[var(--xd-border)] bg-[var(--xd-accent-soft)]/50 px-2.5 py-1.5 text-[11px]">
+            <span className="inline-flex min-w-0 items-center gap-1.5 text-[var(--xd-ink-secondary)]">
+              <ShieldCheck className="size-3.5 shrink-0 text-[var(--xd-accent)]" />
+              <span className="truncate">
+                Connect Antigravity or OpenCode Go
+              </span>
+            </span>
+            <button
+              type="button"
+              onClick={onOpenProviders}
+              className="shrink-0 rounded bg-[var(--xd-accent)] px-2 py-0.5 text-[10.5px] font-medium text-white hover:bg-[var(--xd-accent-hover)]"
+            >
+              Connect
+            </button>
+          </div>
+        )}
 
       <div className="min-h-0 flex-1 overflow-y-auto" role="tabpanel">
         {tab === 'chat' && (
@@ -906,7 +912,7 @@ export function CursorAISidebar({
                 <div className="flex items-center gap-2 rounded border border-[var(--xd-border)] bg-[var(--xd-canvas)] px-2.5 py-2 text-[11.5px] text-[var(--xd-ink-secondary)]">
                   <Loader2 className="size-3.5 shrink-0 animate-spin text-[var(--xd-accent)]" />
                   <span className="truncate">
-                    {thinkingLabel || 'Running Google Antigravity ACP…'}
+                    {thinkingLabel || 'Running AI collaborator…'}
                   </span>
                 </div>
               </li>
@@ -1040,6 +1046,17 @@ function MessageBubble({ message }: { message: AIMessage }) {
               Antigravity ACP
               {message.modelId
                 ? ` · ${message.modelId.replace(/^antigravity\//, '')}`
+                : ''}
+            </span>
+          </div>
+        )}
+        {message.runtimeSource === 'opencode-go' && (
+          <div className="xd-mono mb-1 flex items-center gap-1 text-[9.5px] text-[var(--xd-commit)]">
+            <ShieldCheck className="size-2.5 shrink-0" />
+            <span>
+              OpenCode Go
+              {message.modelId
+                ? ` · ${message.modelId.replace(/^opencode-go\//, '')}`
                 : ''}
             </span>
           </div>
