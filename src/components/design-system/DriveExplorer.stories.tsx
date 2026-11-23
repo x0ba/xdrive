@@ -8,6 +8,9 @@ import {
   DriveFolderCard,
   DriveFolderDialog,
   DriveMoveDialog,
+  DrivePermanentDeleteDialog,
+  DriveTrashList,
+  TRASH_RETENTION_DAYS,
   getDescendantFolderIds,
   getFolderAncestors,
   getFolderItemCounts,
@@ -83,6 +86,7 @@ function InteractiveDriveBrowserDemo() {
   const visibleDocs = useMemo(() => {
     const needle = searchQuery.trim().toLowerCase()
     return docs
+      .filter((doc) => !doc.trashedAt)
       .filter((doc) =>
         currentFolderId === null ? true : doc.folderId === currentFolderId,
       )
@@ -161,6 +165,16 @@ function InteractiveDriveBrowserDemo() {
     }
   }
 
+  const handleTrashDoc = (doc: MarbleDocumentFile) => {
+    setDocs((prev) =>
+      prev.map((item) =>
+        item.id === doc.id
+          ? { ...item, trashedAt: new Date().toISOString() }
+          : item,
+      ),
+    )
+  }
+
   return (
     <div className="mx-auto max-w-6xl space-y-5 bg-[var(--xd-canvas)] p-6 text-[var(--xd-ink)]">
       <DriveBreadcrumbBar
@@ -210,6 +224,7 @@ function InteractiveDriveBrowserDemo() {
               ),
             )
           }
+          onDeleteDoc={handleTrashDoc}
         />
       ) : (
         <div className="space-y-6">
@@ -264,6 +279,7 @@ function InteractiveDriveBrowserDemo() {
                         ),
                       )
                     }
+                    onDelete={handleTrashDoc}
                   />
                 ))}
               </div>
@@ -283,6 +299,7 @@ function InteractiveDriveBrowserDemo() {
                         ),
                       )
                     }
+                    onDelete={handleTrashDoc}
                   />
                 ))}
               </div>
@@ -340,6 +357,8 @@ const meta = {
     DriveFileListTable,
     DriveFolderDialog,
     DriveMoveDialog,
+    DriveTrashList,
+    DrivePermanentDeleteDialog,
   },
   args: {
     doc: DEFAULT_SEED.docs[0],
@@ -471,4 +490,81 @@ export const FolderStripAndBreadcrumbs: Story = {
       </div>
     )
   },
+}
+
+function InteractiveTrashDemo() {
+  const seed = useMemo(() => {
+    const now = Date.now()
+    const base = makeStorySeed()
+    return {
+      folders: base.folders,
+      docs: base.docs.slice(0, 3).map((doc, idx) => ({
+        ...doc,
+        trashedAt: new Date(
+          now - (idx === 0 ? 1 : idx === 1 ? 14 : 27) * 24 * 60 * 60 * 1000,
+        ).toISOString(),
+      })),
+    }
+  }, [])
+  const [trashedDocs, setTrashedDocs] = useState<MarbleDocumentFile[]>(
+    seed.docs,
+  )
+  const [confirmTarget, setConfirmTarget] = useState<
+    { mode: 'single'; doc: MarbleDocumentFile } | { mode: 'empty' } | null
+  >(null)
+
+  return (
+    <div className="mx-auto max-w-6xl space-y-4 bg-[var(--xd-canvas)] p-6 text-[var(--xd-ink)]">
+      <h1 className="text-[16px] font-semibold tracking-tight">Trash</h1>
+      <DriveTrashList
+        docs={trashedDocs}
+        retentionDays={TRASH_RETENTION_DAYS}
+        resolveFolderLabel={(doc) =>
+          getFolderPathLabel(seed.folders, doc.folderId, doc.folder)
+        }
+        formatTrashedAt={(iso) =>
+          new Date(iso).toLocaleDateString(undefined, {
+            month: 'short',
+            day: 'numeric',
+          })
+        }
+        onRestoreDoc={(doc) =>
+          setTrashedDocs((prev) => prev.filter((item) => item.id !== doc.id))
+        }
+        onDeleteForeverDoc={(doc) => setConfirmTarget({ mode: 'single', doc })}
+        onEmptyTrash={() => setConfirmTarget({ mode: 'empty' })}
+      />
+      <DrivePermanentDeleteDialog
+        open={confirmTarget !== null}
+        mode={confirmTarget?.mode ?? 'single'}
+        fileName={
+          confirmTarget?.mode === 'single'
+            ? confirmTarget.doc.title
+            : undefined
+        }
+        itemCount={trashedDocs.length}
+        onClose={() => setConfirmTarget(null)}
+        onConfirm={() => {
+          if (confirmTarget?.mode === 'empty') {
+            setTrashedDocs([])
+          } else if (confirmTarget?.mode === 'single') {
+            setTrashedDocs((prev) =>
+              prev.filter((item) => item.id !== confirmTarget.doc.id),
+            )
+          }
+          setConfirmTarget(null)
+        }}
+      />
+    </div>
+  )
+}
+
+/**
+ * Interactive Trash view showing 30-day auto-delete countdowns, restore actions, and permanent delete confirmation.
+ *
+ * @summary Trash view with restore and permanent deletion
+ */
+export const TrashView: Story = {
+  name: 'Trash · Restore & Permanent Delete',
+  render: () => <InteractiveTrashDemo />,
 }

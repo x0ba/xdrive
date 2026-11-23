@@ -1,6 +1,8 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react'
 import {
+  AlertTriangle,
   ChevronRight,
+  Clock,
   Copy,
   ExternalLink,
   Folder,
@@ -11,6 +13,7 @@ import {
   MoreVertical,
   Pencil,
   Pin,
+  RotateCcw,
   Share2,
   Star,
   Trash2,
@@ -198,6 +201,7 @@ export function getFolderItemCounts(
     }
   }
   for (const doc of docs) {
+    if (doc.trashedAt) continue
     if (doc.folderId) {
       const entry = counts.get(doc.folderId)
       if (entry) {
@@ -207,6 +211,57 @@ export function getFolderItemCounts(
     }
   }
   return counts
+}
+
+/* ============================================================================
+   Trash Retention Helpers (30-Day Default Auto-Purge)
+   ============================================================================ */
+
+export const TRASH_RETENTION_DAYS = 30
+const DAY_MS = 24 * 60 * 60 * 1000
+export const TRASH_RETENTION_MS = TRASH_RETENTION_DAYS * DAY_MS
+
+export function isDocTrashed(doc: MarbleDocumentFile): boolean {
+  return Boolean(doc.trashedAt)
+}
+
+export function isTrashedDocExpired(
+  doc: MarbleDocumentFile,
+  nowMs = Date.now(),
+  retentionDays = TRASH_RETENTION_DAYS,
+): boolean {
+  if (!doc.trashedAt) return false
+  const trashedMs = Date.parse(doc.trashedAt)
+  if (Number.isNaN(trashedMs)) return false
+  return nowMs - trashedMs >= retentionDays * DAY_MS
+}
+
+export function getTrashDaysRemaining(
+  trashedAt: string,
+  nowMs = Date.now(),
+  retentionDays = TRASH_RETENTION_DAYS,
+): number {
+  const trashedMs = Date.parse(trashedAt)
+  if (Number.isNaN(trashedMs)) return retentionDays
+  const remainingMs = trashedMs + retentionDays * DAY_MS - nowMs
+  return Math.max(0, Math.ceil(remainingMs / DAY_MS))
+}
+
+export function purgeExpiredTrashedDocs(
+  docs: MarbleDocumentFile[],
+  nowMs = Date.now(),
+  retentionDays = TRASH_RETENTION_DAYS,
+): { docs: MarbleDocumentFile[]; purged: MarbleDocumentFile[] } {
+  const kept: MarbleDocumentFile[] = []
+  const purged: MarbleDocumentFile[] = []
+  for (const doc of docs) {
+    if (isTrashedDocExpired(doc, nowMs, retentionDays)) {
+      purged.push(doc)
+    } else {
+      kept.push(doc)
+    }
+  }
+  return { docs: kept, purged }
 }
 
 const DRAG_MIME = 'application/x-xdrive-doc-id'
@@ -836,11 +891,20 @@ export interface DriveFileCardProps {
   onShare?: (doc: MarbleDocumentFile) => void
   onToggleStar?: (doc: MarbleDocumentFile) => void
   onTogglePin?: (doc: MarbleDocumentFile) => void
+  onDelete?: (doc: MarbleDocumentFile) => void
 }
 
 function buildFileMenuItems(props: DriveFileCardProps): ActionMenuItem[] {
-  const { doc, onOpen, onMove, onDuplicate, onShare, onToggleStar, onTogglePin } =
-    props
+  const {
+    doc,
+    onOpen,
+    onMove,
+    onDuplicate,
+    onShare,
+    onToggleStar,
+    onTogglePin,
+    onDelete,
+  } = props
   return [
     {
       id: 'open',
@@ -895,6 +959,17 @@ function buildFileMenuItems(props: DriveFileCardProps): ActionMenuItem[] {
             label: doc.pinned ? 'Unpin from sidebar' : 'Pin to sidebar',
             icon: <Pin className="h-3.5 w-3.5" />,
             onSelect: () => onTogglePin(doc),
+          },
+        ]
+      : []),
+    ...(onDelete
+      ? [
+          {
+            id: 'delete',
+            label: 'Move to trash',
+            icon: <Trash2 className="h-3.5 w-3.5" />,
+            danger: true,
+            onSelect: () => onDelete(doc),
           },
         ]
       : []),
@@ -1053,6 +1128,7 @@ export interface DriveFileListTableProps {
   onShareDoc?: (doc: MarbleDocumentFile) => void
   onToggleStar?: (doc: MarbleDocumentFile) => void
   onTogglePin?: (doc: MarbleDocumentFile) => void
+  onDeleteDoc?: (doc: MarbleDocumentFile) => void
 }
 
 export function DriveFileListTable({
@@ -1071,6 +1147,7 @@ export function DriveFileListTable({
   onShareDoc,
   onToggleStar,
   onTogglePin,
+  onDeleteDoc,
 }: DriveFileListTableProps) {
   const [dragTargetFolderId, setDragTargetFolderId] = useState<string | null>(
     null,
@@ -1211,6 +1288,7 @@ export function DriveFileListTable({
               onShare: onShareDoc,
               onToggleStar,
               onTogglePin,
+              onDelete: onDeleteDoc,
             })
 
             return (
@@ -1551,6 +1629,328 @@ export function DriveMoveDialog({
             className="h-7 rounded bg-[var(--xd-accent)] px-3 text-[12px] font-medium text-white transition-colors hover:bg-[var(--xd-accent-hover)]"
           >
             Move here
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+/* ============================================================================
+   9. DriveTrashList — Trash View with 30-Day Retention, Restore & Delete Forever
+   ============================================================================ */
+
+export interface DriveTrashListProps {
+  docs: MarbleDocumentFile[]
+  totalCount?: number
+  retentionDays?: number
+  resolveFolderLabel?: (doc: MarbleDocumentFile) => string
+  formatTrashedAt?: (iso: string) => string
+  onRestoreDoc?: (doc: MarbleDocumentFile) => void
+  onDeleteForeverDoc?: (doc: MarbleDocumentFile) => void
+  onEmptyTrash?: () => void
+}
+
+export function DriveTrashList({
+  docs,
+  totalCount,
+  retentionDays = TRASH_RETENTION_DAYS,
+  resolveFolderLabel,
+  formatTrashedAt,
+  onRestoreDoc,
+  onDeleteForeverDoc,
+  onEmptyTrash,
+}: DriveTrashListProps) {
+  const effectiveTotal = totalCount ?? docs.length
+  const hasTrashItems = effectiveTotal > 0
+
+  return (
+    <div className="space-y-4">
+      {/* 30-Day Auto-Clear Policy Banner */}
+      <div className="flex flex-wrap items-center justify-between gap-3 rounded-md border border-[var(--xd-border)] bg-[var(--xd-rail)] px-3.5 py-2.5 text-[12px] text-[var(--xd-ink-secondary)]">
+        <div className="flex items-center gap-2">
+          <Clock className="h-3.5 w-3.5 shrink-0 text-[var(--xd-ink-muted)]" />
+          <span>
+            Items in trash are automatically permanently deleted after{' '}
+            <strong className="font-medium text-[var(--xd-ink)]">
+              {retentionDays} {retentionDays === 1 ? 'day' : 'days'}
+            </strong>
+            .
+          </span>
+        </div>
+
+        {hasTrashItems && onEmptyTrash && (
+          <button
+            type="button"
+            onClick={onEmptyTrash}
+            className="inline-flex h-7 items-center gap-1.5 rounded border border-[var(--xd-danger)]/35 bg-[var(--xd-danger-soft)] px-2.5 text-[11.5px] font-medium text-[var(--xd-danger)] transition-colors hover:border-[var(--xd-danger)]/60 hover:bg-[var(--xd-danger)] hover:text-white"
+          >
+            <Trash2 className="h-3 w-3" />
+            <span>Empty trash</span>
+          </button>
+        )}
+      </div>
+
+      {docs.length === 0 ? (
+        <div className="flex flex-col items-center justify-center rounded-lg border border-dashed border-[var(--xd-border-strong)] py-14 text-center">
+          <span className="inline-flex h-10 w-10 items-center justify-center rounded-full border border-[var(--xd-border)] bg-[var(--xd-rail)] text-[var(--xd-ink-muted)]">
+            <Trash2 className="h-4 w-4" />
+          </span>
+          <p className="mt-3 text-[13px] font-medium text-[var(--xd-ink)]">
+            {hasTrashItems ? 'No matching files in Trash' : 'Trash is empty'}
+          </p>
+          <p className="mt-1 max-w-sm text-[12px] text-[var(--xd-ink-muted)]">
+            {hasTrashItems
+              ? 'Try clearing your search query to see all trashed files.'
+              : `Files you delete are moved here and kept for ${retentionDays} ${retentionDays === 1 ? 'day' : 'days'} before they are permanently removed.`}
+          </p>
+        </div>
+      ) : (
+        <div className="overflow-visible rounded-md border border-[var(--xd-border)] bg-[var(--xd-canvas)]">
+          <table className="w-full border-collapse text-left text-[12.5px]">
+            <thead className="border-b border-[var(--xd-border)] bg-[var(--xd-rail)] text-[11px] text-[var(--xd-ink-muted)]">
+              <tr>
+                <th className="px-3 py-2 font-medium">Name</th>
+                <th className="hidden px-3 py-2 font-medium sm:table-cell">
+                  Original location
+                </th>
+                <th className="hidden px-3 py-2 font-medium md:table-cell">
+                  Date trashed
+                </th>
+                <th className="px-3 py-2 font-medium">Auto-delete</th>
+                <th className="hidden px-3 py-2 text-right font-medium lg:table-cell">
+                  Size
+                </th>
+                <th className="px-3 py-2 text-right font-medium">Actions</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-[var(--xd-border)]">
+              {docs.map((doc) => {
+                const folderLabel = resolveFolderLabel
+                  ? resolveFolderLabel(doc)
+                  : doc.folder || 'My Drive'
+                const trashedIso = doc.trashedAt ?? doc.updatedAt
+                const daysLeft = getTrashDaysRemaining(
+                  trashedIso,
+                  Date.now(),
+                  retentionDays,
+                )
+                const trashedLabel = formatTrashedAt
+                  ? formatTrashedAt(trashedIso)
+                  : trashedIso
+                const expiryLabel =
+                  daysLeft <= 0
+                    ? 'Expiring soon'
+                    : daysLeft === 1
+                      ? '1 day left'
+                      : `${daysLeft} days left`
+                const urgent = daysLeft <= 5
+
+                const menuItems: ActionMenuItem[] = [
+                  ...(onRestoreDoc
+                    ? [
+                        {
+                          id: 'restore',
+                          label: 'Restore',
+                          icon: <RotateCcw className="h-3.5 w-3.5" />,
+                          onSelect: () => onRestoreDoc(doc),
+                        },
+                      ]
+                    : []),
+                  ...(onDeleteForeverDoc
+                    ? [
+                        {
+                          id: 'delete-forever',
+                          label: 'Delete forever',
+                          icon: <Trash2 className="h-3.5 w-3.5" />,
+                          danger: true,
+                          onSelect: () => onDeleteForeverDoc(doc),
+                        },
+                      ]
+                    : []),
+                ]
+
+                return (
+                  <tr
+                    key={doc.id}
+                    className="group transition-colors hover:bg-[var(--xd-surface-hover)]/40"
+                  >
+                    <td className="px-3 py-2.5">
+                      <div className="flex items-center gap-2.5">
+                        <span className="shrink-0 text-[var(--xd-ink-muted)]">
+                          {getCategoryIcon(doc.category, 'h-4 w-4')}
+                        </span>
+                        <div className="min-w-0">
+                          <div className="truncate font-medium text-[var(--xd-ink)]">
+                            {doc.title}
+                          </div>
+                          <div className="xd-mono truncate text-[10.5px] text-[var(--xd-ink-muted)]">
+                            {doc.fileName}
+                          </div>
+                        </div>
+                      </div>
+                    </td>
+
+                    <td className="hidden px-3 py-2.5 sm:table-cell">
+                      <span className="inline-flex items-center gap-1 rounded border border-[var(--xd-border)] bg-[var(--xd-rail)] px-1.5 py-0.5 text-[11px] text-[var(--xd-ink-secondary)]">
+                        <Folder className="h-3 w-3 text-[var(--xd-ink-muted)]" />
+                        <span className="max-w-[140px] truncate">
+                          {folderLabel}
+                        </span>
+                      </span>
+                    </td>
+
+                    <td className="xd-tabular hidden px-3 py-2.5 text-[var(--xd-ink-muted)] md:table-cell">
+                      {trashedLabel}
+                    </td>
+
+                    <td className="xd-tabular px-3 py-2.5">
+                      <span
+                        className={`inline-flex items-center gap-1 rounded border px-1.5 py-0.5 text-[11px] font-medium ${
+                          urgent
+                            ? 'border-[var(--xd-sketch)]/40 bg-[var(--xd-sketch-soft)] text-[var(--xd-sketch)]'
+                            : 'border-[var(--xd-border)] bg-[var(--xd-rail)] text-[var(--xd-ink-muted)]'
+                        }`}
+                      >
+                        {expiryLabel}
+                      </span>
+                    </td>
+
+                    <td className="xd-tabular hidden px-3 py-2.5 text-right text-[var(--xd-ink-muted)] lg:table-cell">
+                      {formatBytes(doc.byteSize)}
+                    </td>
+
+                    <td className="px-3 py-2.5">
+                      <div className="flex items-center justify-end gap-1">
+                        {onRestoreDoc && (
+                          <button
+                            type="button"
+                            onClick={() => onRestoreDoc(doc)}
+                            aria-label={`Restore ${doc.title}`}
+                            className="inline-flex h-7 items-center gap-1 rounded border border-[var(--xd-border)] bg-[var(--xd-canvas)] px-2 text-[11.5px] font-medium text-[var(--xd-ink)] transition-colors hover:border-[var(--xd-border-strong)] hover:bg-[var(--xd-surface-hover)]"
+                          >
+                            <RotateCcw className="h-3 w-3 text-[var(--xd-ink-secondary)]" />
+                            <span>Restore</span>
+                          </button>
+                        )}
+                        {onDeleteForeverDoc && (
+                          <button
+                            type="button"
+                            onClick={() => onDeleteForeverDoc(doc)}
+                            aria-label={`Delete ${doc.title} forever`}
+                            title="Delete forever"
+                            className="inline-flex h-7 w-7 items-center justify-center rounded border border-[var(--xd-border)] text-[var(--xd-ink-muted)] transition-colors hover:border-[var(--xd-danger)]/45 hover:bg-[var(--xd-danger-soft)] hover:text-[var(--xd-danger)]"
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </button>
+                        )}
+                        {menuItems.length > 0 && (
+                          <CompactActionMenu
+                            label={`Trash actions for ${doc.title}`}
+                            items={menuItems}
+                          />
+                        )}
+                      </div>
+                    </td>
+                  </tr>
+                )
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  )
+}
+
+/* ============================================================================
+   10. DrivePermanentDeleteDialog — Confirm Permanent Deletion from Trash
+   ============================================================================ */
+
+export interface DrivePermanentDeleteDialogProps {
+  open: boolean
+  mode: 'single' | 'empty'
+  fileName?: string
+  itemCount?: number
+  onClose: () => void
+  onConfirm: () => void
+}
+
+export function DrivePermanentDeleteDialog({
+  open,
+  mode,
+  fileName,
+  itemCount = 0,
+  onClose,
+  onConfirm,
+}: DrivePermanentDeleteDialogProps) {
+  useEffect(() => {
+    if (!open) return
+    function onKeyDown(event: KeyboardEvent) {
+      if (event.key === 'Escape') onClose()
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [open, onClose])
+
+  if (!open) return null
+
+  const title =
+    mode === 'empty' ? 'Empty trash forever?' : 'Delete file forever?'
+  const description =
+    mode === 'empty'
+      ? `All ${itemCount} ${itemCount === 1 ? 'item' : 'items'} in Trash will be permanently deleted. This action cannot be undone.`
+      : `"${fileName || 'This file'}" will be permanently deleted and can no longer be restored.`
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-start justify-center bg-black/45 px-4 pt-[18vh]"
+      onMouseDown={onClose}
+    >
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-label={title}
+        className="w-full max-w-sm rounded-lg border border-[var(--xd-border-strong)] bg-[var(--xd-canvas)] p-4 shadow-xl"
+        onMouseDown={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-start justify-between gap-2">
+          <div className="flex items-center gap-2">
+            <span className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-[var(--xd-danger-soft)] text-[var(--xd-danger)]">
+              <AlertTriangle className="h-4 w-4" />
+            </span>
+            <h2 className="text-[14px] font-semibold text-[var(--xd-ink)]">
+              {title}
+            </h2>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="Close dialog"
+            className="inline-flex h-6 w-6 items-center justify-center rounded text-[var(--xd-ink-muted)] hover:bg-[var(--xd-surface-hover)] hover:text-[var(--xd-ink)]"
+          >
+            <X className="h-3.5 w-3.5" />
+          </button>
+        </div>
+
+        <p className="mt-2.5 text-[12.5px] leading-relaxed text-[var(--xd-ink-secondary)]">
+          {description}
+        </p>
+
+        <div className="mt-4 flex justify-end gap-1.5">
+          <button
+            type="button"
+            onClick={onClose}
+            className="h-7 rounded border border-[var(--xd-border)] px-3 text-[12px] text-[var(--xd-ink-secondary)] transition-colors hover:bg-[var(--xd-surface-hover)] hover:text-[var(--xd-ink)]"
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            onClick={onConfirm}
+            className="h-7 rounded bg-[var(--xd-danger)] px-3 text-[12px] font-medium text-white transition-opacity hover:opacity-90"
+          >
+            {mode === 'empty' ? 'Empty trash' : 'Delete forever'}
           </button>
         </div>
       </div>

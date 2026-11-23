@@ -43,12 +43,18 @@ export {
 
 export {
   DRIVE_FOLDER_COLORS,
+  TRASH_RETENTION_DAYS,
+  TRASH_RETENTION_MS,
   getFolderIconClass,
   seedDriveFolders,
   getFolderAncestors,
   getFolderPathLabel,
   getDescendantFolderIds,
   getFolderItemCounts,
+  isDocTrashed,
+  isTrashedDocExpired,
+  getTrashDaysRemaining,
+  purgeExpiredTrashedDocs,
   readDraggedDocId,
   DriveBreadcrumbBar,
   DriveFolderCard,
@@ -58,12 +64,16 @@ export {
   DriveFileListTable,
   DriveFolderDialog,
   DriveMoveDialog,
+  DriveTrashList,
+  DrivePermanentDeleteDialog,
   type DriveBreadcrumbBarProps,
   type DriveFolderCardProps,
   type DriveFileCardProps,
   type DriveFileListTableProps,
   type DriveFolderDialogProps,
   type DriveMoveDialogProps,
+  type DriveTrashListProps,
+  type DrivePermanentDeleteDialogProps,
 } from './DriveExplorer'
 
 export {
