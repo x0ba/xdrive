@@ -187,6 +187,59 @@ export function normalizeReasoningEfforts(
   return ordered.length > 0 ? ordered : ALL_EFFORTS
 }
 
+/**
+ * Effort the picker shows and the request must send.
+ * An unsupported selection falls back to the last supported level — the same
+ * fallback as `ModelPicker` — so the glyph cannot drift from the payload.
+ */
+export function resolveReasoningEffort(
+  selected: ReasoningEffort | undefined,
+  supportedEfforts?: readonly ReasoningEffort[],
+): ReasoningEffort {
+  const supported =
+    supportedEfforts && supportedEfforts.length > 0
+      ? supportedEfforts
+      : ALL_EFFORTS
+  if (selected && supported.includes(selected)) return selected
+  return supported.at(-1) ?? 'off'
+}
+
+type EffortModel = {
+  id?: string
+  supportsReasoning?: boolean
+  reasoningEfforts?: readonly ReasoningEffort[]
+} | null
+
+export function supportedReasoningEfforts(
+  model?: EffortModel,
+): ReasoningEffort[] {
+  if (!model) return [...ALL_EFFORTS]
+  if (model.supportsReasoning === false) return ['off']
+  if (model.reasoningEfforts && model.reasoningEfforts.length > 0) {
+    return [...model.reasoningEfforts]
+  }
+  return [...ALL_EFFORTS]
+}
+
+export function reasoningEffortForModel(
+  model: EffortModel | undefined,
+  selected: ReasoningEffort | undefined,
+): ReasoningEffort {
+  return resolveReasoningEffort(selected, supportedReasoningEfforts(model))
+}
+
+export function prepareDriveChatRequest(
+  request: DriveChatApiRequest,
+  model?: EffortModel,
+): DriveChatApiRequest {
+  const reasoningEffort = reasoningEffortForModel(
+    model,
+    request.reasoningEffort,
+  )
+  if (reasoningEffort === request.reasoningEffort) return request
+  return { ...request, reasoningEffort }
+}
+
 export function buildDriveChatModels(params: {
   subscriptions: AISubscription[]
   antigravityStatus?: AntigravityRuntimeStatus | null

@@ -12,6 +12,8 @@ import {
   Send,
   Square,
 } from 'lucide-react'
+import type { ReasoningEffort } from '#/lib/ai/drive-chat-types'
+import { reasoningEffortForModel } from '#/lib/ai/drive-chat-client'
 import type {
   CanvasInteractionMode,
   SelectedMarbleElement,
@@ -292,6 +294,8 @@ export interface SelectionSketchOverlayProps {
   models?: ModelPickerInputOption[]
   modelId?: string
   onModelChange?: (modelId: string) => void
+  reasoningEffort?: ReasoningEffort
+  onSelectReasoningEffort?: (effort: ReasoningEffort) => void
   favoriteModelIds?: string[]
   onFavoriteModelIdsChange?: (ids: string[]) => void
   onOpenProviders?: () => void
@@ -316,6 +320,8 @@ export function SelectionSketchOverlay({
   models = PROMPT_MODELS,
   modelId,
   onModelChange,
+  reasoningEffort: reasoningEffortProp,
+  onSelectReasoningEffort,
   favoriteModelIds,
   onFavoriteModelIdsChange,
   onOpenProviders,
@@ -343,6 +349,10 @@ export function SelectionSketchOverlay({
   const [drag, setDrag] = useState<LiveDrag | null>(null)
   const [tool, setTool] = useState<SketchTool>('pen')
   const [color, setColor] = useState<string>(SKETCH_COLORS[0].value)
+  const [internalEffort, setInternalEffort] = useState<ReasoningEffort>(
+    () => reasoningEffortProp ?? 'high',
+  )
+  const reasoningEffort = reasoningEffortProp ?? internalEffort
   const [prompt, setPrompt] = useState('')
   const [callout, setCallout] = useState<{ point: Point; text: string } | null>(
     null,
@@ -421,17 +431,29 @@ export function SelectionSketchOverlay({
     onSketchesChange?.(nextAnnotations, nextStrokes)
   }
 
+  function setReasoningEffort(next: ReasoningEffort) {
+    if (reasoningEffortProp === undefined) setInternalEffort(next)
+    onSelectReasoningEffort?.(next)
+  }
+
   function publish(request: MarbleIntentRequest) {
-    setPendingIds(request.targetIds)
+    const model = resolveModel(models, request.modelId)
+    const stamped: MarbleIntentRequest = {
+      ...request,
+      reasoningEffort:
+        request.reasoningEffort ??
+        reasoningEffortForModel(model, reasoningEffort),
+    }
+    setPendingIds(stamped.targetIds)
     window.setTimeout(() => setPendingIds([]), 1600)
-    onIntent?.(request)
-    if (request.kind === 'scale' && request.gesture) {
+    onIntent?.(stamped)
+    if (stamped.kind === 'scale' && stamped.gesture) {
       setNotice(
-        `Scale ${request.gesture.x.toFixed(2)}×${request.gesture.y.toFixed(2)}`,
+        `Scale ${stamped.gesture.x.toFixed(2)}×${stamped.gesture.y.toFixed(2)}`,
       )
       return
     }
-    setNotice(request.instruction)
+    setNotice(stamped.instruction)
   }
 
   function toPoint(event: ReactPointerEvent<HTMLDivElement>): Point {
@@ -1031,6 +1053,8 @@ export function SelectionSketchOverlay({
               models={models}
               modelId={modelId}
               onModelChange={onModelChange}
+              reasoningEffort={reasoningEffort}
+              onSelectReasoningEffort={setReasoningEffort}
               favoriteModelIds={favoriteModelIds}
               onFavoriteModelIdsChange={onFavoriteModelIdsChange}
               onOpenProviders={onOpenProviders}

@@ -1,4 +1,5 @@
 import type { Meta, StoryObj } from '@storybook/tanstack-react'
+import { expect, userEvent, within } from 'storybook/test'
 import { SelectionSketchOverlay } from './SelectionSketchOverlay'
 
 /**
@@ -33,6 +34,15 @@ export const SelectMode: Story = {
     mode: 'select',
     initialSelectedIds: ['sec-abstract', 'eq-bell'],
     permission: 'edit_with_ai_shared',
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    const trigger = canvas.getByRole('button', { name: /Reasoning effort/i })
+    await userEvent.click(trigger)
+    const body = within(document.body)
+    await expect(
+      body.getByRole('radiogroup', { name: 'Reasoning effort' }),
+    ).toBeVisible()
   },
 }
 

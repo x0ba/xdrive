@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import type { Meta, StoryObj } from '@storybook/tanstack-react'
+import { expect, userEvent, within } from 'storybook/test'
 import {
   DriveFileIconTile,
   DriveFileListTable,
@@ -370,6 +371,32 @@ export const DriveFileIndex: Story = {
  *
  * @summary Starter template blueprint gallery
  */
+/**
+ * Hero composer prompt bar with the docked reasoning-level picker.
+ *
+ * @summary Agent hero composer reasoning level picker
+ */
+export const AgentHeroReasoningLevel: Story = {
+  render: () => (
+    <div className="bg-[var(--xd-canvas)] p-8">
+      <AgentHeroComposer />
+    </div>
+  ),
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    const trigger = canvas.getByRole('button', { name: /Reasoning effort/i })
+    await userEvent.click(trigger)
+    const body = within(document.body)
+    await expect(
+      body.getByRole('radiogroup', { name: 'Reasoning effort' }),
+    ).toBeVisible()
+    await expect(body.getByRole('radio', { name: /High/i })).toHaveAttribute(
+      'aria-checked',
+      'true',
+    )
+  },
+}
+
 export const TemplateGallery: Story = {
   render: () => (
     <div className="mx-auto max-w-5xl space-y-4 bg-[var(--xd-canvas)] p-6 text-[var(--xd-ink)]">

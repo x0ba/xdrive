@@ -246,7 +246,7 @@ export const CreateWithAIAgentModal: Story = {
     ).toBeNull()
 
     const trigger = within(dialog).getByRole('button', {
-      name: 'Select AI model',
+      name: /Select AI model/i,
     })
     await expect(trigger).toHaveAttribute('data-xdrive-model-picker', 'true')
     await expect(trigger).toHaveTextContent('Gemini 4 Neon')
@@ -262,6 +262,9 @@ export const CreateWithAIAgentModal: Story = {
     const chosenFolder = folderSelect?.value ?? ''
 
     await userEvent.click(trigger)
+    await expect(
+      body.getByRole('radiogroup', { name: 'Reasoning effort' }),
+    ).toBeVisible()
     const search = await body.findByPlaceholderText('Search models...')
     await expect(search).toBeVisible()
     const glmOption = await body.findByRole('option', { name: /GLM-5\.3/i })

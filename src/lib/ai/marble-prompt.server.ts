@@ -18,6 +18,7 @@ import type {
   SelectedMarbleElement,
   SketchAnnotation,
 } from '#/lib/types'
+import type { ReasoningEffort } from '#/lib/ai/drive-chat-types'
 import type { MarbleActionKind } from '#/lib/marble/ai-collaborator'
 import {
   resolveEvergreenDesignContext,
@@ -61,6 +62,7 @@ export interface ServerCollaborateInput {
   instruction: string
   modelId: string
   providerId: AIProviderId
+  reasoningEffort?: ReasoningEffort
   action?: MarbleActionKind
   selectedElements?: SelectedMarbleElement[]
   sketchAnnotations?: SketchAnnotation[]

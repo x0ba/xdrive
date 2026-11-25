@@ -9,6 +9,30 @@ import type {
 
 export type ReasoningEffort = 'off' | 'low' | 'medium' | 'high' | 'max'
 
+const REASONING_EFFORT_VALUES: ReadonlySet<string> = new Set<ReasoningEffort>([
+  'off',
+  'low',
+  'medium',
+  'high',
+  'max',
+])
+
+/** Parse a provider or request value into the effort the UI and ACP clients share. */
+export function parseReasoningEffort(
+  value: unknown,
+): ReasoningEffort | undefined {
+  if (typeof value !== 'string') return undefined
+  const clean = value.trim().toLowerCase()
+  if (clean === 'xhigh' || clean === 'extra-high' || clean === 'extra_high') {
+    return 'max'
+  }
+  if (clean === 'none' || clean === 'minimal' || clean === 'disabled') {
+    return 'off'
+  }
+  if (REASONING_EFFORT_VALUES.has(clean)) return clean as ReasoningEffort
+  return undefined
+}
+
 export type DriveChatMode = 'ask' | 'review' | 'auto'
 
 export interface DriveChatModelOption {

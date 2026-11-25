@@ -1,4 +1,5 @@
 import type { Meta, StoryObj } from '@storybook/tanstack-react'
+import { expect, userEvent, within } from 'storybook/test'
 import { FloatingPromptBar } from './FloatingPromptBar'
 import { DEMO_STAGE_NODES, toSelectedElement } from './SelectionSketchOverlay'
 
@@ -50,6 +51,31 @@ export const AnnotateAndPropose: Story = {
  *
  * @summary View-only locked prompt bar state
  */
+/**
+ * Model trigger opens the docked reasoning-level column on the floating prompt bar.
+ *
+ * @summary Floating prompt bar reasoning level picker
+ */
+export const ReasoningLevel: Story = {
+  args: {
+    selectedElements: TARGETS,
+    permission: 'edit_with_ai_shared',
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    const trigger = canvas.getByRole('button', { name: /Reasoning effort/i })
+    await userEvent.click(trigger)
+    const body = within(document.body)
+    await expect(
+      body.getByRole('radiogroup', { name: 'Reasoning effort' }),
+    ).toBeVisible()
+    await expect(body.getByRole('radio', { name: /High/i })).toHaveAttribute(
+      'aria-checked',
+      'true',
+    )
+  },
+}
+
 export const ViewOnlyLocked: Story = {
   args: {
     selectedElements: TARGETS,

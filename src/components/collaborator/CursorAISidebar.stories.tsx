@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import type { Meta, StoryObj } from '@storybook/tanstack-react'
-import { expect, within } from 'storybook/test'
+import { expect, userEvent, within } from 'storybook/test'
 import { CursorAISidebar } from './CursorAISidebar'
 import type { MarbleIntentRequest } from './FloatingPromptBar'
 import {
@@ -180,6 +180,13 @@ export const EmptyChat: Story = {
     await expect(
       canvas.getByPlaceholderText('Ask for a change...'),
     ).toBeVisible()
+    const trigger = canvas.getByRole('button', { name: /Reasoning effort/i })
+    await userEvent.click(trigger)
+    const body = within(document.body)
+    await expect(
+      body.getByRole('radiogroup', { name: 'Reasoning effort' }),
+    ).toBeVisible()
+    await userEvent.keyboard('{Escape}')
   },
 }
 
