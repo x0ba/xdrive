@@ -197,17 +197,19 @@ function PickerTooltip({
   label,
   side = 'left',
   sideOffset = 8,
+  portalContainer,
   children,
 }: {
   label: string
   side?: 'top' | 'right' | 'bottom' | 'left'
   sideOffset?: number
+  portalContainer?: HTMLElement | null
   children: ReactNode
 }) {
   return (
     <TooltipPrimitive.Root>
       <TooltipPrimitive.Trigger asChild>{children}</TooltipPrimitive.Trigger>
-      <TooltipPrimitive.Portal>
+      <TooltipPrimitive.Portal container={portalContainer ?? undefined}>
         <TooltipPrimitive.Content
           side={side}
           sideOffset={sideOffset}
@@ -230,12 +232,14 @@ const ModelPickerSidebar = memo(function ModelPickerSidebar({
   onFocusSearch,
   providerTabs,
   showFavorites = true,
+  portalContainer,
 }: {
   selectedTab: RailTab
   onSelectTab: (tab: RailTab) => void
   onFocusSearch: () => void
   providerTabs: ReadonlyArray<ModelPickerProviderTab>
   showFavorites?: boolean
+  portalContainer?: HTMLElement | null
 }) {
   const railContentRef = useRef<HTMLDivElement>(null)
   const [indicatorTop, setIndicatorTop] = useState<number | null>(null)
@@ -308,7 +312,11 @@ const ModelPickerSidebar = memo(function ModelPickerSidebar({
                 className="relative w-full"
                 data-model-picker-provider="favorites"
               >
-                <PickerTooltip label="Favorites" side="left">
+                <PickerTooltip
+                  label="Favorites"
+                  side="left"
+                  portalContainer={portalContainer}
+                >
                   <button
                     type="button"
                     data-rail-button
@@ -345,7 +353,11 @@ const ModelPickerSidebar = memo(function ModelPickerSidebar({
                 className="relative w-full"
                 data-model-picker-provider={tab.providerId}
               >
-                <PickerTooltip label={tooltip} side="left">
+                <PickerTooltip
+                  label={tooltip}
+                  side="left"
+                  portalContainer={portalContainer}
+                >
                   <button
                     type="button"
                     data-rail-button
@@ -391,26 +403,31 @@ const ModelPickerSidebar = memo(function ModelPickerSidebar({
  * Single uniform model row adapted from t3code's `ModelListRow.tsx`.
  */
 const ModelListRow = memo(function ModelListRow({
+  id,
   model,
   isSelected,
   isHighlighted,
   isFavorite,
   favoriteStarOnHover,
+  portalContainer,
   onSelect,
   onHighlight,
   onToggleFavorite,
 }: {
+  id: string
   model: ModelPickerOption
   isSelected: boolean
   isHighlighted: boolean
   isFavorite: boolean
   favoriteStarOnHover: boolean
+  portalContainer?: HTMLElement | null
   onSelect: () => void
   onHighlight: () => void
   onToggleFavorite: () => void
 }) {
   return (
     <div
+      id={id}
       role="option"
       aria-selected={isSelected}
       data-model-picker-row="true"
@@ -475,13 +492,18 @@ const ModelListRow = memo(function ModelListRow({
         )}
 
         <PickerTooltip
-          label={isFavorite ? 'Remove from favorites' : 'Add to favorites'}
+          label={
+            isFavorite
+              ? 'Remove from favorites (Alt+S)'
+              : 'Add to favorites (Alt+S)'
+          }
           side="top"
           sideOffset={4}
+          portalContainer={portalContainer}
         >
           <button
             type="button"
-            tabIndex={-1}
+            tabIndex={isHighlighted ? 0 : -1}
             aria-label={
               isFavorite
                 ? `Remove ${model.name} from favorites`
@@ -491,9 +513,15 @@ const ModelListRow = memo(function ModelListRow({
               event.stopPropagation()
               onToggleFavorite()
             }}
-            onKeyDown={(event) => event.stopPropagation()}
+            onKeyDown={(event) => {
+              event.stopPropagation()
+              if (event.key === 'Enter' || event.key === ' ') {
+                event.preventDefault()
+                onToggleFavorite()
+              }
+            }}
             className={cn(
-              'inline-flex size-5.5 items-center justify-center rounded-sm text-[var(--xd-ink-muted)] transition-opacity hover:bg-[var(--xd-ink)]/[0.08] hover:text-[var(--xd-ink)] focus-visible:opacity-100',
+              'inline-flex size-5.5 items-center justify-center rounded-sm text-[var(--xd-ink-muted)] transition-opacity outline-none hover:bg-[var(--xd-ink)]/[0.08] hover:text-[var(--xd-ink)] focus-visible:opacity-100 focus-visible:ring-2 focus-visible:ring-[var(--xd-accent)]',
               isFavorite && !favoriteStarOnHover
                 ? 'text-[var(--xd-sketch)] opacity-100'
                 : isFavorite && favoriteStarOnHover
@@ -521,6 +549,7 @@ const ModelPickerEffortColumn = memo(function ModelPickerEffortColumn({
   supportedEfforts,
   selectedEffort,
   defaultEffort,
+  portalContainer,
   onSelectEffort,
   onReturnToSearch,
 }: {
@@ -529,6 +558,7 @@ const ModelPickerEffortColumn = memo(function ModelPickerEffortColumn({
   supportedEfforts: ReadonlyArray<ReasoningEffort>
   selectedEffort: ReasoningEffort
   defaultEffort?: ReasoningEffort
+  portalContainer?: HTMLElement | null
   onSelectEffort: (effort: ReasoningEffort) => void
   onReturnToSearch: () => void
 }) {
@@ -632,6 +662,7 @@ const ModelPickerEffortColumn = memo(function ModelPickerEffortColumn({
                   label={meta.description}
                   side="right"
                   sideOffset={8}
+                  portalContainer={portalContainer}
                 >
                   <button
                     type="button"
@@ -721,14 +752,26 @@ export const ModelPicker = memo(function ModelPicker({
   const favoriteIds = controlledFavoriteIds ?? internalFavorites
   const favoriteSet = useMemo(() => new Set(favoriteIds), [favoriteIds])
 
-  const activeModel = useMemo(
+  const trimmedSelectedId = selectedModelId.trim()
+  const exactSelectedModel = useMemo(
     () =>
-      models.find((m) => m.id === selectedModelId) ??
+      trimmedSelectedId
+        ? (models.find((m) => m.id === trimmedSelectedId) ?? null)
+        : null,
+    [models, trimmedSelectedId],
+  )
+  const isMissingSelectedModel =
+    trimmedSelectedId.length > 0 && exactSelectedModel === null
+
+  const activeModel = useMemo(() => {
+    if (isMissingSelectedModel) return null
+    return (
+      exactSelectedModel ??
       models.find((m) => m.connected) ??
       models.at(0) ??
-      null,
-    [models, selectedModelId],
-  )
+      null
+    )
+  }, [isMissingSelectedModel, exactSelectedModel, models])
 
   const providerTabs = useMemo<ModelPickerProviderTab[]>(() => {
     const map = new Map<AIProviderId, ModelPickerProviderTab>()
@@ -777,11 +820,30 @@ export const ModelPicker = memo(function ModelPicker({
   const [searchQuery, setSearchQuery] = useState(defaultSearchQuery)
   const [highlightedIndex, setHighlightedIndex] = useState(0)
 
+  const triggerRef = useRef<HTMLButtonElement>(null)
   const searchInputRef = useRef<HTMLInputElement>(null)
   const popupRef = useRef<HTMLDivElement>(null)
   const listContainerRef = useRef<HTMLDivElement>(null)
   const searchHeightRef = useRef<number | null>(null)
+  const [workspacePortalContainer, setWorkspacePortalContainer] =
+    useState<HTMLElement | null>(null)
   const listboxId = useId()
+
+  // Resolve the enclosing workspace container so portaled popovers and tooltips
+  // inherit xDrive's light/dark CSS variables (set on [data-component="xdrive-workspace"]).
+  useIsomorphicLayoutEffect(() => {
+    if (portalContainer !== undefined) return
+    const container =
+      triggerRef.current?.closest<HTMLElement>(
+        '[data-component="xdrive-workspace"]',
+      ) ?? null
+    setWorkspacePortalContainer((prev) =>
+      prev === container ? prev : container,
+    )
+  }, [portalContainer, isOpen])
+
+  const resolvedPortalContainer =
+    portalContainer !== undefined ? portalContainer : workspacePortalContainer
 
   const docked =
     reasoningEffort !== undefined && onSelectReasoningEffort !== undefined
@@ -975,13 +1037,21 @@ export const ModelPicker = memo(function ModelPicker({
       ? null
       : (providerTabs.find((tab) => tab.providerId === selectedTab) ?? null)
 
+  const clampedHighlightedIndex =
+    visibleModels.length > 0
+      ? Math.min(highlightedIndex, visibleModels.length - 1)
+      : -1
+  const optionId = (index: number) => `${listboxId}-option-${index}`
+  const activeDescendantId =
+    clampedHighlightedIndex >= 0 ? optionId(clampedHighlightedIndex) : undefined
+
   const handleSearchKeyDown = (event: ReactKeyboardEvent<HTMLInputElement>) => {
     if (event.nativeEvent.isComposing) return
 
     if (event.key === 'ArrowDown') {
       if (visibleModels.length === 0) return
       event.preventDefault()
-      const next = (highlightedIndex + 1) % visibleModels.length
+      const next = (clampedHighlightedIndex + 1) % visibleModels.length
       setHighlightedIndex(next)
       scrollRowIntoView(next)
       return
@@ -991,14 +1061,34 @@ export const ModelPicker = memo(function ModelPicker({
       if (visibleModels.length === 0) return
       event.preventDefault()
       const next =
-        (highlightedIndex - 1 + visibleModels.length) % visibleModels.length
+        (clampedHighlightedIndex - 1 + visibleModels.length) %
+        visibleModels.length
       setHighlightedIndex(next)
       scrollRowIntoView(next)
       return
     }
 
+    if (
+      event.altKey &&
+      !event.ctrlKey &&
+      !event.metaKey &&
+      event.code === 'KeyS'
+    ) {
+      const highlighted =
+        clampedHighlightedIndex >= 0
+          ? visibleModels.at(clampedHighlightedIndex)
+          : undefined
+      if (!highlighted) return
+      event.preventDefault()
+      toggleFavorite(highlighted.id)
+      return
+    }
+
     if (event.key === 'Enter') {
-      const chosen = visibleModels.at(highlightedIndex)
+      const chosen =
+        clampedHighlightedIndex >= 0
+          ? visibleModels.at(clampedHighlightedIndex)
+          : undefined
       if (!chosen) return
       event.preventDefault()
       handleSelectModel(chosen.id)
@@ -1039,7 +1129,10 @@ export const ModelPicker = memo(function ModelPicker({
       event.currentTarget.selectionStart === searchQuery.length
     ) {
       event.preventDefault()
-      const highlighted = visibleModels.at(highlightedIndex)
+      const highlighted =
+        clampedHighlightedIndex >= 0
+          ? visibleModels.at(clampedHighlightedIndex)
+          : undefined
       if (highlighted && highlighted.id !== activeModel?.id) {
         handleSelectModel(highlighted.id)
       } else {
@@ -1050,7 +1143,11 @@ export const ModelPicker = memo(function ModelPicker({
 
   const effortMeta = REASONING_EFFORT_META[effectiveEffort]
   const showEffortSuffix = docked && supportsReasoning
-  const triggerText = activeModel ? activeModel.name : placeholder
+  const triggerText = activeModel
+    ? activeModel.name
+    : isMissingSelectedModel
+      ? trimmedSelectedId
+      : placeholder
   const showEffortWord =
     effortDisplay === 'label' ||
     effortDisplay === 'both' ||
@@ -1058,6 +1155,7 @@ export const ModelPicker = memo(function ModelPicker({
 
   const triggerAriaLabel = [
     ariaLabel ?? triggerText,
+    isMissingSelectedModel ? 'Unavailable' : null,
     showEffortSuffix ? `Reasoning effort: ${effortMeta.label}` : null,
   ]
     .filter(Boolean)
@@ -1081,6 +1179,7 @@ export const ModelPicker = memo(function ModelPicker({
       <PopoverPrimitive.Root open={isOpen} onOpenChange={setOpen}>
         <PopoverPrimitive.Trigger asChild>
           <button
+            ref={triggerRef}
             type="button"
             disabled={disabled || models.length === 0}
             aria-label={triggerAriaLabel}
@@ -1150,6 +1249,12 @@ export const ModelPicker = memo(function ModelPicker({
                   Off
                 </span>
               )}
+
+              {isMissingSelectedModel && (
+                <span className="shrink-0 rounded border border-[var(--xd-border-strong)] px-1 py-px text-[10px] leading-none text-[var(--xd-ink-muted)]">
+                  Unavailable
+                </span>
+              )}
             </span>
 
             {resolvedShowChevron && (
@@ -1161,7 +1266,9 @@ export const ModelPicker = memo(function ModelPicker({
           </button>
         </PopoverPrimitive.Trigger>
 
-        <PopoverPrimitive.Portal container={portalContainer}>
+        <PopoverPrimitive.Portal
+          container={resolvedPortalContainer ?? undefined}
+        >
           <PopoverPrimitive.Content
             ref={popupRef}
             side={resolvedSide}
@@ -1217,6 +1324,7 @@ export const ModelPicker = memo(function ModelPicker({
                       onFocusSearch={focusSearchInput}
                       providerTabs={providerTabs}
                       showFavorites
+                      portalContainer={resolvedPortalContainer}
                     />
                   )}
 
@@ -1239,6 +1347,7 @@ export const ModelPicker = memo(function ModelPicker({
                           role="combobox"
                           aria-expanded={true}
                           aria-controls={listboxId}
+                          aria-activedescendant={activeDescendantId}
                           aria-autocomplete="list"
                           placeholder="Search models..."
                           value={searchQuery}
@@ -1286,13 +1395,15 @@ export const ModelPicker = memo(function ModelPicker({
                           {visibleModels.map((model, index) => (
                             <ModelListRow
                               key={model.id}
+                              id={optionId(index)}
                               model={model}
                               isSelected={activeModel?.id === model.id}
-                              isHighlighted={index === highlightedIndex}
+                              isHighlighted={index === clampedHighlightedIndex}
                               isFavorite={favoriteSet.has(model.id)}
                               favoriteStarOnHover={
                                 selectedTab === 'favorites' && !isSearching
                               }
+                              portalContainer={resolvedPortalContainer}
                               onHighlight={() => setHighlightedIndex(index)}
                               onSelect={() => handleSelectModel(model.id)}
                               onToggleFavorite={() => toggleFavorite(model.id)}
@@ -1343,11 +1454,18 @@ export const ModelPicker = memo(function ModelPicker({
                 {/* Docked right-hand Reasoning Effort Column (t3code ComposerEffortColumn) */}
                 {docked && (
                   <ModelPickerEffortColumn
-                    modelLabel={activeModel ? activeModel.name : placeholder}
+                    modelLabel={
+                      activeModel
+                        ? activeModel.name
+                        : isMissingSelectedModel
+                          ? trimmedSelectedId
+                          : placeholder
+                    }
                     supportsReasoning={supportsReasoning}
                     supportedEfforts={supportedEfforts}
                     selectedEffort={effectiveEffort}
                     defaultEffort={activeModel?.defaultReasoningEffort}
+                    portalContainer={resolvedPortalContainer}
                     onSelectEffort={onSelectReasoningEffort}
                     onReturnToSearch={focusSearchInput}
                   />

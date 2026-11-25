@@ -158,6 +158,12 @@ export const OpenFavorites: Story = {
     const search = await body.findByPlaceholderText('Search models...')
     await expect(search).toBeVisible()
     await expect(body.getByText('GLM-5.3')).toBeVisible()
+    const firstActiveId = search.getAttribute('aria-activedescendant')
+    await expect(firstActiveId).toBeTruthy()
+    await userEvent.keyboard('{ArrowDown}')
+    const secondActiveId = search.getAttribute('aria-activedescendant')
+    await expect(secondActiveId).toBeTruthy()
+    await expect(secondActiveId).not.toBe(firstActiveId)
   },
 }
 
@@ -299,7 +305,7 @@ export const TriggerVariants: Story = {
         />
       </div>
 
-      <div className="grid gap-3 rounded-lg border border-[var(--xd-border)] bg-[var(--xd-rail)] p-4 sm:grid-cols-2">
+      <div className="grid gap-3 rounded-lg border border-[var(--xd-border)] bg-[var(--xd-rail)] p-4 sm:grid-cols-3">
         <div className="space-y-1">
           <span className="block text-[11px] font-medium text-[var(--xd-ink-secondary)]">
             Implementation (field)
@@ -318,6 +324,17 @@ export const TriggerVariants: Story = {
           <ModelPicker
             models={DEMO_MODELS}
             selectedModelId="claude-opus-5-5"
+            onSelectModel={() => {}}
+            variant="field"
+          />
+        </div>
+        <div className="space-y-1">
+          <span className="block text-[11px] font-medium text-[var(--xd-ink-secondary)]">
+            Design (field · missing model)
+          </span>
+          <ModelPicker
+            models={DEMO_MODELS}
+            selectedModelId="legacy/removed-model"
             onSelectModel={() => {}}
             variant="field"
           />
