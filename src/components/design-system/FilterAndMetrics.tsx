@@ -22,6 +22,8 @@ import {
   getCategoryLabel,
   formatBytes,
 } from './NavigationShell'
+import { ModelPicker } from '#/components/model-picker'
+import type { ModelPickerInputOption } from '#/components/model-picker'
 
 /* ============================================================================
    1. FilterPillBar — Clean Horizontal Filter & Search Bar
@@ -400,9 +402,12 @@ export function TemplateGalleryCard({
    ============================================================================ */
 
 export interface AgentHeroComposerProps {
-  models?: Pick<AIModelSpec, 'id' | 'name' | 'providerId' | 'badge' | 'role'>[]
+  models?: ModelPickerInputOption[]
   selectedModelId?: string
   onSelectModel?: (modelId: string) => void
+  favoriteModelIds?: string[]
+  onFavoriteModelIdsChange?: (ids: string[]) => void
+  onOpenProviders?: () => void
   onSubmitPrompt?: (prompt: string, modelId: string) => void
   onTriggerSketchMode?: () => void
   onTriggerAttachNode?: () => void
@@ -491,6 +496,9 @@ export function AgentHeroComposer({
   models = DEFAULT_COMPOSER_MODELS,
   selectedModelId = 'grok-4.7',
   onSelectModel,
+  favoriteModelIds,
+  onFavoriteModelIdsChange,
+  onOpenProviders,
   onSubmitPrompt,
   onQuickStartTemplate,
 }: AgentHeroComposerProps) {
@@ -552,25 +560,18 @@ export function AgentHeroComposer({
           </div>
 
           <div className="flex items-center gap-1.5">
-            <div className="relative inline-flex items-center">
-              <select
-                aria-label="Select model"
-                value={currentModelId}
-                onChange={(e) => handleModelChange(e.target.value)}
-                className="h-6 appearance-none rounded bg-transparent pr-5 pl-2 text-[11.5px] font-medium text-[var(--xd-ink-secondary)] hover:text-[var(--xd-ink)] focus:outline-none"
-              >
-                {models.map((m) => (
-                  <option
-                    key={m.id}
-                    value={m.id}
-                    className="bg-[var(--xd-canvas)] text-[var(--xd-ink)]"
-                  >
-                    {m.name}
-                  </option>
-                ))}
-              </select>
-              <ChevronDown className="pointer-events-none absolute right-1 h-3 w-3 text-[var(--xd-ink-muted)]" />
-            </div>
+            <ModelPicker
+              models={models}
+              selectedModelId={currentModelId}
+              onSelectModel={handleModelChange}
+              favoriteModelIds={favoriteModelIds}
+              onFavoriteModelIdsChange={onFavoriteModelIdsChange}
+              onOpenProviders={onOpenProviders}
+              size="xs"
+              side="bottom"
+              align="end"
+              ariaLabel="Select model"
+            />
 
             <button
               type="submit"

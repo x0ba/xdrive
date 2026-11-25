@@ -2,35 +2,28 @@ import { useEffect, useId, useMemo, useRef, useState } from 'react'
 import {
   AtSign,
   Check,
-  ChevronDown,
   Eye,
   Folder,
   Globe,
   HardDrive,
-  KeyRound,
   Plus,
   Search,
   ShieldCheck,
-  Sparkles,
   Square,
-  Star,
   X,
   Zap,
 } from 'lucide-react'
 import { getCategoryIcon } from '#/components/design-system/NavigationShell'
 import { getFolderPathLabel } from '#/components/design-system/DriveExplorer'
-import type { AIProviderId, DriveFolder, MarbleDocumentFile } from '#/lib/types'
-import {
-  DRIVE_CHAT_MODE_META,
-  REASONING_EFFORT_META,
-} from '#/lib/ai/drive-chat-types'
+import { ModelPicker } from '#/components/model-picker'
+import type { DriveFolder, MarbleDocumentFile } from '#/lib/types'
+import { DRIVE_CHAT_MODE_META } from '#/lib/ai/drive-chat-types'
 import type {
   DriveChatMode,
   DriveChatModelOption,
   DriveContextRef,
   ReasoningEffort,
 } from '#/lib/ai/drive-chat-types'
-import { EffortGlyph, ProviderGlyph } from './ProviderGlyph'
 import { cn } from '#/lib/utils'
 
 export interface ChatComposerProps {
@@ -60,10 +53,7 @@ export interface ChatComposerProps {
   className?: string
 }
 
-type OpenMenu = 'context' | 'model' | 'reasoning' | 'mode' | null
-type ModelRailTab = 'favorites' | AIProviderId
-
-const FAVORITES_STORAGE_KEY = 'xdrive.drive-chat.favorite-models.v1'
+type OpenMenu = 'context' | 'mode' | null
 
 const COMPOSER_CONTROL_CLASS =
   'relative inline-flex h-7 shrink-0 cursor-pointer items-center justify-center gap-1.5 whitespace-nowrap rounded-lg border border-transparent px-2 text-[12.5px] font-medium text-[var(--xd-ink-secondary)] outline-none transition-colors hover:bg-[var(--xd-surface-hover)] hover:text-[var(--xd-ink)] focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--xd-accent)] disabled:pointer-events-none disabled:opacity-45'
@@ -80,26 +70,6 @@ function ModeIcon({
   return <ShieldCheck className={className} />
 }
 
-function loadFavoriteModels(models: DriveChatModelOption[]): string[] {
-  if (typeof window !== 'undefined') {
-    try {
-      const raw = window.localStorage.getItem(FAVORITES_STORAGE_KEY)
-      if (raw) {
-        const parsed: unknown = JSON.parse(raw)
-        if (Array.isArray(parsed)) {
-          return parsed.filter((id): id is string => typeof id === 'string')
-        }
-      }
-    } catch {
-      // ignore storage failures
-    }
-  }
-  return models
-    .filter((m) => m.connected)
-    .slice(0, 3)
-    .map((m) => m.id)
-}
-
 export function ChatComposer({
   value,
   onChange,
@@ -110,7 +80,7 @@ export function ChatComposer({
   models,
   selectedModelId,
   onSelectModel,
-  favoriteModelIds: controlledFavoriteIds,
+  favoriteModelIds,
   onFavoriteModelIdsChange,
   reasoningEffort,
   onSelectReasoningEffort,
@@ -127,18 +97,10 @@ export function ChatComposer({
   className,
 }: ChatComposerProps) {
   const [openMenu, setOpenMenu] = useState<OpenMenu>(null)
-  const [modelSearch, setModelSearch] = useState('')
   const [contextSearch, setContextSearch] = useState('')
-  const [internalFavoriteIds, setInternalFavoriteIds] = useState<string[]>(
-    () => controlledFavoriteIds ?? loadFavoriteModels(models),
-  )
-  const favoriteIds = controlledFavoriteIds ?? internalFavoriteIds
-  const [activeProviderTab, setActiveProviderTab] =
-    useState<ModelRailTab>('favorites')
 
   const rootRef = useRef<HTMLDivElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
-  const modelSearchRef = useRef<HTMLInputElement>(null)
   const textareaId = useId()
 
   const activeModel = useMemo(
@@ -149,17 +111,6 @@ export function ChatComposer({
       null,
     [models, selectedModelId],
   )
-
-  const supportedEfforts: ReasoningEffort[] =
-    activeModel && activeModel.reasoningEfforts.length > 0
-      ? activeModel.reasoningEfforts
-      : ['off', 'low', 'medium', 'high', 'max']
-
-  const effectiveEffort: ReasoningEffort = supportedEfforts.includes(
-    reasoningEffort,
-  )
-    ? reasoningEffort
-    : (supportedEfforts.at(-1) ?? 'off')
 
   useEffect(() => {
     const el = textareaRef.current
@@ -188,54 +139,6 @@ export function ChatComposer({
     }
   }, [openMenu])
 
-  const providerTabs = useMemo(() => {
-    const map = new Map<
-      AIProviderId,
-      {
-        providerId: AIProviderId
-        providerName: string
-        connected: boolean
-        status: DriveChatModelOption['status']
-        models: DriveChatModelOption[]
-      }
-    >()
-    for (const model of models) {
-      let entry = map.get(model.providerId)
-      if (!entry) {
-        entry = {
-          providerId: model.providerId,
-          providerName: model.providerName,
-          connected: model.connected,
-          status: model.status,
-          models: [],
-        }
-        map.set(model.providerId, entry)
-      }
-      entry.models.push(model)
-    }
-    return [...map.values()].sort(
-      (a, b) => Number(b.connected) - Number(a.connected),
-    )
-  }, [models])
-
-  const favoriteSet = useMemo(() => new Set(favoriteIds), [favoriteIds])
-
-  const visibleModels = useMemo(() => {
-    const needle = modelSearch.trim().toLowerCase()
-    if (needle) {
-      return models.filter((model) =>
-        `${model.name} ${model.providerName} ${model.id} ${model.description ?? ''}`
-          .toLowerCase()
-          .includes(needle),
-      )
-    }
-    if (activeProviderTab === 'favorites') {
-      const favs = models.filter((m) => favoriteSet.has(m.id))
-      return favs.length > 0 ? favs : models.filter((m) => m.connected)
-    }
-    return models.filter((m) => m.providerId === activeProviderTab)
-  }, [models, modelSearch, activeProviderTab, favoriteSet])
-
   const attachedKeys = useMemo(
     () => new Set(contextRefs.map((ref) => `${ref.kind}:${ref.id}`)),
     [contextRefs],
@@ -263,28 +166,6 @@ export function ChatComposer({
 
   const canSend = !disabled && !isStreaming && value.trim().length > 0
 
-  function toggleFavorite(modelId: string) {
-    const current = favoriteIds
-    const next = current.includes(modelId)
-      ? current.filter((id) => id !== modelId)
-      : [...current, modelId]
-    if (onFavoriteModelIdsChange) {
-      onFavoriteModelIdsChange(next)
-    } else {
-      setInternalFavoriteIds(next)
-      if (typeof window !== 'undefined') {
-        try {
-          window.localStorage.setItem(
-            FAVORITES_STORAGE_KEY,
-            JSON.stringify(next),
-          )
-        } catch {
-          // ignore
-        }
-      }
-    }
-  }
-
   function handleTextareaChange(next: string) {
     onChange(next)
     if (/(?:^|\s)@$/.test(next)) {
@@ -307,27 +188,7 @@ export function ChatComposer({
     textareaRef.current?.focus()
   }
 
-  function openModelMenu() {
-    setModelSearch('')
-    if (openMenu === 'model') {
-      setOpenMenu(null)
-      return
-    }
-    if (activeModel) {
-      setActiveProviderTab(
-        favoriteSet.has(activeModel.id) ? 'favorites' : activeModel.providerId,
-      )
-    }
-    setOpenMenu('model')
-  }
-
   const modeMeta = DRIVE_CHAT_MODE_META[mode]
-  const effortMeta = REASONING_EFFORT_META[effectiveEffort]
-  const activeTabInfo =
-    activeProviderTab === 'favorites'
-      ? null
-      : (providerTabs.find((tab) => tab.providerId === activeProviderTab) ??
-        null)
 
   return (
     <div
@@ -397,358 +258,22 @@ export function ChatComposer({
         {/* Bottom Controls Bar (T3 Code ComposerControlsBar + ComposerPrimaryActions) */}
         <div className="flex items-center justify-between gap-2 px-2.5 pb-2.5 pt-0.5">
           <div className="flex min-w-0 flex-wrap items-center gap-0.5">
-            {/* 1. Provider + Model Picker (T3 Code two-pane rail + searchable list) */}
-            <div className="relative">
-              <button
-                type="button"
-                aria-haspopup="dialog"
-                aria-expanded={openMenu === 'model'}
-                onClick={openModelMenu}
-                className={cn(
-                  COMPOSER_CONTROL_CLASS,
-                  'max-w-[230px] pe-1.5',
-                  openMenu === 'model' &&
-                    'bg-[var(--xd-surface-hover)] text-[var(--xd-ink)]',
-                )}
-              >
-                {activeModel ? (
-                  <ProviderGlyph
-                    providerId={activeModel.providerId}
-                    className={cn(
-                      'size-3.5',
-                      activeModel.connected
-                        ? 'text-[var(--xd-ink)]'
-                        : 'text-[var(--xd-ink-muted)]',
-                    )}
-                  />
-                ) : (
-                  <Sparkles className="size-3.5 text-[var(--xd-ink-muted)]" />
-                )}
-                <span className="truncate text-[var(--xd-ink)]">
-                  {activeModel ? activeModel.name : 'Select model'}
-                </span>
-                <ChevronDown className="size-3 shrink-0 text-[var(--xd-ink-muted)]" />
-              </button>
-
-              {openMenu === 'model' && (
-                <div
-                  role="dialog"
-                  aria-label="Select AI provider and model"
-                  className="absolute bottom-full left-0 z-50 mb-2 flex h-[324px] w-[min(430px,calc(100vw-2rem))] overflow-hidden rounded-xl border border-[var(--xd-border-strong)] bg-[var(--xd-elevated)] shadow-2xl"
-                >
-                  {/* Left Provider Icon Rail (T3 Code ModelPickerSidebar) */}
-                  <div
-                    role="tablist"
-                    aria-label="Providers"
-                    className="flex w-11 shrink-0 flex-col items-center gap-1 border-r border-[var(--xd-border)] bg-[var(--xd-rail)] py-2"
-                  >
-                    <button
-                      type="button"
-                      role="tab"
-                      aria-selected={activeProviderTab === 'favorites'}
-                      title="Favorites"
-                      onClick={() => {
-                        setModelSearch('')
-                        setActiveProviderTab('favorites')
-                        modelSearchRef.current?.focus()
-                      }}
-                      className={cn(
-                        'relative flex size-8 items-center justify-center rounded-lg transition-colors',
-                        activeProviderTab === 'favorites' && !modelSearch
-                          ? 'bg-[var(--xd-surface-active)] text-[var(--xd-ink)]'
-                          : 'text-[var(--xd-ink-muted)] hover:bg-[var(--xd-surface-hover)] hover:text-[var(--xd-ink)]',
-                      )}
-                    >
-                      {activeProviderTab === 'favorites' && !modelSearch && (
-                        <span className="absolute top-1.5 bottom-1.5 -left-1.5 w-[2.5px] rounded-r-full bg-[var(--xd-ink)]" />
-                      )}
-                      <Star className="size-3.5" />
-                    </button>
-
-                    <div className="my-0.5 h-px w-5 bg-[var(--xd-border)]" />
-
-                    {providerTabs.map((tab) => {
-                      const selected =
-                        activeProviderTab === tab.providerId && !modelSearch
-                      return (
-                        <button
-                          key={tab.providerId}
-                          type="button"
-                          role="tab"
-                          aria-selected={selected}
-                          title={`${tab.providerName}${tab.connected ? ' (Connected)' : ' (Disconnected)'}`}
-                          onClick={() => {
-                            setModelSearch('')
-                            setActiveProviderTab(tab.providerId)
-                            modelSearchRef.current?.focus()
-                          }}
-                          className={cn(
-                            'relative flex size-8 items-center justify-center rounded-lg transition-colors',
-                            selected
-                              ? 'bg-[var(--xd-surface-active)] text-[var(--xd-ink)]'
-                              : tab.connected
-                                ? 'text-[var(--xd-ink-secondary)] hover:bg-[var(--xd-surface-hover)] hover:text-[var(--xd-ink)]'
-                                : 'text-[var(--xd-ink-muted)]/60 hover:bg-[var(--xd-surface-hover)] hover:text-[var(--xd-ink-secondary)]',
-                          )}
-                        >
-                          {selected && (
-                            <span className="absolute top-1.5 bottom-1.5 -left-1.5 w-[2.5px] rounded-r-full bg-[var(--xd-ink)]" />
-                          )}
-                          <ProviderGlyph
-                            providerId={tab.providerId}
-                            className="size-4"
-                          />
-                          <span
-                            className={cn(
-                              'absolute right-1 bottom-1 size-1.5 rounded-full ring-2 ring-[var(--xd-rail)]',
-                              tab.status === 'active'
-                                ? 'bg-[var(--xd-commit)]'
-                                : tab.status === 'rate_limited'
-                                  ? 'bg-[var(--xd-sketch)]'
-                                  : 'bg-[var(--xd-ink-subtle)]/70',
-                            )}
-                          />
-                        </button>
-                      )
-                    })}
-                  </div>
-
-                  {/* Right Model Search & List Column (T3 Code ModelPickerContent + ModelListRow) */}
-                  <div className="flex min-w-0 flex-1 flex-col">
-                    <div className="flex items-center gap-2 border-b border-[var(--xd-border)] px-3 py-2">
-                      <Search className="size-3.5 shrink-0 text-[var(--xd-ink-muted)]" />
-                      <input
-                        ref={modelSearchRef}
-                        type="text"
-                        autoFocus
-                        value={modelSearch}
-                        onChange={(event) => setModelSearch(event.target.value)}
-                        placeholder="Search models…"
-                        className="w-full bg-transparent text-[12.5px] text-[var(--xd-ink)] outline-none placeholder:text-[var(--xd-ink-muted)]"
-                      />
-                    </div>
-
-                    <div className="min-h-0 flex-1 overflow-y-auto p-1.5">
-                      <div className="flex items-center justify-between px-2 py-1 text-[11px] text-[var(--xd-ink-muted)]">
-                        <span>
-                          {modelSearch
-                            ? 'Search results'
-                            : activeProviderTab === 'favorites'
-                              ? 'Favorites'
-                              : (activeTabInfo?.providerName ?? 'Models')}
-                        </span>
-                        {activeTabInfo && !modelSearch && (
-                          <span
-                            className={cn(
-                              activeTabInfo.connected
-                                ? 'text-[var(--xd-commit)]'
-                                : 'text-[var(--xd-ink-muted)]',
-                            )}
-                          >
-                            {activeTabInfo.connected
-                              ? 'Connected'
-                              : 'Not connected'}
-                          </span>
-                        )}
-                      </div>
-
-                      {visibleModels.length === 0 ? (
-                        <p className="px-2 py-8 text-center text-[12px] text-[var(--xd-ink-muted)]">
-                          No matching models.
-                        </p>
-                      ) : (
-                        <div
-                          role="listbox"
-                          aria-label="Models"
-                          className="space-y-0.5"
-                        >
-                          {visibleModels.map((model) => {
-                            const isSelected = activeModel?.id === model.id
-                            const isFav = favoriteSet.has(model.id)
-                            return (
-                              <div
-                                key={model.id}
-                                role="option"
-                                aria-selected={isSelected}
-                                onClick={() => {
-                                  onSelectModel(model.id)
-                                  setOpenMenu(null)
-                                }}
-                                onKeyDown={(event) => {
-                                  if (
-                                    event.key === 'Enter' ||
-                                    event.key === ' '
-                                  ) {
-                                    event.preventDefault()
-                                    onSelectModel(model.id)
-                                    setOpenMenu(null)
-                                  }
-                                }}
-                                tabIndex={0}
-                                className={cn(
-                                  'group flex w-full cursor-pointer items-center gap-2 rounded-lg px-2 py-1.5 text-left transition-colors outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--xd-accent)]',
-                                  isSelected
-                                    ? 'bg-[var(--xd-surface-active)] text-[var(--xd-ink)]'
-                                    : 'text-[var(--xd-ink-secondary)] hover:bg-[var(--xd-surface-hover)] hover:text-[var(--xd-ink)]',
-                                )}
-                              >
-                                <ProviderGlyph
-                                  providerId={model.providerId}
-                                  className={cn(
-                                    'size-3.5 shrink-0',
-                                    model.connected
-                                      ? 'text-[var(--xd-ink-secondary)]'
-                                      : 'text-[var(--xd-ink-muted)]/60',
-                                  )}
-                                />
-
-                                <div className="flex min-w-0 flex-1 items-center gap-1.5">
-                                  <span className="truncate text-[13px] text-[var(--xd-ink)]">
-                                    {model.name}
-                                  </span>
-                                  {isSelected && (
-                                    <Check className="size-3.5 shrink-0 text-[var(--xd-ink)]" />
-                                  )}
-                                  {!model.connected && (
-                                    <span className="shrink-0 rounded border border-[var(--xd-border)] px-1 py-px text-[10px] text-[var(--xd-ink-muted)]">
-                                      Off
-                                    </span>
-                                  )}
-                                </div>
-
-                                <div className="flex shrink-0 items-center gap-1">
-                                  <span className="xd-mono text-[10.5px] text-[var(--xd-ink-muted)]">
-                                    {model.contextWindow}
-                                  </span>
-                                  <button
-                                    type="button"
-                                    onClick={(event) => {
-                                      event.stopPropagation()
-                                      toggleFavorite(model.id)
-                                    }}
-                                    aria-label={
-                                      isFav
-                                        ? `Remove ${model.name} from favorites`
-                                        : `Add ${model.name} to favorites`
-                                    }
-                                    className={cn(
-                                      'inline-flex size-5 items-center justify-center rounded text-[var(--xd-ink-muted)] transition-opacity hover:bg-[var(--xd-surface-active)] hover:text-[var(--xd-ink)]',
-                                      isFav
-                                        ? 'text-[var(--xd-sketch)] opacity-100'
-                                        : 'opacity-0 group-hover:opacity-100 focus-visible:opacity-100',
-                                    )}
-                                  >
-                                    <Star
-                                      className={cn(
-                                        'size-3',
-                                        isFav && 'fill-current',
-                                      )}
-                                    />
-                                  </button>
-                                </div>
-                              </div>
-                            )
-                          })}
-                        </div>
-                      )}
-                    </div>
-
-                    {onOpenProviders && (
-                      <div className="border-t border-[var(--xd-border)] bg-[var(--xd-rail)]/70 p-1.5">
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setOpenMenu(null)
-                            onOpenProviders()
-                          }}
-                          className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-[12px] font-medium text-[var(--xd-ink-secondary)] transition-colors hover:bg-[var(--xd-surface-hover)] hover:text-[var(--xd-ink)]"
-                        >
-                          <KeyRound className="size-3.5 text-[var(--xd-ink-muted)]" />
-                          <span>Manage providers &amp; plans</span>
-                        </button>
-                      </div>
-                    )}
-                  </div>
-                </div>
-              )}
-            </div>
-
-            {/* 2. Reasoning Effort Picker (T3 Code EffortGlyph + TraitsPicker) */}
-            <div className="relative">
-              <button
-                type="button"
-                aria-haspopup="listbox"
-                aria-expanded={openMenu === 'reasoning'}
-                disabled={!activeModel?.supportsReasoning}
-                onClick={() =>
-                  setOpenMenu((prev) =>
-                    prev === 'reasoning' ? null : 'reasoning',
-                  )
-                }
-                title={
-                  activeModel?.supportsReasoning
-                    ? `Reasoning effort: ${effortMeta.label}`
-                    : 'Selected model does not expose reasoning controls'
-                }
-                className={cn(
-                  COMPOSER_CONTROL_CLASS,
-                  openMenu === 'reasoning' &&
-                    'bg-[var(--xd-surface-hover)] text-[var(--xd-ink)]',
-                )}
-              >
-                <EffortGlyph count={4} filled={effortMeta.bars} size="sm" />
-                <span>{effortMeta.label}</span>
-              </button>
-
-              {openMenu === 'reasoning' && (
-                <div
-                  role="listbox"
-                  aria-label="Select reasoning effort"
-                  className="absolute bottom-full left-0 z-50 mb-2 w-64 overflow-hidden rounded-xl border border-[var(--xd-border-strong)] bg-[var(--xd-elevated)] p-1.5 shadow-2xl"
-                >
-                  <p className="px-2 py-1 text-[11px] font-medium text-[var(--xd-ink-muted)]">
-                    Reasoning effort
-                  </p>
-                  {supportedEfforts.map((effort) => {
-                    const meta = REASONING_EFFORT_META[effort]
-                    const selected = effectiveEffort === effort
-                    return (
-                      <button
-                        key={effort}
-                        type="button"
-                        role="option"
-                        aria-selected={selected}
-                        onClick={() => {
-                          onSelectReasoningEffort(effort)
-                          setOpenMenu(null)
-                        }}
-                        className={cn(
-                          'flex w-full items-center justify-between gap-2 rounded-lg px-2 py-1.5 text-left transition-colors',
-                          selected
-                            ? 'bg-[var(--xd-surface-active)] text-[var(--xd-ink)]'
-                            : 'text-[var(--xd-ink-secondary)] hover:bg-[var(--xd-surface-hover)] hover:text-[var(--xd-ink)]',
-                        )}
-                      >
-                        <div className="flex items-center gap-2.5">
-                          <EffortGlyph count={4} filled={meta.bars} size="sm" />
-                          <div>
-                            <div className="text-[12.5px] font-medium text-[var(--xd-ink)]">
-                              {meta.label}
-                            </div>
-                            <div className="text-[11px] text-[var(--xd-ink-muted)]">
-                              {meta.description}
-                            </div>
-                          </div>
-                        </div>
-                        {selected && (
-                          <Check className="size-3.5 shrink-0 text-[var(--xd-ink)]" />
-                        )}
-                      </button>
-                    )
-                  })}
-                </div>
-              )}
-            </div>
+            {/* 1. Shared T3-Code-style Model + Docked Reasoning Effort Picker */}
+            <ModelPicker
+              models={models}
+              selectedModelId={selectedModelId}
+              onSelectModel={onSelectModel}
+              favoriteModelIds={favoriteModelIds}
+              onFavoriteModelIdsChange={onFavoriteModelIdsChange}
+              reasoningEffort={reasoningEffort}
+              onSelectReasoningEffort={onSelectReasoningEffort}
+              effortDisplay="both"
+              onOpenProviders={onOpenProviders}
+              size="sm"
+              side="top"
+              align="start"
+              disabled={disabled}
+            />
 
             {/* 3. Permissions / Drive Access Picker (T3 Code ComposerPermissionsSection segmented bar) */}
             <div className="relative">

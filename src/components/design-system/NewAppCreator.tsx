@@ -1,4 +1,11 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react'
 import { createPortal } from 'react-dom'
 import {
   ArrowUp,
@@ -21,6 +28,8 @@ import type {
 import { DriveDocumentThumbnail, getFolderPathLabel } from './DriveExplorer'
 import { DEFAULT_COMPOSER_MODELS } from './FilterAndMetrics'
 import { getCategoryIcon, getCategoryLabel } from './NavigationShell'
+import { ModelPicker } from '#/components/model-picker'
+import type { ModelPickerInputOption } from '#/components/model-picker'
 
 export type NewAppMode = 'agent' | 'templates'
 
@@ -133,10 +142,7 @@ export function NewAppButton({
     const top = openAbove
       ? Math.max(margin, rect.top - gap - Math.min(440, availableAbove))
       : rect.bottom + gap
-    const maxHeight = Math.max(
-      180,
-      openAbove ? availableAbove : availableBelow,
-    )
+    const maxHeight = Math.max(180, openAbove ? availableAbove : availableBelow)
     setMenuPos({ top, left, maxHeight })
   }, [])
 
@@ -185,7 +191,7 @@ export function NewAppButton({
   const portalTarget =
     typeof document !== 'undefined'
       ? (rootRef.current?.closest('[data-component="xdrive-workspace"]') ??
-          document.body)
+        document.body)
       : null
 
   const menuContent =
@@ -318,7 +324,9 @@ export function NewAppButton({
         />
       </button>
 
-      {menuContent && portalTarget ? createPortal(menuContent, portalTarget) : null}
+      {menuContent && portalTarget
+        ? createPortal(menuContent, portalTarget)
+        : null}
     </div>
   )
 }
@@ -333,9 +341,12 @@ export interface NewAppModalProps {
   templates: MarbleDocumentFile[]
   folders?: DriveFolder[]
   initialFolderId?: string | null
-  models?: NewAppModelOption[]
+  models?: ModelPickerInputOption[]
   selectedModelId?: string
   onSelectModel?: (modelId: string) => void
+  favoriteModelIds?: string[]
+  onFavoriteModelIdsChange?: (ids: string[]) => void
+  onOpenProviders?: () => void
   onClose: () => void
   onBuildWithAgent: (input: {
     prompt: string
@@ -359,6 +370,9 @@ export function NewAppModal({
   models = DEFAULT_COMPOSER_MODELS,
   selectedModelId,
   onSelectModel,
+  favoriteModelIds,
+  onFavoriteModelIdsChange,
+  onOpenProviders,
   onClose,
   onBuildWithAgent,
   onCreateFromTemplate,
@@ -394,7 +408,13 @@ export function NewAppModal({
   useEffect(() => {
     if (!open) return
     function onKeyDown(event: KeyboardEvent) {
-      if (event.key === 'Escape') onClose()
+      if (
+        event.key === 'Escape' &&
+        !event.defaultPrevented &&
+        !document.querySelector('[data-xdrive-model-picker-popup]')
+      ) {
+        onClose()
+      }
     }
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
@@ -593,28 +613,28 @@ export function NewAppModal({
               />
 
               <div className="flex flex-wrap items-center justify-between gap-2 border-t border-[var(--xd-border)] bg-[var(--xd-rail)] px-3 py-2">
-                <div className="relative inline-flex items-center">
-                  <select
-                    aria-label="Select AI model"
-                    value={currentModelId}
-                    onChange={(e) => {
-                      setCurrentModelId(e.target.value)
-                      onSelectModel?.(e.target.value)
-                    }}
-                    className="h-7 appearance-none rounded border border-[var(--xd-border)] bg-[var(--xd-canvas)] pr-6 pl-2.5 text-[12px] font-medium text-[var(--xd-ink)] focus:border-[var(--xd-accent)] focus:outline-none"
-                  >
-                    {models.map((m) => (
-                      <option
-                        key={m.id}
-                        value={m.id}
-                        className="bg-[var(--xd-canvas)] text-[var(--xd-ink)]"
-                      >
-                        {m.name}
-                      </option>
-                    ))}
-                  </select>
-                  <ChevronDown className="pointer-events-none absolute right-2 h-3 w-3 text-[var(--xd-ink-muted)]" />
-                </div>
+                <ModelPicker
+                  models={models}
+                  selectedModelId={currentModelId}
+                  onSelectModel={(nextId) => {
+                    setCurrentModelId(nextId)
+                    onSelectModel?.(nextId)
+                  }}
+                  favoriteModelIds={favoriteModelIds}
+                  onFavoriteModelIdsChange={onFavoriteModelIdsChange}
+                  onOpenProviders={
+                    onOpenProviders
+                      ? () => {
+                          onClose()
+                          onOpenProviders()
+                        }
+                      : undefined
+                  }
+                  size="sm"
+                  side="top"
+                  align="start"
+                  ariaLabel="Select AI model"
+                />
 
                 <div className="flex items-center gap-2">
                   <span className="xd-mono hidden text-[10.5px] text-[var(--xd-ink-muted)] sm:inline">

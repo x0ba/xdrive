@@ -1,6 +1,5 @@
 export {
   FloatingPromptBar,
-  ModelSelect,
   PROMPT_MODELS,
   type ConnectedModelOption,
   type FloatingPromptBarHandle,

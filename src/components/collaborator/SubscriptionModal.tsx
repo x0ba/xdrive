@@ -23,6 +23,10 @@ import type {
 } from '#/lib/ai/opencode-go-types'
 import { openCodeGoModelsToSpecs } from '#/lib/ai/opencode-go-client'
 import { Switch } from '#/components/ui/switch'
+import {
+  ModelPicker,
+  modelPickerOptionsFromSubscriptions,
+} from '#/components/model-picker'
 import type { ConnectedModelOption } from '#/components/collaborator/FloatingPromptBar'
 import { cn } from '#/lib/utils'
 
@@ -257,6 +261,8 @@ export interface SubscriptionModalProps {
   variant?: 'modal' | 'page'
   subscriptions?: ManagedSubscription[]
   roleAssignments?: RoleAssignments
+  favoriteModelIds?: string[]
+  onFavoriteModelIdsChange?: (ids: string[]) => void
   onChange?: (
     subscriptions: ManagedSubscription[],
     roles: RoleAssignments,
@@ -289,6 +295,8 @@ export function SubscriptionModal({
   variant = 'modal',
   subscriptions: subscriptionsProp,
   roleAssignments: rolesProp,
+  favoriteModelIds,
+  onFavoriteModelIdsChange,
   onChange,
   antigravityStatus = null,
   antigravityBusy = null,
@@ -325,7 +333,13 @@ export function SubscriptionModal({
   useEffect(() => {
     if (!open || variant !== 'modal') return
     const onKey = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') onOpenChange?.(false)
+      if (
+        event.key === 'Escape' &&
+        !event.defaultPrevented &&
+        !document.querySelector('[data-xdrive-model-picker-popup]')
+      ) {
+        onOpenChange?.(false)
+      }
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
@@ -403,7 +417,7 @@ export function SubscriptionModal({
     })
   }
 
-  const connectedModels = connectedModelsFromSubscriptions(subscriptions)
+  const rolePickerModels = modelPickerOptionsFromSubscriptions(subscriptions)
   const isAntigravity = active.providerId === 'antigravity'
   const isOpenCodeGo = active.providerId === 'opencode-go'
   const binaryAvailable = antigravityStatus?.binaryAvailable ?? true
@@ -1197,41 +1211,31 @@ export function SubscriptionModal({
 
       {/* Role assignments */}
       <div className="border-t border-[var(--xd-border)] bg-[var(--xd-rail)]/40 px-4 py-3">
-        <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
-          {ROLE_FIELDS.map((field) => {
-            const selected = connectedModels.find(
-              (item) => item.id === roles[field.key],
-            )
-            return (
-              <label key={field.key} className="block">
-                <span className="block text-[11px] font-medium text-[var(--xd-ink-secondary)]">
-                  {field.label}
-                </span>
-                <select
-                  aria-label={field.label}
-                  value={roles[field.key]}
-                  onChange={(event) =>
-                    commit(subscriptions, {
-                      ...roles,
-                      [field.key]: event.target.value,
-                    })
-                  }
-                  className="mt-1 h-7 w-full rounded border border-[var(--xd-border)] bg-[var(--xd-canvas)] px-1.5 text-[11.5px]"
-                >
-                  {connectedModels.map((item) => (
-                    <option key={item.id} value={item.id}>
-                      {item.modelName}
-                    </option>
-                  ))}
-                  {!selected && (
-                    <option value={roles[field.key]}>
-                      {roles[field.key]} (off)
-                    </option>
-                  )}
-                </select>
-              </label>
-            )
-          })}
+        <div className="grid gap-2.5 sm:grid-cols-2 lg:grid-cols-4">
+          {ROLE_FIELDS.map((field) => (
+            <div key={field.key} className="space-y-1">
+              <span className="block text-[11px] font-medium text-[var(--xd-ink-secondary)]">
+                {field.label}
+              </span>
+              <ModelPicker
+                models={rolePickerModels}
+                selectedModelId={roles[field.key]}
+                onSelectModel={(nextModelId) =>
+                  commit(subscriptions, {
+                    ...roles,
+                    [field.key]: nextModelId,
+                  })
+                }
+                favoriteModelIds={favoriteModelIds}
+                onFavoriteModelIdsChange={onFavoriteModelIdsChange}
+                variant="field"
+                size="sm"
+                side="top"
+                align="start"
+                ariaLabel={field.label}
+              />
+            </div>
+          ))}
         </div>
       </div>
     </div>

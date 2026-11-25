@@ -25,10 +25,10 @@ import {
   resolveModel,
 } from '#/components/collaborator/FloatingPromptBar'
 import type {
-  ConnectedModelOption,
   FloatingPromptBarHandle,
   MarbleIntentRequest,
 } from '#/components/collaborator/FloatingPromptBar'
+import type { ModelPickerInputOption } from '#/components/model-picker'
 import {
   aiIsBlocked,
   permissionByLevel,
@@ -289,9 +289,12 @@ export interface SelectionSketchOverlayProps {
   mode?: CanvasInteractionMode
   nodes?: StageNode[]
   permission?: SharePermissionLevel
-  models?: ConnectedModelOption[]
+  models?: ModelPickerInputOption[]
   modelId?: string
   onModelChange?: (modelId: string) => void
+  favoriteModelIds?: string[]
+  onFavoriteModelIdsChange?: (ids: string[]) => void
+  onOpenProviders?: () => void
   selectedIds?: string[]
   initialSelectedIds?: string[]
   onSelectedIdsChange?: (ids: string[]) => void
@@ -313,6 +316,9 @@ export function SelectionSketchOverlay({
   models = PROMPT_MODELS,
   modelId,
   onModelChange,
+  favoriteModelIds,
+  onFavoriteModelIdsChange,
+  onOpenProviders,
   selectedIds: selectedIdsProp,
   initialSelectedIds = [],
   onSelectedIdsChange,
@@ -867,7 +873,8 @@ export function SelectionSketchOverlay({
           >
             {liveScale && (
               <span className="xd-tabular absolute -top-5 left-0 rounded bg-[var(--xd-accent)] px-1.5 py-0.5 text-[10px] text-white">
-                {liveScale.gesture.x.toFixed(2)}×{liveScale.gesture.y.toFixed(2)}
+                {liveScale.gesture.x.toFixed(2)}×
+                {liveScale.gesture.y.toFixed(2)}
               </span>
             )}
             {CORNERS.map((corner) => (
@@ -1024,6 +1031,9 @@ export function SelectionSketchOverlay({
               models={models}
               modelId={modelId}
               onModelChange={onModelChange}
+              favoriteModelIds={favoriteModelIds}
+              onFavoriteModelIdsChange={onFavoriteModelIdsChange}
+              onOpenProviders={onOpenProviders}
               permission={permission}
               prompt={prompt}
               onPromptChange={setPrompt}
