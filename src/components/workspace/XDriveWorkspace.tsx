@@ -138,8 +138,12 @@ import type {
 import {
   applyOpenCodeGoStatusToSubscriptions,
   fetchOpenCodeGoStatus,
+  isOpenCodeUsable,
 } from '#/lib/ai/opencode-go-client'
-import { toXDriveOpenCodeGoModelId } from '#/lib/ai/opencode-go-types'
+import {
+  isOpenCodeModelId,
+  toXDriveOpenCodeGoModelId,
+} from '#/lib/ai/opencode-go-types'
 import type { OpenCodeGoRuntimeStatus } from '#/lib/ai/opencode-go-types'
 import type {
   AIMessage,
@@ -559,7 +563,7 @@ function providerFor(
 ): AIProviderId {
   const match = models.find((model) => model.id === modelId)
   if (match) return match.providerId
-  if (modelId.startsWith('opencode-go/')) return 'opencode-go'
+  if (isOpenCodeModelId(modelId)) return 'opencode-go'
   if (modelId.startsWith('antigravity/') || modelId.startsWith('gemini')) {
     return 'antigravity'
   }
@@ -1762,8 +1766,7 @@ export function XDriveWorkspace({
           : 'antigravity/default'
       setModelId((current) =>
         current === 'antigravity/default' ||
-        (!current.startsWith('antigravity/') &&
-          !current.startsWith('opencode-go/'))
+        (!current.startsWith('antigravity/') && !isOpenCodeModelId(current))
           ? preferred
           : current,
       )
@@ -1787,7 +1790,7 @@ export function XDriveWorkspace({
     setSubscriptions((prev) =>
       applyOpenCodeGoStatusToSubscriptions(prev, status),
     )
-    if (status.authenticated && status.entitled) {
+    if (isOpenCodeUsable(status)) {
       const preferred = status.currentModelId
         ? toXDriveOpenCodeGoModelId(status.currentModelId)
         : status.models[0]
@@ -2579,7 +2582,7 @@ export function XDriveWorkspace({
       threadId,
       label:
         input.providerId === 'opencode-go'
-          ? `Running ${openCodeGoStatus?.transport === 'http-fallback' ? 'OpenCode Go' : 'OpenCode ACP'} (${input.model.replace(/^opencode-go\//, '')})…`
+          ? `Running ${openCodeGoStatus?.transport === 'http-fallback' ? 'OpenCode Go' : 'OpenCode ACP'} (${input.model.replace(/^opencode-go\/(?:opencode\/)?/, '')})…`
           : `Running Google Antigravity ACP (${input.model.replace(/^antigravity\//, '')})…`,
     })
     try {
@@ -5680,8 +5683,7 @@ export function XDriveWorkspace({
               antigravityStatus || openCodeGoStatus
                 ? Boolean(
                     antigravityStatus?.authenticated ||
-                    (openCodeGoStatus?.authenticated &&
-                      openCodeGoStatus.entitled),
+                    (openCodeGoStatus && isOpenCodeUsable(openCodeGoStatus)),
                   )
                 : undefined
             }

@@ -10,7 +10,10 @@ import {
   runOpenCodePrompt,
 } from '#/lib/ai/opencode-acp.server'
 import { OpenCodeGoError } from '#/lib/ai/opencode-go.server'
-import { toXDriveOpenCodeGoModelId } from '#/lib/ai/opencode-go-types'
+import {
+  isOpenCodeModelId,
+  toXDriveOpenCodeGoModelId,
+} from '#/lib/ai/opencode-go-types'
 import {
   buildMarbleAcpPrompt,
   parseMarbleAcpResponse,
@@ -75,7 +78,7 @@ function resolveProviderId(body: Record<string, unknown>): string {
     return body.providerId.trim()
   }
   if (typeof body.modelId === 'string') {
-    if (body.modelId.startsWith('opencode-go/')) return 'opencode-go'
+    if (isOpenCodeModelId(body.modelId)) return 'opencode-go'
     if (body.modelId.startsWith('antigravity/')) return 'antigravity'
   }
   return 'antigravity'

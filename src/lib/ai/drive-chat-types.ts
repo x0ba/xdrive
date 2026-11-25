@@ -25,6 +25,7 @@ export interface DriveChatModelOption {
   reasoningEfforts: ReasoningEffort[]
   description?: string
   badge?: string
+  isFree?: boolean
 }
 
 export type DriveContextRef =
@@ -80,11 +81,7 @@ export interface DriveSnapshot {
 }
 
 export type DriveChatActionStatus =
-  | 'proposed'
-  | 'applied'
-  | 'discarded'
-  | 'undone'
-  | 'failed'
+  'proposed' | 'applied' | 'discarded' | 'undone' | 'failed'
 
 export interface DriveChatActionBase {
   id: string
@@ -238,7 +235,11 @@ export interface DriveChatApiRequest {
 }
 
 export type DriveChatStreamEvent =
-  | { type: 'status'; phase: 'thinking' | 'answering' | 'preparing_actions'; label: string }
+  | {
+      type: 'status'
+      phase: 'thinking' | 'answering' | 'preparing_actions'
+      label: string
+    }
   | { type: 'thought_delta'; delta: string }
   | { type: 'text_delta'; delta: string }
   | {
@@ -307,16 +308,19 @@ export const DRIVE_CHAT_MODE_META: Record<
   ask: {
     label: 'Ask only',
     shortLabel: 'Ask',
-    description: 'Query, compare, and inspect Drive files without modifying anything',
+    description:
+      'Query, compare, and inspect Drive files without modifying anything',
   },
   review: {
     label: 'Review changes',
     shortLabel: 'Review',
-    description: 'Propose Drive edits and organization as cards you approve or discard',
+    description:
+      'Propose Drive edits and organization as cards you approve or discard',
   },
   auto: {
     label: 'Auto-apply',
     shortLabel: 'Auto-apply',
-    description: 'Apply Drive changes immediately with one-click Undo on every action',
+    description:
+      'Apply Drive changes immediately with one-click Undo on every action',
   },
 }

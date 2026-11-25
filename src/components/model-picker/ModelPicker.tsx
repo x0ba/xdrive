@@ -13,6 +13,7 @@
  */
 
 import {
+  Fragment,
   memo,
   useCallback,
   useEffect,
@@ -157,7 +158,8 @@ function rankModelSearch(
     const idLower = model.id.toLowerCase()
     const providerLower = model.providerName.toLowerCase()
     const descLower = (model.description ?? '').toLowerCase()
-    const haystack = `${nameLower} ${providerLower} ${idLower} ${descLower}`
+    const freeToken = model.isFree ? 'free' : ''
+    const haystack = `${nameLower} ${providerLower} ${idLower} ${descLower} ${freeToken}`
 
     if (!tokens.every((token) => haystack.includes(token))) continue
 
@@ -167,6 +169,7 @@ function rankModelSearch(
     else if (nameLower.includes(needle)) score += 80
     if (providerLower.startsWith(needle)) score += 50
     else if (providerLower.includes(needle)) score += 30
+    if (model.isFree && tokens.includes('free')) score += 40
     if (idLower.includes(needle)) score += 20
     if (model.connected) score += 15
     if (favoriteSet.has(model.id)) score += 12
@@ -469,6 +472,15 @@ const ModelListRow = memo(function ModelListRow({
             className="size-3.5 shrink-0 text-[var(--xd-ink)]"
             aria-hidden="true"
           />
+        )}
+
+        {model.isFree && (
+          <span
+            data-model-free-badge="true"
+            className="shrink-0 rounded border border-[var(--xd-commit)]/35 bg-[var(--xd-commit-soft)] px-1 py-px text-[10px] leading-none font-medium text-[var(--xd-commit)]"
+          >
+            Free
+          </span>
         )}
 
         {!model.connected && (
@@ -874,28 +886,47 @@ export const ModelPicker = memo(function ModelPicker({
     ],
   )
 
-  const visibleModels = useMemo(() => {
+  const { visibleModels, freeSectionIndex, freeModelCount } = useMemo(() => {
     if (isSearching) {
-      return rankModelSearch(models, searchQuery, favoriteSet)
+      return {
+        visibleModels: rankModelSearch(models, searchQuery, favoriteSet),
+        freeSectionIndex: -1,
+        freeModelCount: 0,
+      }
     }
     if (selectedTab === 'favorites') {
       const favs = models.filter((m) => favoriteSet.has(m.id))
-      return favs.slice().sort((a, b) => {
-        const provDiff =
-          providerOrder.indexOf(a.providerId) -
-          providerOrder.indexOf(b.providerId)
-        if (provDiff !== 0) return provDiff
-        return a.name.localeCompare(b.name)
-      })
+      return {
+        visibleModels: favs.slice().sort((a, b) => {
+          const provDiff =
+            providerOrder.indexOf(a.providerId) -
+            providerOrder.indexOf(b.providerId)
+          if (provDiff !== 0) return provDiff
+          return a.name.localeCompare(b.name)
+        }),
+        freeSectionIndex: -1,
+        freeModelCount: 0,
+      }
     }
     const tabModels = models.filter((m) => m.providerId === selectedTab)
-    // Favorites sorted to top within provider tab, matching t3code's sortProviderModelItems
-    return tabModels.slice().sort((a, b) => {
-      const favDiff =
-        Number(favoriteSet.has(b.id)) - Number(favoriteSet.has(a.id))
-      if (favDiff !== 0) return favDiff
-      return 0
-    })
+    const sortByFavorite = (list: ModelPickerOption[]) =>
+      list.slice().sort((a, b) => {
+        const favDiff =
+          Number(favoriteSet.has(b.id)) - Number(favoriteSet.has(a.id))
+        if (favDiff !== 0) return favDiff
+        return 0
+      })
+
+    const standardModels = sortByFavorite(tabModels.filter((m) => !m.isFree))
+    const freeModels = sortByFavorite(
+      tabModels.filter((m) => Boolean(m.isFree)),
+    )
+
+    return {
+      visibleModels: [...standardModels, ...freeModels],
+      freeSectionIndex: freeModels.length > 0 ? standardModels.length : -1,
+      freeModelCount: freeModels.length,
+    }
   }, [
     models,
     isSearching,
@@ -912,16 +943,25 @@ export const ModelPicker = memo(function ModelPicker({
 
   // Compute stable popup height from the tallest tab so switching tabs never jumps the popover
   const stableMinHeightPx = useMemo(() => {
-    let maxRows = 0
+    let maxHeight = 0
     const favCount = models.filter((m) => favoriteSet.has(m.id)).length
-    maxRows = Math.max(maxRows, favCount)
-    for (const tab of providerTabs) {
-      maxRows = Math.max(maxRows, tab.models.length)
+    if (favCount > 0) {
+      maxHeight = Math.max(
+        maxHeight,
+        favCount * ROW_HEIGHT_PX + Math.max(0, favCount - 1) * ROW_GAP_PX,
+      )
     }
-    const contentHeight =
-      maxRows > 0
-        ? maxRows * ROW_HEIGHT_PX + Math.max(0, maxRows - 1) * ROW_GAP_PX
-        : 96
+    for (const tab of providerTabs) {
+      const count = tab.models.length
+      if (count === 0) continue
+      const hasFreeSection = tab.models.some((m) => Boolean(m.isFree))
+      const tabHeight =
+        count * ROW_HEIGHT_PX +
+        Math.max(0, count - 1) * ROW_GAP_PX +
+        (hasFreeSection ? 28 : 0)
+      maxHeight = Math.max(maxHeight, tabHeight)
+    }
+    const contentHeight = maxHeight > 0 ? maxHeight : 96
     return Math.min(
       contentHeight + LIST_CHROME_PX + (onOpenProviders ? 40 : 0),
       MAX_POPUP_HEIGHT_PX,
@@ -1244,6 +1284,12 @@ export const ModelPicker = memo(function ModelPicker({
                 </span>
               )}
 
+              {activeModel && activeModel.isFree && (
+                <span className="shrink-0 rounded border border-[var(--xd-commit)]/35 bg-[var(--xd-commit-soft)] px-1 py-px text-[10px] leading-none font-medium text-[var(--xd-commit)]">
+                  Free
+                </span>
+              )}
+
               {activeModel && !activeModel.connected && (
                 <span className="shrink-0 rounded border border-[var(--xd-border-strong)] px-1 py-px text-[10px] leading-none text-[var(--xd-ink-muted)]">
                   Off
@@ -1393,21 +1439,45 @@ export const ModelPicker = memo(function ModelPicker({
                       ) : (
                         <div className="flex flex-col gap-0.5">
                           {visibleModels.map((model, index) => (
-                            <ModelListRow
-                              key={model.id}
-                              id={optionId(index)}
-                              model={model}
-                              isSelected={activeModel?.id === model.id}
-                              isHighlighted={index === clampedHighlightedIndex}
-                              isFavorite={favoriteSet.has(model.id)}
-                              favoriteStarOnHover={
-                                selectedTab === 'favorites' && !isSearching
-                              }
-                              portalContainer={resolvedPortalContainer}
-                              onHighlight={() => setHighlightedIndex(index)}
-                              onSelect={() => handleSelectModel(model.id)}
-                              onToggleFavorite={() => toggleFavorite(model.id)}
-                            />
+                            <Fragment key={model.id}>
+                              {index === freeSectionIndex && (
+                                <div
+                                  role="presentation"
+                                  data-model-picker-section="free"
+                                  className={cn(
+                                    'mb-0.5 flex items-center gap-1.5 px-2 pb-0.5',
+                                    freeSectionIndex > 0
+                                      ? 'mt-1.5 border-t border-[var(--xd-border)]/70 pt-2'
+                                      : 'pt-0.5',
+                                  )}
+                                >
+                                  <span className="text-[10.5px] font-medium tracking-wide text-[var(--xd-ink-muted)]">
+                                    Free
+                                  </span>
+                                  <span className="xd-mono text-[10px] text-[var(--xd-ink-muted)]/70">
+                                    {freeModelCount}
+                                  </span>
+                                </div>
+                              )}
+                              <ModelListRow
+                                id={optionId(index)}
+                                model={model}
+                                isSelected={activeModel?.id === model.id}
+                                isHighlighted={
+                                  index === clampedHighlightedIndex
+                                }
+                                isFavorite={favoriteSet.has(model.id)}
+                                favoriteStarOnHover={
+                                  selectedTab === 'favorites' && !isSearching
+                                }
+                                portalContainer={resolvedPortalContainer}
+                                onHighlight={() => setHighlightedIndex(index)}
+                                onSelect={() => handleSelectModel(model.id)}
+                                onToggleFavorite={() =>
+                                  toggleFavorite(model.id)
+                                }
+                              />
+                            </Fragment>
                           ))}
                         </div>
                       )}

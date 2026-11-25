@@ -1084,7 +1084,7 @@ function MessageBubble({ message }: { message: AIMessage }) {
             <span>
               OpenCode ACP
               {message.modelId
-                ? ` · ${message.modelId.replace(/^opencode-go\//, '')}`
+                ? ` · ${message.modelId.replace(/^opencode-go\/(?:opencode\/)?/, '')}`
                 : ''}
             </span>
           </div>

@@ -1,4 +1,5 @@
 import type { AIModelSpec, AIProviderId, AISubscription } from '#/lib/types'
+import { stripOpenCodeFreeDisplaySuffix } from '#/lib/ai/opencode-go-types'
 import type {
   DriveChatModelOption,
   ReasoningEffort,
@@ -27,6 +28,7 @@ export interface ModelPickerOption {
   contextWindow?: string
   description?: string
   badge?: string
+  isFree?: boolean
   supportsReasoning?: boolean
   reasoningEfforts?: ReasoningEffort[]
   defaultReasoningEffort?: ReasoningEffort
@@ -53,6 +55,7 @@ export interface ConnectedModelLike {
   modelName: string
   rateLimited?: boolean
   supportsVisionSketch?: boolean
+  isFree?: boolean
 }
 
 /**
@@ -60,7 +63,7 @@ export interface ConnectedModelLike {
  */
 export type ComposerModelLike = Pick<
   AIModelSpec,
-  'id' | 'name' | 'providerId' | 'badge' | 'role'
+  'id' | 'name' | 'providerId' | 'badge' | 'role' | 'isFree'
 >
 
 export type ModelPickerInputOption =
@@ -88,32 +91,51 @@ function isConnectedModelLike(
 export function normalizeModelPickerOptions(
   items: ReadonlyArray<ModelPickerInputOption>,
 ): ModelPickerOption[] {
-  return items.map((item): ModelPickerOption => {
+  const seenIds = new Set<string>()
+  const normalized: ModelPickerOption[] = []
+
+  for (const item of items) {
+    let option: ModelPickerOption
     if (isModelPickerOption(item)) {
-      return item
-    }
-    if (isConnectedModelLike(item)) {
-      return {
+      option = item.isFree
+        ? { ...item, name: stripOpenCodeFreeDisplaySuffix(item.name) }
+        : item
+    } else if (isConnectedModelLike(item)) {
+      option = {
         id: item.id,
-        name: item.modelName,
+        name: item.isFree
+          ? stripOpenCodeFreeDisplaySuffix(item.modelName)
+          : item.modelName,
         providerId: item.providerId,
         providerName: item.group || PROVIDER_DISPLAY_NAMES[item.providerId],
         connected: true,
         status: item.rateLimited ? 'rate_limited' : 'active',
         badge: item.group,
+        isFree: item.isFree,
+      }
+    } else {
+      option = {
+        id: item.id,
+        name: item.isFree
+          ? stripOpenCodeFreeDisplaySuffix(item.name)
+          : item.name,
+        providerId: item.providerId,
+        providerName: item.badge || PROVIDER_DISPLAY_NAMES[item.providerId],
+        connected: true,
+        status: 'active',
+        badge: item.badge,
+        description: item.role,
+        isFree: item.isFree,
       }
     }
-    return {
-      id: item.id,
-      name: item.name,
-      providerId: item.providerId,
-      providerName: item.badge || PROVIDER_DISPLAY_NAMES[item.providerId],
-      connected: true,
-      status: 'active',
-      badge: item.badge,
-      description: item.role,
-    }
-  })
+
+    const dedupeKey = option.id.toLowerCase()
+    if (seenIds.has(dedupeKey)) continue
+    seenIds.add(dedupeKey)
+    normalized.push(option)
+  }
+
+  return normalized
 }
 
 /**
@@ -140,6 +162,7 @@ export function modelPickerOptionsFromSubscriptions(
         contextWindow: model.contextWindow,
         description: model.recommendedFor,
         badge: model.badge,
+        isFree: model.isFree,
       }
     }),
   )

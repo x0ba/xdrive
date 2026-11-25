@@ -40,7 +40,9 @@ import {
   DEFAULT_OPENCODE_GO_MODELS,
   OPENCODE_GO_ENDPOINT_BASE_URL,
   OPENCODE_GO_MODEL_PREFIX,
+  formatOpenCodeModelDisplayName,
   fromXDriveOpenCodeGoModelId,
+  toXDriveOpenCodeGoModelId,
 } from './opencode-go-types'
 import type {
   OpenCodeBinarySource,
@@ -253,16 +255,185 @@ async function inspectOpenCodeAuthList(
   }
 }
 
-function isFreePlaceholderModel(acpModelId: string): boolean {
-  const lower = acpModelId.toLowerCase()
-  return lower.endsWith('-free') || lower === 'opencode/big-pickle'
+export function isFreeOpenCodeModel(
+  model: Pick<AcpModelOption, 'id' | 'name'> | string,
+): boolean {
+  const id = (typeof model === 'string' ? model : model.id).trim().toLowerCase()
+  const slug = id.includes('/') ? id.slice(id.indexOf('/') + 1) : id
+  if (id.endsWith('-free') || id.endsWith(':free') || slug === 'big-pickle') {
+    return true
+  }
+  if (typeof model !== 'string' && model.name) {
+    if (/(?:^|[\s([/-])free[\])]*$/i.test(model.name.trim())) {
+      return true
+    }
+  }
+  return false
 }
 
-function normalizeAcpModelIdForXDrive(acpModelId: string): string {
+function getAcpModelSlug(acpModelId: string): string {
+  const lower = acpModelId.trim().toLowerCase()
+  const slashIdx = lower.indexOf('/')
+  return slashIdx >= 0 ? lower.slice(slashIdx + 1) : lower
+}
+
+function freeModelProviderPriority(acpModelId: string): number {
+  const lower = acpModelId.trim().toLowerCase()
+  if (lower.startsWith('opencode/')) return 2
+  if (lower.startsWith(OPENCODE_GO_MODEL_PREFIX)) return 1
+  return 0
+}
+
+function dedupeFreeAcpModels(models: AcpModelOption[]): AcpModelOption[] {
+  const selected: AcpModelOption[] = []
+  const bySlug = new Map<string, number>()
+  const byDisplayName = new Map<string, number>()
+
+  for (const model of models) {
+    const slug = getAcpModelSlug(model.id)
+    const displayKey = formatOpenCodeModelDisplayName(
+      model.id,
+      model.name,
+      true,
+    ).toLowerCase()
+    const existingIndex = bySlug.get(slug) ?? byDisplayName.get(displayKey)
+
+    if (existingIndex !== undefined) {
+      const existing = selected[existingIndex]
+      if (
+        freeModelProviderPriority(model.id) >
+        freeModelProviderPriority(existing.id)
+      ) {
+        selected[existingIndex] = model
+        bySlug.set(slug, existingIndex)
+        byDisplayName.set(displayKey, existingIndex)
+      }
+      continue
+    }
+
+    const index = selected.length
+    selected.push(model)
+    bySlug.set(slug, index)
+    byDisplayName.set(displayKey, index)
+  }
+
+  return selected
+}
+
+export function selectOpenCodeAcpModels(
+  discoveryModels: AcpModelOption[],
+  authInfo: OpenCodeAuthListInfo,
+  hasEnvOpenCodeKey: boolean,
+): {
+  authenticated: boolean
+  selectedAcpModels: AcpModelOption[]
+} {
+  const paidGoModels = discoveryModels.filter(
+    (item) =>
+      item.id.toLowerCase().startsWith(OPENCODE_GO_MODEL_PREFIX) &&
+      !isFreeOpenCodeModel(item),
+  )
+  const nonFreeModels = discoveryModels.filter(
+    (item) => !isFreeOpenCodeModel(item),
+  )
+  const freeModels = dedupeFreeAcpModels(
+    discoveryModels.filter((item) => isFreeOpenCodeModel(item)),
+  )
+
+  let authenticated = false
+  let paidSelected: AcpModelOption[] = []
+
+  if (paidGoModels.length > 0) {
+    authenticated = true
+    paidSelected = paidGoModels
+  } else if (
+    authInfo.hasOpenCodeAuth ||
+    hasEnvOpenCodeKey ||
+    (authInfo.hasCredentials && nonFreeModels.length > 0) ||
+    (!authInfo.supported && nonFreeModels.length > 0)
+  ) {
+    authenticated = true
+    paidSelected = nonFreeModels
+  }
+
+  const seenNormalizedIds = new Set<string>()
+  const selectedAcpModels: AcpModelOption[] = []
+
+  for (const model of [...paidSelected, ...freeModels]) {
+    const normalizedKey = normalizeAcpModelIdForXDrive(model.id).toLowerCase()
+    if (seenNormalizedIds.has(normalizedKey)) continue
+    seenNormalizedIds.add(normalizedKey)
+    selectedAcpModels.push(model)
+  }
+
+  return { authenticated, selectedAcpModels }
+}
+
+export function normalizeAcpModelIdForXDrive(acpModelId: string): string {
   if (acpModelId.startsWith(OPENCODE_GO_MODEL_PREFIX)) {
     return acpModelId.slice(OPENCODE_GO_MODEL_PREFIX.length)
   }
   return acpModelId
+}
+
+export function resolveOpenCodeAcpModelId(
+  requestedModelId: string,
+  discovered: AcpSessionDiscovery,
+  cachedAcpModelIdMap: ReadonlyMap<string, string>,
+): string | null {
+  const raw = fromXDriveOpenCodeGoModelId(requestedModelId).trim()
+  if (!raw || raw === 'auto' || raw === 'default') {
+    const firstPaidGo = discovered.models.find(
+      (item) =>
+        item.id.toLowerCase().startsWith(OPENCODE_GO_MODEL_PREFIX) &&
+        !isFreeOpenCodeModel(item),
+    )
+    return (
+      firstPaidGo?.id ??
+      discovered.currentModelId ??
+      discovered.models.at(0)?.id ??
+      null
+    )
+  }
+
+  const cachedExact =
+    cachedAcpModelIdMap.get(requestedModelId) ?? cachedAcpModelIdMap.get(raw)
+  if (
+    cachedExact &&
+    discovered.models.some((item) => item.id === cachedExact)
+  ) {
+    return cachedExact
+  }
+
+  const candidates = raw.includes('/')
+    ? [raw, requestedModelId, `${OPENCODE_GO_MODEL_PREFIX}${raw}`]
+    : [
+        requestedModelId,
+        `${OPENCODE_GO_MODEL_PREFIX}${raw}`,
+        raw,
+        `opencode/${raw}`,
+      ]
+
+  for (const candidate of candidates) {
+    const match = discovered.models.find(
+      (item) => item.id.toLowerCase() === candidate.toLowerCase(),
+    )
+    if (match) return match.id
+  }
+
+  const byName = discovered.models.find((item) => {
+    const lowerRaw = raw.toLowerCase()
+    if (item.name.toLowerCase() === lowerRaw) return true
+    const cleaned = formatOpenCodeModelDisplayName(
+      item.id,
+      item.name,
+      isFreeOpenCodeModel(item),
+    ).toLowerCase()
+    return cleaned === lowerRaw
+  })
+  if (byName) return byName.id
+
+  return raw.includes('/') ? raw : `${OPENCODE_GO_MODEL_PREFIX}${raw}`
 }
 
 function enrichAcpModels(
@@ -276,22 +447,41 @@ function enrichAcpModels(
   }
 
   return acpModels.map((model) => {
+    const isFree = isFreeOpenCodeModel(model)
     const normalizedId = normalizeAcpModelIdForXDrive(model.id)
     const strippedProvider = normalizedId.includes('/')
       ? normalizedId.slice(normalizedId.indexOf('/') + 1)
       : normalizedId
+    const baseSlug = isFree
+      ? strippedProvider.replace(/[:-]free$/i, '')
+      : strippedProvider
     const catalog =
       catalogByRawId.get(normalizedId.toLowerCase()) ??
-      catalogByRawId.get(strippedProvider.toLowerCase())
+      catalogByRawId.get(strippedProvider.toLowerCase()) ??
+      (isFree ? catalogByRawId.get(baseSlug.toLowerCase()) : undefined)
+
+    const rawDisplayName =
+      model.name && model.name !== model.id
+        ? model.name
+        : (catalog?.name ?? (model.name || normalizedId))
+    const displayName = formatOpenCodeModelDisplayName(
+      model.id,
+      rawDisplayName,
+      isFree,
+    )
 
     if (catalog) {
       return {
         ...catalog,
         id: normalizedId,
         acpModelId: model.id,
-        name: model.name && model.name !== model.id ? model.name : catalog.name,
-        description: model.description || catalog.description,
+        name: displayName,
+        description:
+          model.description ||
+          (isFree ? 'Free model via local OpenCode ACP' : catalog.description),
         supportsVision: supportsImages && catalog.supportsVision,
+        featured: !isFree && Boolean(catalog.featured),
+        ...(isFree ? { isFree: true, monthlyUsage: undefined } : {}),
         apiProtocol: 'acp',
         baseUrl: 'opencode acp',
       }
@@ -300,8 +490,12 @@ function enrichAcpModels(
     return {
       id: normalizedId,
       acpModelId: model.id,
-      name: model.name || normalizedId,
-      description: model.description ?? 'Model exposed by local OpenCode ACP',
+      name: displayName,
+      description:
+        model.description ??
+        (isFree
+          ? 'Free model via local OpenCode ACP'
+          : 'Model exposed by local OpenCode ACP'),
       family: normalizedId.includes('/')
         ? normalizedId.slice(0, normalizedId.indexOf('/'))
         : null,
@@ -309,7 +503,9 @@ function enrichAcpModels(
       outputLimit: 16_384,
       supportsVision: supportsImages,
       reasoning: true,
-      featured: model.id.toLowerCase().startsWith(OPENCODE_GO_MODEL_PREFIX),
+      featured:
+        !isFree && model.id.toLowerCase().startsWith(OPENCODE_GO_MODEL_PREFIX),
+      ...(isFree ? { isFree: true } : {}),
       apiProtocol: 'acp',
       baseUrl: 'opencode acp',
     }
@@ -363,18 +559,30 @@ class OpenCodeAcpManager {
       if (model.acpModelId) {
         this.cachedAcpModelIdMap.set(model.id, model.acpModelId)
         this.cachedAcpModelIdMap.set(
-          `${OPENCODE_GO_MODEL_PREFIX}${model.id}`,
+          toXDriveOpenCodeGoModelId(model.id),
           model.acpModelId,
         )
+        this.cachedAcpModelIdMap.set(model.acpModelId, model.acpModelId)
       }
     }
 
     const matchedDefault = discovery.currentModelId
-      ? enrichedModels.find((m) => m.acpModelId === discovery.currentModelId)
-          ?.id
+      ? (enrichedModels.find((m) => m.acpModelId === discovery.currentModelId)
+          ?.id ??
+        (isFreeOpenCodeModel(discovery.currentModelId)
+          ? enrichedModels.find(
+              (m) =>
+                m.isFree &&
+                m.acpModelId &&
+                getAcpModelSlug(m.acpModelId) ===
+                  getAcpModelSlug(discovery.currentModelId!),
+            )?.id
+          : undefined))
       : undefined
-    const firstModelId = enrichedModels.length > 0 ? enrichedModels[0].id : null
-    this.cachedCurrentModelId = matchedDefault ?? firstModelId
+    const preferredFallback =
+      enrichedModels.find((m) => !m.isFree)?.id ??
+      (enrichedModels.length > 0 ? enrichedModels[0].id : null)
+    this.cachedCurrentModelId = matchedDefault ?? preferredFallback
   }
 
   private buildAcpStatus(
@@ -388,10 +596,8 @@ class OpenCodeAcpManager {
     const supportsImagePrompt = Boolean(
       init.agentCapabilities?.promptCapabilities?.image,
     )
-    const models =
-      authenticated && this.cachedModels.length > 0
-        ? this.cachedModels
-        : fallbackCatalog
+    const hasCachedModels = this.cachedModels.length > 0
+    const models = hasCachedModels ? this.cachedModels : fallbackCatalog
     const firstModelId = models.length > 0 ? models[0].id : null
 
     return {
@@ -411,10 +617,10 @@ class OpenCodeAcpManager {
       maskedKey: null,
       endpointBaseUrl: binary.displayPath,
       models,
-      currentModelId: authenticated
+      currentModelId: hasCachedModels
         ? (this.cachedCurrentModelId ?? firstModelId)
         : firstModelId,
-      configOptions: authenticated ? this.cachedConfigOptions : [],
+      configOptions: hasCachedModels ? this.cachedConfigOptions : [],
       supportsImagePrompt,
       usage: null,
       rateLimited: false,
@@ -496,36 +702,18 @@ class OpenCodeAcpManager {
 
     try {
       const { discovery } = await this.runtime.probeSession(15_000)
-      const goModels = discovery.models.filter((item) =>
-        item.id.toLowerCase().startsWith(OPENCODE_GO_MODEL_PREFIX),
-      )
-      const nonFreeModels = discovery.models.filter(
-        (item) => !isFreePlaceholderModel(item.id),
-      )
-
       const hasEnvOpenCodeKey = Boolean(
         process.env.OPENCODE_API_KEY?.trim() ||
         process.env.OPENCODE_GO_API_KEY?.trim(),
       )
 
-      let authenticated = false
-      let selectedAcpModels: AcpModelOption[] = []
+      const { authenticated, selectedAcpModels } = selectOpenCodeAcpModels(
+        discovery.models,
+        authInfo,
+        hasEnvOpenCodeKey,
+      )
 
-      if (goModels.length > 0) {
-        authenticated = true
-        selectedAcpModels = goModels
-      } else if (
-        authInfo.hasOpenCodeAuth ||
-        hasEnvOpenCodeKey ||
-        (authInfo.hasCredentials && nonFreeModels.length > 0) ||
-        (!authInfo.supported && nonFreeModels.length > 0)
-      ) {
-        authenticated = true
-        selectedAcpModels =
-          nonFreeModels.length > 0 ? nonFreeModels : discovery.models
-      }
-
-      if (!authenticated) {
+      if (!authenticated && selectedAcpModels.length === 0) {
         this.cachedModels = []
         this.cachedCurrentModelId = null
         this.cachedConfigOptions = []
@@ -545,7 +733,13 @@ class OpenCodeAcpManager {
         supportsImages,
       )
       this.cacheDiscovery(discovery, enriched)
-      return this.buildAcpStatus(init, binary, true, authInfo, catalogModels)
+      return this.buildAcpStatus(
+        init,
+        binary,
+        authenticated,
+        authInfo,
+        catalogModels,
+      )
     } catch (error) {
       if (isAcpAuthRequiredError(error)) {
         this.cachedModels = []
@@ -567,50 +761,22 @@ class OpenCodeAcpManager {
   async runPrompt(
     input: OpenCodeAcpPromptInput,
   ): Promise<OpenCodeAcpPromptOutput> {
+    const defaultAcpModelId =
+      (this.cachedCurrentModelId
+        ? (this.cachedAcpModelIdMap.get(this.cachedCurrentModelId) ??
+          this.cachedCurrentModelId)
+        : null) ??
+      `${OPENCODE_GO_MODEL_PREFIX}${DEFAULT_OPENCODE_GO_MODELS[0].id}`
+
     const result = await this.runtime.runPrompt(input, {
-      defaultModelId:
-        this.cachedCurrentModelId ??
-        `${OPENCODE_GO_MODEL_PREFIX}${DEFAULT_OPENCODE_GO_MODELS[0].id}`,
+      defaultModelId: defaultAcpModelId,
       cachedModelConfigId: this.cachedModelConfigId,
-      resolveRequestedModel: (requestedModelId, discovered) => {
-        const raw = fromXDriveOpenCodeGoModelId(requestedModelId).trim()
-        if (!raw || raw === 'auto' || raw === 'default') {
-          const firstGo = discovered.models.find((item) =>
-            item.id.toLowerCase().startsWith(OPENCODE_GO_MODEL_PREFIX),
-          )
-          return firstGo?.id ?? null
-        }
-
-        const cachedExact =
-          this.cachedAcpModelIdMap.get(requestedModelId) ??
-          this.cachedAcpModelIdMap.get(raw)
-        if (
-          cachedExact &&
-          discovered.models.some((item) => item.id === cachedExact)
-        ) {
-          return cachedExact
-        }
-
-        const candidates = [
+      resolveRequestedModel: (requestedModelId, discovered) =>
+        resolveOpenCodeAcpModelId(
           requestedModelId,
-          `${OPENCODE_GO_MODEL_PREFIX}${raw}`,
-          raw,
-          `opencode/${raw}`,
-        ]
-        for (const candidate of candidates) {
-          const match = discovered.models.find(
-            (item) => item.id.toLowerCase() === candidate.toLowerCase(),
-          )
-          if (match) return match.id
-        }
-
-        const byName = discovered.models.find(
-          (item) => item.name.toLowerCase() === raw.toLowerCase(),
-        )
-        if (byName) return byName.id
-
-        return raw.includes('/') ? raw : `${OPENCODE_GO_MODEL_PREFIX}${raw}`
-      },
+          discovered,
+          this.cachedAcpModelIdMap,
+        ),
     })
 
     return result
