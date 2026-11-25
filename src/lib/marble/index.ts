@@ -23,6 +23,7 @@ export {
   PREDEFINED_MARBLE_TEMPLATES,
   TEMPLATES_FOLDER_ID,
   TEMPLATES_FOLDER_NAME,
+  isTemplatesRootFolder,
 } from './templates'
 
 export { INITIAL_AI_SUBSCRIPTIONS } from './subscriptions-seed'

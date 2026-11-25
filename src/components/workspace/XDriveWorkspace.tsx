@@ -111,12 +111,11 @@ import type {
   ReasoningEffort,
 } from '#/lib/ai/drive-chat-types'
 import {
+  PREDEFINED_MARBLE_TEMPLATES,
   DOCUMENT_DESIGN_SYSTEM_SLUG,
   DOCUMENT_DONTS_SYSTEM_SLUG,
   INITIAL_AI_SUBSCRIPTIONS,
   MarbleCollaborationError,
-  PREDEFINED_MARBLE_TEMPLATES,
-  TEMPLATES_FOLDER_ID,
   TEMPLATES_FOLDER_NAME,
   applyDocumentContentUpdate,
   applyMarbleOpsClient,
@@ -126,9 +125,18 @@ import {
   duplicateMarbleTemplate,
   generateMarbleCollaboration,
   inspectMarbleNodes,
+  isTemplatesRootFolder,
   resolveEvergreenDesignContext,
   updateMarbleSourceTitle,
 } from '#/lib/marble'
+import {
+  deriveDocIsTemplate,
+  ensureClientTemplatesFolder,
+  getTemplateFolderIds,
+  mergeRenameDocumentReply,
+  mintClientFolderId,
+  reconcileFolderRename,
+} from '#/components/workspace/template-workspace-helpers'
 import type { MarbleActionKind } from '#/lib/marble'
 import {
   applyAntigravityStatusToSubscriptions,
@@ -1059,6 +1067,7 @@ export function XDriveWorkspace({
   const shownSourceRef = useRef<string | null>(null)
   const shownSigRef = useRef('')
   const saveTokens = useRef(new Map<string, number>())
+  const renameTokensRef = useRef(new Map<string, number>())
   const timers = useRef<number[]>([])
   const hostOpRef = useRef<
     (op: MarbleOp, options?: { look?: boolean }) => void
@@ -1086,34 +1095,20 @@ export function XDriveWorkspace({
   )
 
   const templatesFolder = useMemo(
-    () =>
-      folders.find(
-        (folder) =>
-          folder.parentId === null &&
-          folder.name.toLowerCase() === TEMPLATES_FOLDER_NAME.toLowerCase(),
-      ) ?? null,
+    () => folders.find(isTemplatesRootFolder) ?? null,
     [folders],
   )
-  const templateFolderIds = useMemo(() => {
-    if (!templatesFolder) return new Set<string>()
-    return getDescendantFolderIds(folders, templatesFolder.id)
-  }, [folders, templatesFolder])
-
-  const isDocInTemplatesFolder = (doc: MarbleDocumentFile): boolean => {
-    if (doc.folderId && templateFolderIds.has(doc.folderId)) return true
-    const folderName = doc.folder.trim().toLowerCase()
-    return (
-      folderName === TEMPLATES_FOLDER_NAME.toLowerCase() ||
-      folderName.startsWith(`${TEMPLATES_FOLDER_NAME.toLowerCase()}/`)
-    )
-  }
+  const templateFolderIds = useMemo(
+    () => getTemplateFolderIds(folders),
+    [folders],
+  )
 
   const isDocTemplate = (doc: MarbleDocumentFile): boolean =>
-    Boolean(doc.isTemplate || isDocInTemplatesFolder(doc))
+    deriveDocIsTemplate(doc, folders, templateFolderIds)
 
   const templates = useMemo(
     () => activeDocs.filter(isDocTemplate),
-    [activeDocs, templateFolderIds],
+    [activeDocs, folders, templateFolderIds],
   )
   const defaultCreateFolderId =
     currentFolderId && templateFolderIds.has(currentFolderId)
@@ -1821,7 +1816,14 @@ export function XDriveWorkspace({
       .filter((doc) => matchesQuery(doc, searchQuery))
       .slice()
       .sort((a, b) => compareDocs(a, b, sortBy))
-  }, [activeDocs, currentFolderId, searchQuery, sortBy, templateFolderIds])
+  }, [
+    activeDocs,
+    currentFolderId,
+    folders,
+    searchQuery,
+    sortBy,
+    templateFolderIds,
+  ])
 
   const starredDocs = useMemo(() => {
     return activeDocs
@@ -3212,23 +3214,16 @@ export function XDriveWorkspace({
     const cleanDescription = input.description.trim()
     const now = new Date().toISOString()
 
-    let targetTemplatesFolder = foldersRef.current.find(
-      (folder) =>
-        folder.parentId === null &&
-        folder.name.toLowerCase() === TEMPLATES_FOLDER_NAME.toLowerCase(),
+    const ensured = ensureClientTemplatesFolder(
+      foldersRef.current,
+      now,
+      shortSha,
     )
-    if (!targetTemplatesFolder) {
-      targetTemplatesFolder = {
-        id: TEMPLATES_FOLDER_ID,
-        name: TEMPLATES_FOLDER_NAME,
-        parentId: null,
-        color: 'accent',
-        createdAt: now,
-        updatedAt: now,
-      }
-      const nextFolders = [...foldersRef.current, targetTemplatesFolder]
-      foldersRef.current = nextFolders
-      setFolders(nextFolders)
+    const targetTemplatesFolder = ensured.folder
+    const optimisticFolderId = targetTemplatesFolder.id
+    if (ensured.created) {
+      foldersRef.current = ensured.folders
+      setFolders(ensured.folders)
     }
 
     const liveSource = sourceRef.current.get(sourceDoc.id) ?? sourceDoc.source
@@ -3262,7 +3257,7 @@ export function XDriveWorkspace({
       tags:
         sourceDoc.tags.length > 0 ? [...sourceDoc.tags] : [sourceDoc.category],
       folder: targetTemplatesFolder.name,
-      folderId: targetTemplatesFolder.id,
+      folderId: optimisticFolderId,
       trashedAt: null,
       share: {
         isPublicLinkEnabled: false,
@@ -3276,6 +3271,9 @@ export function XDriveWorkspace({
       checkpoints: [],
       intentHistory: [],
     }
+
+    const saveTokenAtCreate = saveTokens.current.get(tplDoc.id) ?? 0
+    const renameTokenAtCreate = renameTokensRef.current.get(tplDoc.id) ?? 0
 
     sourceRef.current.set(tplDoc.id, tplDoc.source)
     allDocsRef.current = [tplDoc, ...allDocsRef.current]
@@ -3298,27 +3296,60 @@ export function XDriveWorkspace({
           category: sourceDoc.category,
           tags: tplDoc.tags,
           id: tplDoc.id,
+          folderId: optimisticFolderId,
           slug: tplDoc.slug,
           createdBy: YOU,
         },
         { reloadOnError: true },
       ).then((res) => {
         if (!res) return
-        const serverFolder = res.folder as DriveFolder | undefined
+        const serverFolderRaw = res.folder as DriveFolder | undefined
         const serverDoc = res.doc as MarbleDocumentFile | undefined
-        if (serverFolder) {
+        if (serverFolderRaw) {
+          const serverFolder: DriveFolder = {
+            ...serverFolderRaw,
+            isTemplatesFolder: true,
+          }
           const updatedFolders = foldersRef.current.map((f) =>
-            f.parentId === null &&
-            f.name.toLowerCase() === TEMPLATES_FOLDER_NAME.toLowerCase()
+            f.id === optimisticFolderId || isTemplatesRootFolder(f)
               ? serverFolder
               : f,
           )
           foldersRef.current = updatedFolders
           setFolders(updatedFolders)
+          if (serverFolder.id !== optimisticFolderId) {
+            const remappedDocs = allDocsRef.current.map((doc) =>
+              doc.folderId === optimisticFolderId
+                ? {
+                    ...doc,
+                    folderId: serverFolder.id,
+                    folder: serverFolder.name,
+                  }
+                : doc,
+            )
+            allDocsRef.current = remappedDocs
+            setDocs(remappedDocs)
+          }
         }
         if (serverDoc && serverDoc.id === tplDoc.id) {
-          sourceRef.current.set(serverDoc.id, serverDoc.source)
-          patchFile(tplDoc.id, () => serverDoc)
+          patchFile(tplDoc.id, (currentDoc) => {
+            const hasLocalEdits =
+              (saveTokens.current.get(tplDoc.id) ?? 0) !== saveTokenAtCreate ||
+              (renameTokensRef.current.get(tplDoc.id) ?? 0) !==
+                renameTokenAtCreate ||
+              currentDoc.version !== 1 ||
+              currentDoc.source !== tplDoc.source
+            if (hasLocalEdits) {
+              return {
+                ...currentDoc,
+                folderId: serverDoc.folderId ?? currentDoc.folderId,
+                folder: serverDoc.folder || currentDoc.folder,
+                isTemplate: serverDoc.isTemplate,
+              }
+            }
+            sourceRef.current.set(serverDoc.id, serverDoc.source)
+            return serverDoc
+          })
         }
       })
     }
@@ -3330,32 +3361,40 @@ export function XDriveWorkspace({
   ) {
     const cleanTitle = input.title.trim()
     if (!cleanTitle) return
+    const liveDoc =
+      allDocsRef.current.find((doc) => doc.id === targetDoc.id) ?? targetDoc
     const nextDescription = input.description.trim()
-    const currentSource =
-      sourceRef.current.get(targetDoc.id) ?? targetDoc.source
+    const currentSource = sourceRef.current.get(liveDoc.id) ?? liveDoc.source
     const nextSource = updateMarbleSourceTitle(currentSource, cleanTitle)
     const isEvergreen =
-      Boolean(targetDoc.isEvergreen) ||
-      targetDoc.slug === DOCUMENT_DESIGN_SYSTEM_SLUG ||
-      targetDoc.slug === DOCUMENT_DONTS_SYSTEM_SLUG
+      Boolean(liveDoc.isEvergreen) ||
+      liveDoc.slug === DOCUMENT_DESIGN_SYSTEM_SLUG ||
+      liveDoc.slug === DOCUMENT_DONTS_SYSTEM_SLUG
     const nextSlug = isEvergreen
-      ? targetDoc.slug
+      ? liveDoc.slug
       : uniqueSlugForDocs(
           cleanTitle,
           allDocsRef.current,
-          targetDoc.id,
-          targetDoc.slug,
+          liveDoc.id,
+          liveDoc.slug,
         )
     const now = new Date().toISOString()
+    const saveTokenAtRename = saveTokens.current.get(liveDoc.id) ?? 0
+    const renameToken = (renameTokensRef.current.get(liveDoc.id) ?? 0) + 1
+    renameTokensRef.current.set(liveDoc.id, renameToken)
+    const expectedVersion = liveDoc.version + 1
 
-    sourceRef.current.set(targetDoc.id, nextSource)
-    patchFile(targetDoc.id, (doc) => ({
+    sourceRef.current.set(liveDoc.id, nextSource)
+    patchFile(liveDoc.id, (doc) => ({
       ...doc,
       title: cleanTitle,
       description: nextDescription,
       slug: nextSlug,
       fileName: `${nextSlug}.mrbl`,
       source: nextSource,
+      nodeCount: countMarbleNodes(nextSource),
+      byteSize: byteSizeOf(nextSource),
+      version: expectedVersion,
       updatedAt: now,
     }))
     setRenameDocTarget(null)
@@ -3365,8 +3404,8 @@ export function XDriveWorkspace({
       void syncDriveApi(
         {
           action: 'rename_document',
-          slug: targetDoc.slug,
-          folderPath: folderDiskPath(foldersRef.current, targetDoc.folderId),
+          slug: liveDoc.slug,
+          folderPath: folderDiskPath(foldersRef.current, liveDoc.folderId),
           title: cleanTitle,
           description: nextDescription,
           nextSlug,
@@ -3374,24 +3413,48 @@ export function XDriveWorkspace({
         { reloadOnError: true },
       ).then((res) => {
         if (!res || typeof res.slug !== 'string') return
-        const serverSlug = res.slug
-        const serverFileName =
-          typeof res.fileName === 'string' ? res.fileName : `${serverSlug}.mrbl`
-        const serverSource =
-          typeof res.source === 'string' ? res.source : nextSource
-        sourceRef.current.set(targetDoc.id, serverSource)
-        patchFile(targetDoc.id, (doc) => ({
-          ...doc,
-          slug: serverSlug,
-          fileName: serverFileName,
-          source: serverSource,
-          isTemplate:
-            typeof res.isTemplate === 'boolean'
-              ? res.isTemplate
-              : doc.isTemplate,
-          updatedAt:
-            typeof res.updatedAt === 'string' ? res.updatedAt : doc.updatedAt,
-        }))
+        const latestDoc = allDocsRef.current.find(
+          (doc) => doc.id === liveDoc.id,
+        )
+        if (!latestDoc) return
+        const merged = mergeRenameDocumentReply({
+          currentDoc: latestDoc,
+          currentLiveSource: sourceRef.current.get(liveDoc.id),
+          optimisticSource: nextSource,
+          expectedVersion,
+          saveTokenAtRename,
+          currentSaveToken: saveTokens.current.get(liveDoc.id) ?? 0,
+          renameToken,
+          currentRenameToken: renameTokensRef.current.get(liveDoc.id) ?? 0,
+          serverReply: {
+            slug: res.slug,
+            fileName: res.fileName,
+            source: res.source,
+            isTemplate: res.isTemplate,
+            updatedAt: res.updatedAt,
+          },
+          folders: foldersRef.current,
+          countNodes: countMarbleNodes,
+          byteSize: byteSizeOf,
+        })
+        if (!merged) return
+        if (
+          merged.shouldUpdateSourceRef &&
+          merged.nextSourceRefValue !== undefined
+        ) {
+          sourceRef.current.set(liveDoc.id, merged.nextSourceRefValue)
+        }
+        patchFile(liveDoc.id, () => merged.doc)
+        if (!merged.shouldUpdateSourceRef && res.slug !== nextSlug) {
+          persist(
+            liveDoc.id,
+            merged.doc.slug,
+            merged.doc.source,
+            [],
+            merged.doc.source,
+            merged.doc,
+          )
+        }
       })
     }
   }
@@ -3414,15 +3477,17 @@ export function XDriveWorkspace({
         folderModal.parentId,
       )
       const created: DriveFolder = {
-        id: `folder-${shortSha()}`,
+        id: mintClientFolderId(foldersRef.current, undefined, shortSha),
         name,
         parentId: folderModal.parentId,
         color,
+        isTemplatesFolder:
+          folderModal.parentId === null && name === TEMPLATES_FOLDER_NAME,
         createdAt: now,
         updatedAt: now,
       }
       foldersRef.current = [...foldersRef.current, created]
-      setFolders((prev) => [...prev, created])
+      setFolders(foldersRef.current)
       void syncDriveApi(
         {
           action: 'create_folder',
@@ -3437,20 +3502,20 @@ export function XDriveWorkspace({
       )
     } else {
       const oldPath = folderDiskPath(foldersRef.current, folderModal.folder.id)
-      const nextFolders = foldersRef.current.map((folder) =>
-        folder.id === folderModal.folder.id
-          ? { ...folder, name, color, updatedAt: now }
-          : folder,
+      const reconciled = reconcileFolderRename(
+        foldersRef.current,
+        allDocsRef.current,
+        {
+          folderId: folderModal.folder.id,
+          name,
+          color,
+          updatedAt: now,
+        },
       )
-      foldersRef.current = nextFolders
-      setFolders(nextFolders)
-      setDocs((prev) =>
-        prev.map((doc) =>
-          doc.folderId === folderModal.folder.id
-            ? { ...doc, folder: name }
-            : doc,
-        ),
-      )
+      foldersRef.current = reconciled.folders
+      setFolders(reconciled.folders)
+      allDocsRef.current = reconciled.docs
+      setDocs(reconciled.docs)
       void syncDriveApi(
         {
           action: 'rename_folder',
@@ -3475,22 +3540,23 @@ export function XDriveWorkspace({
     const nextFolders = foldersRef.current.filter(
       (item) => !removed.has(item.id),
     )
+    const nextTemplateIds = getTemplateFolderIds(nextFolders)
     foldersRef.current = nextFolders
     setFolders(nextFolders)
-    setDocs((prev) =>
-      prev.map((doc) =>
-        doc.folderId && removed.has(doc.folderId)
-          ? {
-              ...doc,
-              folderId: folder.parentId,
-              folder: parentName,
-              isTemplate: folder.parentId
-                ? templateFolderIds.has(folder.parentId)
-                : false,
-            }
-          : doc,
-      ),
+    const nextDocs = allDocsRef.current.map((doc) =>
+      doc.folderId && removed.has(doc.folderId)
+        ? {
+            ...doc,
+            folderId: folder.parentId,
+            folder: parentName,
+            isTemplate: folder.parentId
+              ? nextTemplateIds.has(folder.parentId)
+              : false,
+          }
+        : doc,
     )
+    allDocsRef.current = nextDocs
+    setDocs(nextDocs)
     if (currentFolderId && removed.has(currentFolderId)) {
       setLocalCurrentFolderId(folder.parentId)
       if (isRouted) {
@@ -3533,8 +3599,9 @@ export function XDriveWorkspace({
       targetFolder ? targetFolder.id : null,
     )
     const folderName = targetFolder ? targetFolder.name : 'My Drive'
+    const nextTemplateIds = getTemplateFolderIds(foldersRef.current)
     const nextIsTemplate = targetFolder
-      ? templateFolderIds.has(targetFolder.id)
+      ? nextTemplateIds.has(targetFolder.id)
       : false
     const now = new Date().toISOString()
     patchFile(docId, (doc) => ({

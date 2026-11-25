@@ -214,6 +214,12 @@ export function isTemplateRelPath(relPath: string): boolean {
   return relPath.startsWith(`${TEMPLATES_FOLDER_NAME}/`)
 }
 
+export function isTemplatesRootPath(
+  folderPath: string | null | undefined,
+): boolean {
+  return normalizeFolderPath(folderPath) === TEMPLATES_FOLDER_NAME
+}
+
 export function slugifyTitle(title: string, fallback = 'untitled'): string {
   const slug = title
     .normalize('NFKD')
@@ -1412,7 +1418,10 @@ export async function createFolderOnDisk(input: {
     const createdAt = input.createdAt ?? now
     const updatedAt = input.updatedAt ?? now
     const color = sanitizeColor(input.color)
-    const id = input.id?.trim() || deterministicId('folder', relPath)
+    const id = mintUnusedFolderId(
+      metadata,
+      input.id?.trim() || deterministicId('folder', relPath),
+    )
 
     const parentMeta = parent.folderPath
       ? metadata.folders[parent.folderPath]
@@ -1437,6 +1446,7 @@ export async function createFolderOnDisk(input: {
         name: cleanName,
         parentId,
         color,
+        isTemplatesFolder: isTemplatesRootPath(relPath),
         createdAt,
         updatedAt,
       },
@@ -1551,7 +1561,9 @@ export async function renameFolderOnDisk(input: {
 
     const existingMeta = metadata.folders[normalizedNew]
     const updatedMeta: StoredFolderMeta = {
-      id: existingMeta?.id ?? deterministicId('folder', normalizedNew),
+      id:
+        existingMeta?.id ??
+        mintUnusedFolderId(metadata, deterministicId('folder', normalizedNew)),
       color:
         input.color !== undefined
           ? sanitizeColor(input.color)
@@ -1582,6 +1594,7 @@ export async function renameFolderOnDisk(input: {
         name: cleanNewName,
         parentId,
         color: updatedMeta.color,
+        isTemplatesFolder: isTemplatesRootPath(normalizedNew),
         createdAt: updatedMeta.createdAt,
         updatedAt: updatedMeta.updatedAt,
       },
@@ -2111,17 +2124,71 @@ async function collectUsedSlugs(
   return used
 }
 
-function dedupeSlug(base: string, used: Set<string>): string {
-  const cleanBase = slugifyTitle(base)
-  let candidate = cleanBase
+function dedupeValidSlug(validSlug: string, used: Set<string>): string {
+  if (!used.has(validSlug)) return validSlug
+  let candidate = validSlug
   let suffix = 2
   while (used.has(candidate)) {
     const suffixStr = `-${suffix}`
-    const trimmedBase = cleanBase.slice(0, Math.max(1, 128 - suffixStr.length))
+    const trimmedBase = validSlug.slice(0, Math.max(1, 128 - suffixStr.length))
     candidate = `${trimmedBase}${suffixStr}`
     suffix += 1
   }
   return candidate
+}
+
+function dedupeSlug(base: string, used: Set<string>): string {
+  return dedupeValidSlug(slugifyTitle(base), used)
+}
+
+function collectUsedFolderIds(
+  metadata: DriveMetadataFile,
+  extraIds?: Iterable<string>,
+): Set<string> {
+  const used = new Set<string>()
+  for (const entry of Object.values(metadata.folders)) {
+    if (entry?.id) used.add(entry.id)
+  }
+  if (extraIds) {
+    for (const id of extraIds) {
+      if (id) used.add(id)
+    }
+  }
+  return used
+}
+
+function mintUnusedFolderId(
+  metadata: DriveMetadataFile,
+  preferredId?: string,
+  extraIds?: Iterable<string>,
+): string {
+  const used = collectUsedFolderIds(metadata, extraIds)
+  const candidate = preferredId?.trim()
+  if (candidate && !used.has(candidate)) {
+    return candidate
+  }
+  let minted = `folder-${randomBytes(6).toString('hex')}`
+  while (used.has(minted)) {
+    minted = `folder-${randomBytes(6).toString('hex')}`
+  }
+  return minted
+}
+
+function ensureTemplatesFolderMeta(
+  metadata: DriveMetadataFile,
+  now: string,
+  preferredId?: string,
+): StoredFolderMeta {
+  const existing = metadata.folders[TEMPLATES_FOLDER_NAME]
+  if (existing) return existing
+  const created: StoredFolderMeta = {
+    id: mintUnusedFolderId(metadata, preferredId ?? TEMPLATES_FOLDER_ID),
+    color: 'accent',
+    createdAt: now,
+    updatedAt: now,
+  }
+  metadata.folders[TEMPLATES_FOLDER_NAME] = created
+  return created
 }
 
 async function collectExistingDocIds(
@@ -2165,36 +2232,41 @@ export async function seedPremadeTemplatesOnDisk(
     const templatesDir = resolveDriveDirPath(TEMPLATES_FOLDER_NAME)
     await mkdir(templatesDir.fullPath, { recursive: true })
     const now = new Date().toISOString()
-    if (!metadata.folders[TEMPLATES_FOLDER_NAME]) {
-      metadata.folders[TEMPLATES_FOLDER_NAME] = {
-        id: TEMPLATES_FOLDER_ID,
-        color: 'accent',
-        createdAt: now,
-        updatedAt: now,
-      }
-    }
+    ensureTemplatesFolderMeta(metadata, now)
 
-    const existingDocIds = await collectExistingDocIds(metadata)
+    const [existingDocIds, usedSlugs] = await Promise.all([
+      collectExistingDocIds(metadata),
+      collectUsedSlugs(),
+    ])
     const seededSlugs: string[] = []
     const skippedIds: string[] = premadeTemplates
       .filter((tpl) => seededSet.has(tpl.id))
       .map((tpl) => tpl.id)
 
     for (const tpl of unseeded) {
-      const target = resolveDocumentLocation(
-        assertSlug(tpl.slug),
+      const desiredSlug = assertSlug(tpl.slug)
+      const defaultTarget = resolveDocumentLocation(
+        desiredSlug,
         TEMPLATES_FOLDER_NAME,
       )
-      const [existsOnDisk, knownById] = await Promise.all([
-        pathExists(target.fullPath),
+      const [existsInTemplates, knownById] = await Promise.all([
+        pathExists(defaultTarget.fullPath),
         Promise.resolve(existingDocIds.has(tpl.id)),
       ])
 
-      if (!existsOnDisk && !knownById) {
+      if (!existsInTemplates && !knownById) {
+        const chosenSlug = dedupeValidSlug(desiredSlug, usedSlugs)
+        const target = resolveDocumentLocation(
+          chosenSlug,
+          TEMPLATES_FOLDER_NAME,
+        )
         await writeAtomicText(target.fullPath, tpl.source)
+        const baseShare =
+          sanitizeShareConfig(tpl.share, chosenSlug) ??
+          defaultShareConfig(chosenSlug)
         metadata.documents[target.relPath] = {
           id: tpl.id,
-          slug: tpl.slug,
+          slug: chosenSlug,
           title: tpl.title,
           description: tpl.description,
           category: tpl.category,
@@ -2208,11 +2280,16 @@ export async function seedPremadeTemplatesOnDisk(
           pinned: false,
           tags: [...tpl.tags],
           share:
-            sanitizeShareConfig(tpl.share, tpl.slug) ??
-            defaultShareConfig(tpl.slug),
+            chosenSlug !== desiredSlug
+              ? {
+                  ...baseShare,
+                  publicLinkUrl: `https://xdrive.app/d/${chosenSlug}`,
+                }
+              : baseShare,
         }
+        usedSlugs.add(chosenSlug)
         existingDocIds.add(tpl.id)
-        seededSlugs.push(tpl.slug)
+        seededSlugs.push(chosenSlug)
       } else {
         skippedIds.push(tpl.id)
       }
@@ -2245,6 +2322,7 @@ export async function saveAsTemplateOnDisk(input: {
   category?: MarbleAppCategory
   tags?: string[]
   id?: string
+  folderId?: string
   slug?: string
   createdBy?: MarbleDocumentFile['createdBy']
   nodeCountOf?: (source: string) => number
@@ -2282,16 +2360,7 @@ export async function saveAsTemplateOnDisk(input: {
     const templatesDir = resolveDriveDirPath(TEMPLATES_FOLDER_NAME)
     await mkdir(templatesDir.fullPath, { recursive: true })
     const now = new Date().toISOString()
-    let folderMeta = metadata.folders[TEMPLATES_FOLDER_NAME]
-    if (!folderMeta) {
-      folderMeta = {
-        id: TEMPLATES_FOLDER_ID,
-        color: 'accent',
-        createdAt: now,
-        updatedAt: now,
-      }
-      metadata.folders[TEMPLATES_FOLDER_NAME] = folderMeta
-    }
+    const folderMeta = ensureTemplatesFolderMeta(metadata, now, input.folderId)
 
     const usedSlugs = await collectUsedSlugs()
     const desiredSlug = input.slug?.trim()
@@ -2347,6 +2416,7 @@ export async function saveAsTemplateOnDisk(input: {
       name: TEMPLATES_FOLDER_NAME,
       parentId: null,
       color: sanitizeColor(folderMeta.color),
+      isTemplatesFolder: true,
       createdAt: folderMeta.createdAt,
       updatedAt: folderMeta.updatedAt,
     }
@@ -2501,6 +2571,7 @@ export async function loadDriveWorkspace(
 
   const folderByPath = new Map<string, DriveFolder>()
   const folders: DriveFolder[] = []
+  const usedFolderIds = collectUsedFolderIds(metadata)
   let metaDirty = migrated
 
   for (const dir of directories) {
@@ -2512,7 +2583,14 @@ export async function loadDriveWorkspace(
     const name = path.posix.basename(dir.relPath)
     const createdAt = stored?.createdAt ?? info.birthtime.toISOString()
     const updatedAt = stored?.updatedAt ?? info.mtime.toISOString()
-    const id = stored?.id ?? deterministicId('folder', dir.relPath)
+    const id = stored?.id
+      ? stored.id
+      : mintUnusedFolderId(
+          metadata,
+          deterministicId('folder', dir.relPath),
+          usedFolderIds,
+        )
+    usedFolderIds.add(id)
     const color = sanitizeColor(stored?.color)
     if (!stored) {
       metadata.folders[dir.relPath] = { id, color, createdAt, updatedAt }
@@ -2523,6 +2601,7 @@ export async function loadDriveWorkspace(
       name,
       parentId: parent ? parent.id : null,
       color,
+      isTemplatesFolder: isTemplatesRootPath(dir.relPath),
       createdAt,
       updatedAt,
     }

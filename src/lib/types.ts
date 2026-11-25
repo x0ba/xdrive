@@ -89,6 +89,7 @@ export interface DriveFolder {
   name: string
   parentId: string | null
   color?: DriveFolderColor
+  isTemplatesFolder?: boolean
   createdAt: string
   updatedAt: string
 }

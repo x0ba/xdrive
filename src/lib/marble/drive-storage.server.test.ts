@@ -11,6 +11,7 @@ import {
   countMarbleNodes,
 } from './index'
 import {
+  createFolderOnDisk,
   deleteDocumentPermanentlyOnDisk,
   deleteFolderOnDisk,
   getTemplatesDir,
@@ -18,6 +19,7 @@ import {
   loadDriveWorkspace,
   moveDocumentOnDisk,
   renameDocumentOnDisk,
+  renameFolderOnDisk,
   restoreDocumentOnDisk,
   saveAsTemplateOnDisk,
   saveDocumentToDisk,
@@ -485,5 +487,164 @@ describe('drive-storage templates and seeding', () => {
       }),
     })
     expect(missingDocRes.status).toBe(404)
+  })
+
+  it('12. mints an unused folder ID and sets isTemplatesFolder markers when Templates is renamed and recreated', async () => {
+    await loadDriveWorkspace(countMarbleNodes)
+    const renamed = await renameFolderOnDisk({
+      oldPath: TEMPLATES_FOLDER_NAME,
+      newName: 'Old Templates',
+    })
+    expect(renamed.folder.id).toBe(TEMPLATES_FOLDER_ID)
+    expect(renamed.folder.isTemplatesFolder).toBe(false)
+
+    await saveDocumentToDisk({
+      slug: 'notes-draft',
+      folderPath: '',
+      source: SAMPLE_HTML,
+      meta: { id: 'doc-notes-draft', title: 'Notes Draft' },
+    })
+    const saved = await saveAsTemplateOnDisk({
+      sourceSlug: 'notes-draft',
+      sourceFolderPath: '',
+      title: 'Fresh Template',
+      folderId: TEMPLATES_FOLDER_ID,
+      nodeCountOf: countMarbleNodes,
+    })
+
+    expect(saved.folder.name).toBe(TEMPLATES_FOLDER_NAME)
+    expect(saved.folder.isTemplatesFolder).toBe(true)
+    expect(saved.folder.id).not.toBe(TEMPLATES_FOLDER_ID)
+
+    const extraTemplate = {
+      ...PREDEFINED_MARBLE_TEMPLATES[0],
+      id: 'tpl-upgrade-after-rename',
+      slug: 'upgrade-after-rename',
+      fileName: 'upgrade-after-rename.mrbl',
+      title: 'Upgrade After Rename',
+    }
+    await seedPremadeTemplatesOnDisk([
+      ...PREDEFINED_MARBLE_TEMPLATES,
+      extraTemplate,
+    ])
+
+    // Recreating a regular folder with the same name after renaming it also gets an unused ID.
+    const papersCreated = await createFolderOnDisk({ name: 'Papers' })
+    const papersRenamed = await renameFolderOnDisk({
+      oldPath: 'Papers',
+      newName: 'Papers Archive',
+    })
+    const papersRecreated = await createFolderOnDisk({ name: 'Papers' })
+    expect(papersRecreated.folder.id).not.toBe(papersCreated.folder.id)
+    expect(papersRecreated.folder.id).not.toBe(papersRenamed.folder.id)
+
+    const reloaded = await loadDriveWorkspace(countMarbleNodes)
+    const folderIds = reloaded.folders.map((folder) => folder.id)
+    expect(new Set(folderIds).size).toBe(folderIds.length)
+
+    const oldFolder = reloaded.folders.find(
+      (folder) => folder.name === 'Old Templates',
+    )
+    const newTemplatesFolder = reloaded.folders.find(
+      (folder) => folder.name === TEMPLATES_FOLDER_NAME,
+    )
+    expect(oldFolder?.id).toBe(TEMPLATES_FOLDER_ID)
+    expect(oldFolder?.isTemplatesFolder).toBe(false)
+    expect(newTemplatesFolder?.isTemplatesFolder).toBe(true)
+    expect(newTemplatesFolder?.id).not.toBe(TEMPLATES_FOLDER_ID)
+
+    const oldFolderDoc = reloaded.docs.find(
+      (doc) => doc.folderId === oldFolder?.id,
+    )
+    expect(oldFolderDoc?.isTemplate).toBe(false)
+    expect(
+      reloaded.docs.find((doc) => doc.id === saved.doc.id)?.isTemplate,
+    ).toBe(true)
+    expect(
+      reloaded.docs.find((doc) => doc.id === extraTemplate.id)?.folderId,
+    ).toBe(newTemplatesFolder?.id)
+  })
+
+  it('13. deduplicates seeded template slugs against existing Drive and Trash files without overwriting Trash', async () => {
+    const activePremade = PREDEFINED_MARBLE_TEMPLATES[0]
+    const trashedPremade = PREDEFINED_MARBLE_TEMPLATES[1]
+
+    const existingDriveHtml = SAMPLE_HTML.replace(
+      'Original Heading',
+      'User Active Drive Doc',
+    )
+    await saveDocumentToDisk({
+      slug: activePremade.slug,
+      folderPath: 'Papers',
+      source: existingDriveHtml,
+      meta: { id: 'doc-user-latex', title: 'User Active Drive Doc' },
+    })
+
+    const trashedUserHtml = SAMPLE_HTML.replace(
+      'Original Heading',
+      'User Trashed Notebook',
+    )
+    await saveDocumentToDisk({
+      slug: trashedPremade.slug,
+      folderPath: '',
+      source: trashedUserHtml,
+      meta: { id: 'doc-user-trashed', title: 'User Trashed Notebook' },
+    })
+    await trashDocumentOnDisk({
+      slug: trashedPremade.slug,
+      folderPath: '',
+    })
+
+    const workspace = await loadDriveWorkspace(countMarbleNodes)
+    const seededActiveMatch = workspace.docs.find(
+      (doc) => doc.id === activePremade.id,
+    )
+    const seededTrashedMatch = workspace.docs.find(
+      (doc) => doc.id === trashedPremade.id,
+    )
+    const userActiveDoc = workspace.docs.find(
+      (doc) => doc.id === 'doc-user-latex',
+    )
+    const userTrashedDoc = workspace.docs.find(
+      (doc) => doc.id === 'doc-user-trashed',
+    )
+
+    expect(seededActiveMatch?.slug).toBe(`${activePremade.slug}-2`)
+    expect(seededActiveMatch?.folder).toBe(TEMPLATES_FOLDER_NAME)
+    expect(seededTrashedMatch?.slug).toBe(`${trashedPremade.slug}-2`)
+    expect(seededTrashedMatch?.folder).toBe(TEMPLATES_FOLDER_NAME)
+
+    expect(userActiveDoc?.slug).toBe(activePremade.slug)
+    expect(userActiveDoc?.source).toBe(existingDriveHtml)
+    expect(userTrashedDoc?.slug).toBe(trashedPremade.slug)
+    expect(userTrashedDoc?.trashedAt).toBeTruthy()
+
+    // Trashing the seeded templates uses their deduplicated slugs and preserves existing Trash entries.
+    await trashDocumentOnDisk({
+      slug: seededTrashedMatch!.slug,
+      folderPath: TEMPLATES_FOLDER_NAME,
+    })
+    await trashDocumentOnDisk({
+      slug: seededActiveMatch!.slug,
+      folderPath: TEMPLATES_FOLDER_NAME,
+    })
+    await trashDocumentOnDisk({
+      slug: userActiveDoc!.slug,
+      folderPath: 'Papers',
+    })
+
+    const afterTrash = await loadDriveWorkspace(countMarbleNodes)
+    expect(
+      afterTrash.docs.find((doc) => doc.id === 'doc-user-trashed')?.source,
+    ).toBe(trashedUserHtml)
+    expect(
+      afterTrash.docs.find((doc) => doc.id === trashedPremade.id)?.source,
+    ).toBe(trashedPremade.source)
+    expect(
+      afterTrash.docs.find((doc) => doc.id === 'doc-user-latex')?.source,
+    ).toBe(existingDriveHtml)
+    expect(
+      afterTrash.docs.find((doc) => doc.id === activePremade.id)?.source,
+    ).toBe(activePremade.source)
   })
 })

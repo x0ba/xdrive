@@ -572,6 +572,7 @@ export async function POST({ request }: { request: Request }) {
             ? body.tags.filter((t): t is string => typeof t === 'string')
             : undefined,
           id: optionalString(body.id),
+          folderId: optionalString(body.folderId),
           slug: optionalString(body.slug),
           createdBy: body.createdBy as
             MarbleDocumentFile['createdBy'] | undefined,

@@ -20,7 +20,7 @@ import {
   Trash2,
   X,
 } from 'lucide-react'
-import { TEMPLATES_FOLDER_NAME } from '#/lib/marble'
+import { TEMPLATES_FOLDER_NAME, isTemplatesRootFolder } from '#/lib/marble'
 import type {
   DriveFolder,
   DriveFolderColor,
@@ -126,6 +126,7 @@ export function seedDriveFolders(docs: MarbleDocumentFile[]): {
         name: folderName,
         parentId: null,
         color: colorFor(folderName),
+        isTemplatesFolder: folderName === TEMPLATES_FOLDER_NAME,
         createdAt: doc.createdAt || now,
         updatedAt: doc.updatedAt || now,
       }
@@ -382,6 +383,7 @@ function CompactActionMenu({
       {open && (
         <div
           role="menu"
+          aria-label={label}
           className="absolute right-0 top-7 z-30 min-w-[168px] overflow-hidden rounded-md border border-[var(--xd-border-strong)] bg-[var(--xd-canvas)] py-1 shadow-lg"
         >
           {items.map((item) => (
@@ -545,10 +547,7 @@ export interface DriveFolderCardProps {
 }
 
 export function isTopLevelTemplatesFolder(folder: DriveFolder): boolean {
-  return (
-    folder.parentId === null &&
-    folder.name.toLowerCase() === TEMPLATES_FOLDER_NAME.toLowerCase()
-  )
+  return isTemplatesRootFolder(folder)
 }
 
 export function DriveFolderCard({

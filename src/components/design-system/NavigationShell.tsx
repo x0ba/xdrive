@@ -43,7 +43,7 @@ import {
 import { AppContextMenu } from '#/components/apps/shared'
 import type { ContextMenuItem } from '#/components/apps/shared'
 import { WorkspaceLink } from '#/components/routing/WorkspaceLink'
-import { TEMPLATES_FOLDER_NAME } from '#/lib/marble'
+import { isTemplatesRootFolder } from '#/lib/marble'
 import { docHref, folderHref, navHref } from '#/lib/routing'
 import type {
   DriveFolder,
@@ -807,9 +807,7 @@ export function SidebarRail({
               aria-current={isSelected ? 'page' : undefined}
               className="flex min-w-0 flex-1 items-center gap-1.5 text-left"
             >
-              {depth === 0 &&
-              folder.name.toLowerCase() ===
-                TEMPLATES_FOLDER_NAME.toLowerCase() ? (
+              {isTemplatesRootFolder(folder) ? (
                 <LayoutTemplate
                   className={`h-3.5 w-3.5 shrink-0 ${sidebarFolderColorClass(folder.color)}`}
                 />

@@ -1,4 +1,9 @@
-import type { MarbleDocumentFile, MarbleOp, ShareConfig } from '../types'
+import type {
+  DriveFolder,
+  MarbleDocumentFile,
+  MarbleOp,
+  ShareConfig,
+} from '../types'
 import {
   applyMarbleOpsClient,
   byteSizeOf,
@@ -9,6 +14,15 @@ import {
 
 export const TEMPLATES_FOLDER_NAME = 'Templates'
 export const TEMPLATES_FOLDER_ID = 'folder-templates'
+
+export function isTemplatesRootFolder(
+  folder: Pick<DriveFolder, 'name' | 'parentId' | 'isTemplatesFolder'>,
+): boolean {
+  if (typeof folder.isTemplatesFolder === 'boolean') {
+    return folder.isTemplatesFolder
+  }
+  return folder.parentId === null && folder.name === TEMPLATES_FOLDER_NAME
+}
 
 export const DOCUMENT_DESIGN_SYSTEM_ID = 'ws-document-design-system'
 export const DOCUMENT_DESIGN_SYSTEM_SLUG = 'document-design-system'
