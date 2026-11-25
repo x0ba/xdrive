@@ -339,12 +339,85 @@ export function parseLatexFromMarbleSource(source: string): LatexProjectState {
       }
     }
 
-    // 2. Legacy latex-paper.mrbl HTML conversion: extract title/authors if customized
+    // 2. Check for AI-generated LaTeX source inside <pre>/<code> or general custom HTML
     const paperTitle =
       doc.querySelector('[data-marble-id="paper-title-v1"]')?.textContent.trim() ||
+      doc.querySelector('h1')?.textContent.trim() ||
       doc.querySelector('title')?.textContent.trim()
     const paperAuthors =
       doc.querySelector('[data-marble-id="paper-authors"]')?.textContent.trim()
+
+    const rawTexBlock =
+      doc.querySelector('[data-marble-id="latex-main-source"]')?.textContent.trim() ||
+      Array.from(doc.querySelectorAll('pre, code'))
+        .map((el) => (el.textContent || '').trim())
+        .find((txt) => /\\documentclass|\\begin\{document\}|\\section\{/.test(txt))
+
+    if (rawTexBlock && rawTexBlock.length > 20) {
+      const base = cloneLatexState(DEFAULT_LATEX_SEED)
+      base.title = paperTitle || 'Untitled LaTeX Manuscript'
+      base.files = [
+        {
+          id: 'file-main',
+          path: 'main.tex',
+          kind: 'tex',
+          content: rawTexBlock,
+        },
+      ]
+      return base
+    }
+
+    const isDefaultPaper =
+      !paperTitle ||
+      paperTitle === 'Fault-Tolerant Memory with Concatenated Surface Codes' ||
+      Boolean(doc.querySelector('[data-marble-id="paper-title-v1"]'))
+
+    if (!isDefaultPaper) {
+      const latexArticles = doc.querySelectorAll('article')
+      const latexRoot =
+        doc.querySelector('main') ??
+        (latexArticles.length === 1 ? latexArticles[0] : null) ??
+        doc.body
+      const cloned = latexRoot.cloneNode(true) as HTMLElement
+      cloned
+        .querySelectorAll('script, style, template')
+        .forEach((node) => node.remove())
+      const bodyParts: string[] = []
+      for (const el of Array.from(cloned.querySelectorAll('h2, h3, p, li'))) {
+        const tag = el.tagName.toLowerCase()
+        const text = (el.textContent || '').trim()
+        if (!text) continue
+        if (tag === 'h2') bodyParts.push(`\\section{${text}}`)
+        else if (tag === 'h3') bodyParts.push(`\\subsection{${text}}`)
+        else if (tag === 'li') bodyParts.push(`\\item ${text}`)
+        else bodyParts.push(text)
+      }
+      if (bodyParts.length > 0) {
+        const base = cloneLatexState(DEFAULT_LATEX_SEED)
+        base.title = paperTitle
+        base.files = [
+          {
+            id: 'file-main',
+            path: 'main.tex',
+            kind: 'tex',
+            content: [
+              '\\documentclass[11pt,letterpaper]{article}',
+              '\\usepackage{amsmath,amssymb,hyperref}',
+              `\\title{${paperTitle}}`,
+              `\\author{${paperAuthors || 'xDrive Author'}}`,
+              '\\date{\\today}',
+              '\\begin{document}',
+              '\\maketitle',
+              '',
+              ...bodyParts,
+              '',
+              '\\end{document}',
+            ].join('\n'),
+          },
+        ]
+        return base
+      }
+    }
 
     const base = cloneLatexState(DEFAULT_LATEX_SEED)
     if (paperTitle && paperTitle !== 'Fault-Tolerant Memory with Concatenated Surface Codes') {

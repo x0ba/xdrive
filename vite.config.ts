@@ -17,6 +17,9 @@ const config = defineConfig({
   resolve: {
     tsconfigPaths: true,
   },
+  optimizeDeps: {
+    include: ['streamdown'],
+  },
   plugins: [
     ...(!isVitest
       ? [

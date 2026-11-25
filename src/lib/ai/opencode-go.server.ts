@@ -39,10 +39,15 @@ const META_TIMEOUT_MS = 12_000
 
 export interface OpenCodeGoPromptInput {
   prompt: string
+  systemPrompt?: string
+  history?: Array<{ role: 'user' | 'assistant'; content: string }>
   modelId?: string
+  reasoningEffort?: 'off' | 'low' | 'medium' | 'high' | 'max'
   sessionId?: string
   imageDataUrls?: string[]
   signal?: AbortSignal
+  onTextDelta?: (delta: string) => void
+  onThoughtDelta?: (delta: string) => void
 }
 
 export interface OpenCodeGoPromptOutput {
@@ -345,6 +350,49 @@ function pickBalancedReasoningEffort(efforts?: string[]): string | undefined {
   if (efforts.includes('low')) return 'low'
   if (efforts.includes('medium')) return 'medium'
   return undefined
+}
+
+function resolveReasoningEffort(
+  requested?: 'off' | 'low' | 'medium' | 'high' | 'max',
+  supportedEfforts?: string[],
+): string | undefined {
+  if (requested === 'off') return undefined
+  if (!requested) {
+    return pickBalancedReasoningEffort(supportedEfforts)
+  }
+  if (!supportedEfforts || supportedEfforts.length === 0) {
+    return requested
+  }
+  if (supportedEfforts.includes(requested)) return requested
+  const fallbackOrder: Record<
+    Exclude<NonNullable<typeof requested>, 'off'>,
+    string[]
+  > = {
+    low: ['low', 'minimal', 'medium', 'high'],
+    medium: ['medium', 'high', 'low', 'max'],
+    high: ['high', 'max', 'medium', 'low'],
+    max: ['max', 'xhigh', 'high', 'medium'],
+  }
+  for (const candidate of fallbackOrder[requested]) {
+    if (supportedEfforts.includes(candidate)) return candidate
+  }
+  return supportedEfforts[0]
+}
+
+function anthropicThinkingBudget(
+  requested?: 'off' | 'low' | 'medium' | 'high' | 'max',
+): number | undefined {
+  if (!requested || requested === 'off') return undefined
+  switch (requested) {
+    case 'low':
+      return 1024
+    case 'medium':
+      return 4096
+    case 'high':
+      return 10240
+    case 'max':
+      return 24576
+  }
 }
 
 function combineSignals(
@@ -787,7 +835,8 @@ class OpenCodeGoManager {
     )
     const supportsVision = catalogEntry?.supportsVision ?? true
     const maxTokens = Math.min(catalogEntry?.outputLimit ?? 16_384, 16_384)
-    const reasoningEffort = pickBalancedReasoningEffort(
+    const reasoningEffort = resolveReasoningEffort(
+      input.reasoningEffort,
       catalogEntry?.reasoningEfforts,
     )
     const sessionHeader = sanitizeSessionId(input.sessionId)
@@ -806,11 +855,16 @@ class OpenCodeGoManager {
           baseUrl,
           modelId: rawModelId,
           prompt: input.prompt,
+          systemPrompt: input.systemPrompt,
+          history: input.history,
           images,
           maxTokens,
+          reasoningEffort: input.reasoningEffort,
           sessionHeader,
           signal,
           controller,
+          onTextDelta: input.onTextDelta,
+          onThoughtDelta: input.onThoughtDelta,
         })
       }
       if (protocol === 'responses') {
@@ -819,11 +873,15 @@ class OpenCodeGoManager {
           baseUrl,
           modelId: rawModelId,
           prompt: input.prompt,
+          systemPrompt: input.systemPrompt,
+          history: input.history,
           images,
           reasoningEffort,
           sessionHeader,
           signal,
           controller,
+          onTextDelta: input.onTextDelta,
+          onThoughtDelta: input.onThoughtDelta,
         })
       }
       if (protocol === 'generate-content') {
@@ -832,10 +890,15 @@ class OpenCodeGoManager {
           baseUrl,
           modelId: rawModelId,
           prompt: input.prompt,
+          systemPrompt: input.systemPrompt,
+          history: input.history,
           images,
+          reasoningEffort: input.reasoningEffort,
           sessionHeader,
           signal,
           controller,
+          onTextDelta: input.onTextDelta,
+          onThoughtDelta: input.onThoughtDelta,
         })
       }
       return await this.callOpenAiChatCompletions({
@@ -843,11 +906,15 @@ class OpenCodeGoManager {
         baseUrl,
         modelId: rawModelId,
         prompt: input.prompt,
+        systemPrompt: input.systemPrompt,
+        history: input.history,
         images,
         reasoningEffort,
         sessionHeader,
         signal,
         controller,
+        onTextDelta: input.onTextDelta,
+        onThoughtDelta: input.onThoughtDelta,
       })
     } catch (error) {
       if (error instanceof OpenCodeGoError) throw error
@@ -903,11 +970,15 @@ class OpenCodeGoManager {
     baseUrl: string
     modelId: string
     prompt: string
+    systemPrompt?: string
+    history?: Array<{ role: 'user' | 'assistant'; content: string }>
     images: string[]
     reasoningEffort?: string
     sessionHeader: string
     signal: AbortSignal
     controller: AbortController
+    onTextDelta?: (delta: string) => void
+    onThoughtDelta?: (delta: string) => void
   }): Promise<OpenCodeGoPromptOutput> {
     const content =
       params.images.length > 0
@@ -920,9 +991,18 @@ class OpenCodeGoManager {
           ]
         : params.prompt
 
+    const messages: Array<Record<string, unknown>> = []
+    if (params.systemPrompt) {
+      messages.push({ role: 'system', content: params.systemPrompt })
+    }
+    for (const msg of params.history ?? []) {
+      messages.push({ role: msg.role, content: msg.content })
+    }
+    messages.push({ role: 'user', content })
+
     const body: Record<string, unknown> = {
       model: params.modelId,
-      messages: [{ role: 'user', content }],
+      messages,
       stream: true,
     }
     if (params.reasoningEffort) {
@@ -1020,14 +1100,19 @@ class OpenCodeGoManager {
       if (!delta) return
       if (typeof delta.content === 'string') {
         text += delta.content
+        params.onTextDelta?.(delta.content)
       } else if (Array.isArray(delta.content)) {
         for (const part of delta.content) {
-          if (typeof part.text === 'string') text += part.text
+          if (typeof part.text === 'string') {
+            text += part.text
+            params.onTextDelta?.(part.text)
+          }
         }
       }
       const reasoningDelta = delta.reasoning_content ?? delta.reasoning
       if (typeof reasoningDelta === 'string') {
         reasoningText += reasoningDelta
+        params.onThoughtDelta?.(reasoningDelta)
       }
     })
 
@@ -1045,11 +1130,15 @@ class OpenCodeGoManager {
     baseUrl: string
     modelId: string
     prompt: string
+    systemPrompt?: string
+    history?: Array<{ role: 'user' | 'assistant'; content: string }>
     images: string[]
     reasoningEffort?: string
     sessionHeader: string
     signal: AbortSignal
     controller: AbortController
+    onTextDelta?: (delta: string) => void
+    onThoughtDelta?: (delta: string) => void
   }): Promise<OpenCodeGoPromptOutput> {
     const contentParts: Array<Record<string, unknown>> = [
       { type: 'input_text', text: params.prompt },
@@ -1059,10 +1148,27 @@ class OpenCodeGoManager {
       })),
     ]
 
+    const inputItems: Array<Record<string, unknown>> = []
+    for (const msg of params.history ?? []) {
+      inputItems.push({
+        role: msg.role,
+        content: [
+          {
+            type: msg.role === 'assistant' ? 'output_text' : 'input_text',
+            text: msg.content,
+          },
+        ],
+      })
+    }
+    inputItems.push({ role: 'user', content: contentParts })
+
     const body: Record<string, unknown> = {
       model: params.modelId,
-      input: [{ role: 'user', content: contentParts }],
+      input: inputItems,
       stream: true,
+    }
+    if (params.systemPrompt) {
+      body.instructions = params.systemPrompt
     }
     if (params.reasoningEffort) {
       body.reasoning = { effort: params.reasoningEffort }
@@ -1165,12 +1271,14 @@ class OpenCodeGoManager {
         typeof record.delta === 'string'
       ) {
         text += record.delta
+        params.onTextDelta?.(record.delta)
       } else if (
         (kind === 'response.reasoning_summary_text.delta' ||
           kind === 'response.reasoning_text.delta') &&
         typeof record.delta === 'string'
       ) {
         reasoningText += record.delta
+        params.onThoughtDelta?.(record.delta)
       } else if (
         (kind === 'response.completed' || kind === 'response.incomplete') &&
         record.response
@@ -1198,11 +1306,16 @@ class OpenCodeGoManager {
     baseUrl: string
     modelId: string
     prompt: string
+    systemPrompt?: string
+    history?: Array<{ role: 'user' | 'assistant'; content: string }>
     images: string[]
     maxTokens: number
+    reasoningEffort?: 'off' | 'low' | 'medium' | 'high' | 'max'
     sessionHeader: string
     signal: AbortSignal
     controller: AbortController
+    onTextDelta?: (delta: string) => void
+    onThoughtDelta?: (delta: string) => void
   }): Promise<OpenCodeGoPromptOutput> {
     const contentBlocks: Array<Record<string, unknown>> = [
       { type: 'text', text: params.prompt },
@@ -1221,6 +1334,26 @@ class OpenCodeGoManager {
       }
     }
 
+    const messages: Array<Record<string, unknown>> = []
+    for (const msg of params.history ?? []) {
+      messages.push({ role: msg.role, content: msg.content })
+    }
+    messages.push({ role: 'user', content: contentBlocks })
+
+    const budget = anthropicThinkingBudget(params.reasoningEffort)
+    const requestBody: Record<string, unknown> = {
+      model: params.modelId,
+      max_tokens: budget ? Math.max(params.maxTokens, budget + 4096) : params.maxTokens,
+      messages,
+      stream: true,
+    }
+    if (params.systemPrompt) {
+      requestBody.system = params.systemPrompt
+    }
+    if (budget) {
+      requestBody.thinking = { type: 'enabled', budget_tokens: budget }
+    }
+
     const response = await fetch(`${params.baseUrl}/messages`, {
       method: 'POST',
       headers: {
@@ -1232,12 +1365,7 @@ class OpenCodeGoManager {
         'user-agent': USER_AGENT,
         'x-opencode-session': params.sessionHeader,
       },
-      body: JSON.stringify({
-        model: params.modelId,
-        max_tokens: params.maxTokens,
-        messages: [{ role: 'user', content: contentBlocks }],
-        stream: true,
-      }),
+      body: JSON.stringify(requestBody),
       signal: params.signal,
     })
 
@@ -1305,11 +1433,13 @@ class OpenCodeGoManager {
           typeof record.delta.text === 'string'
         ) {
           text += record.delta.text
+          params.onTextDelta?.(record.delta.text)
         } else if (
           record.delta.type === 'thinking_delta' &&
           typeof record.delta.thinking === 'string'
         ) {
           reasoningText += record.delta.thinking
+          params.onThoughtDelta?.(record.delta.thinking)
         }
       } else if (
         kind === 'message_delta' &&
@@ -1334,10 +1464,15 @@ class OpenCodeGoManager {
     baseUrl: string
     modelId: string
     prompt: string
+    systemPrompt?: string
+    history?: Array<{ role: 'user' | 'assistant'; content: string }>
     images: string[]
+    reasoningEffort?: 'off' | 'low' | 'medium' | 'high' | 'max'
     sessionHeader: string
     signal: AbortSignal
     controller: AbortController
+    onTextDelta?: (delta: string) => void
+    onThoughtDelta?: (delta: string) => void
   }): Promise<OpenCodeGoPromptOutput> {
     const parts: Array<Record<string, unknown>> = [{ text: params.prompt }]
     for (const dataUrl of params.images) {
@@ -1352,6 +1487,38 @@ class OpenCodeGoManager {
       }
     }
 
+    const contents: Array<Record<string, unknown>> = []
+    for (const msg of params.history ?? []) {
+      contents.push({
+        role: msg.role === 'assistant' ? 'model' : 'user',
+        parts: [{ text: msg.content }],
+      })
+    }
+    contents.push({ role: 'user', parts })
+
+    const requestBody: Record<string, unknown> = { contents }
+    if (params.systemPrompt) {
+      requestBody.systemInstruction = { parts: [{ text: params.systemPrompt }] }
+    }
+    if (params.reasoningEffort) {
+      const thinkingBudget =
+        params.reasoningEffort === 'off'
+          ? 0
+          : params.reasoningEffort === 'low'
+            ? 1024
+            : params.reasoningEffort === 'medium'
+              ? 4096
+              : params.reasoningEffort === 'high'
+                ? 10240
+                : 24576
+      requestBody.generationConfig = {
+        thinkingConfig: {
+          includeThoughts: params.reasoningEffort !== 'off',
+          thinkingBudget,
+        },
+      }
+    }
+
     const url = `${params.baseUrl}/models/${encodeURIComponent(params.modelId)}:streamGenerateContent?alt=sse`
     const response = await fetch(url, {
       method: 'POST',
@@ -1363,9 +1530,7 @@ class OpenCodeGoManager {
         'user-agent': USER_AGENT,
         'x-opencode-session': params.sessionHeader,
       },
-      body: JSON.stringify({
-        contents: [{ role: 'user', parts }],
-      }),
+      body: JSON.stringify(requestBody),
       signal: params.signal,
     })
 
@@ -1405,8 +1570,10 @@ class OpenCodeGoManager {
         if (typeof part.text !== 'string') continue
         if (part.thought) {
           reasoningText += part.text
+          params.onThoughtDelta?.(part.text)
         } else {
           text += part.text
+          params.onTextDelta?.(part.text)
         }
       }
     }

@@ -99,8 +99,11 @@ interface InstalledRegistryMetadata {
 export interface AntigravityPromptInput {
   prompt: string
   modelId?: string
+  reasoningEffort?: 'off' | 'low' | 'medium' | 'high' | 'max'
   imageDataUrls?: string[]
   signal?: AbortSignal
+  onTextDelta?: (delta: string) => void
+  onThoughtDelta?: (delta: string) => void
 }
 
 export interface AntigravityPromptOutput {
@@ -988,6 +991,45 @@ class AntigravityAcpManager {
         }
       }
 
+      if (input.reasoningEffort) {
+        const reasoningConfig = discovered.configOptions.find(
+          (opt) =>
+            opt.category === 'thought_level' ||
+            opt.category === 'reasoning' ||
+            /reason|think|effort/i.test(`${opt.id} ${opt.name}`),
+        )
+        if (reasoningConfig && reasoningConfig.options.length > 0) {
+          const desired = input.reasoningEffort.toLowerCase()
+          const match =
+            reasoningConfig.options.find(
+              (choice) =>
+                choice.value.toLowerCase() === desired ||
+                choice.name.toLowerCase() === desired,
+            ) ??
+            reasoningConfig.options.find((choice) =>
+              `${choice.value} ${choice.name}`.toLowerCase().includes(desired),
+            ) ??
+            (desired === 'off'
+              ? reasoningConfig.options.find((choice) =>
+                  /off|none|minimal|disabled/i.test(
+                    `${choice.value} ${choice.name}`,
+                  ),
+                )
+              : undefined)
+          if (match && match.value !== reasoningConfig.currentValue) {
+            try {
+              await connection.agent.request('session/set_config_option', {
+                sessionId: activeSession.sessionId,
+                configId: reasoningConfig.id,
+                value: match.value,
+              })
+            } catch {
+              // Ignore if model does not support changing reasoning option.
+            }
+          }
+        }
+      }
+
       const blocks: ContentBlock[] = [{ type: 'text', text: input.prompt }]
       const supportsImages = Boolean(
         init.agentCapabilities?.promptCapabilities?.image,
@@ -1027,11 +1069,13 @@ class AntigravityAcpManager {
           update.content.type === 'text'
         ) {
           text += update.content.text
+          input.onTextDelta?.(update.content.text)
         } else if (
           update.sessionUpdate === 'agent_thought_chunk' &&
           update.content.type === 'text'
         ) {
           currentThought += update.content.text
+          input.onThoughtDelta?.(update.content.text)
         }
         msg = await activeSession.nextUpdate()
       }

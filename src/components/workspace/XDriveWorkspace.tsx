@@ -58,6 +58,20 @@ import {
   MarbleSourceInspector,
 } from '#/components/workspace/MarbleSourceInspector'
 import { DocsApp, LatexApp, NotesApp, SlidesApp } from '#/components/apps'
+import { DriveChatView } from '#/components/chat'
+import {
+  buildDriveChatModels,
+  buildDriveSnapshot,
+  streamDriveChat,
+} from '#/lib/ai/drive-chat-client'
+import type {
+  DriveChatAction,
+  DriveChatMessage,
+  DriveChatMode,
+  DriveChatThread,
+  DriveContextRef,
+  ReasoningEffort,
+} from '#/lib/ai/drive-chat-types'
 import {
   DOCUMENT_DESIGN_SYSTEM_SLUG,
   DOCUMENT_DONTS_SYSTEM_SLUG,
@@ -114,6 +128,48 @@ import type {
   SketchStroke,
 } from '#/lib/types'
 import { cn } from '#/lib/utils'
+
+const CHAT_STORAGE_KEY = 'xdrive.drive-chat.threads.v1'
+
+function createBlankChatThread(
+  modelId: string,
+  reasoningEffort: ReasoningEffort = 'high',
+  mode: DriveChatMode = 'review',
+): DriveChatThread {
+  const now = new Date().toISOString()
+  return {
+    id: `chat-${shortSha()}`,
+    title: 'New chat',
+    createdAt: now,
+    updatedAt: now,
+    modelId,
+    reasoningEffort,
+    mode,
+    messages: [],
+  }
+}
+
+function loadStoredChatThreads(): DriveChatThread[] | null {
+  if (typeof window === 'undefined') return null
+  try {
+    const raw = window.localStorage.getItem(CHAT_STORAGE_KEY)
+    if (!raw) return null
+    const parsed: unknown = JSON.parse(raw)
+    if (!Array.isArray(parsed) || parsed.length === 0) return null
+    return (parsed as DriveChatThread[]).map((item) => ({
+      ...item,
+      messages: (Array.isArray(item.messages) ? item.messages : []).map(
+        (msg) => ({
+          ...msg,
+          isStreaming: false,
+          streamingPhase: undefined,
+        }),
+      ),
+    }))
+  } catch {
+    return null
+  }
+}
 
 export interface XDriveWorkspaceProps {
   initialTheme?: 'dark' | 'light'
@@ -692,11 +748,27 @@ export function XDriveWorkspace({
   const [paletteIndex, setPaletteIndex] = useState(0)
   const [agentStatus, setAgentStatus] = useState<string | null>(null)
   const [frameDoc, setFrameDoc] = useState('')
+  const [chatReasoningEffort, setChatReasoningEffort] =
+    useState<ReasoningEffort>('high')
+  const [chatMode, setChatMode] = useState<DriveChatMode>('review')
+  const [chatThreads, setChatThreads] = useState<DriveChatThread[]>(() => [
+    createBlankChatThread('antigravity/default', 'high', 'review'),
+  ])
+  const [activeChatThreadId, setActiveChatThreadId] = useState<string>(
+    () => chatThreads[0]?.id ?? '',
+  )
+  const [chatStreamingThreadId, setChatStreamingThreadId] = useState<
+    string | null
+  >(null)
 
   const activeTabRef = useRef(activeTabId)
   activeTabRef.current = activeTabId
   const libraryRef = useRef<MarbleDocumentFile[]>([])
   const allDocsRef = useRef<MarbleDocumentFile[]>([])
+  const foldersRef = useRef<DriveFolder[]>([])
+  const chatAbortRef = useRef<AbortController | null>(null)
+  const chatUndoMapRef = useRef(new Map<string, () => void>())
+  const chatHydratedRef = useRef(false)
   const sourceRef = useRef(new Map<string, string>())
   const previewRun = useRef(0)
   const shownSourceRef = useRef<string | null>(null)
@@ -737,7 +809,40 @@ export function XDriveWorkspace({
   )
   libraryRef.current = library
   allDocsRef.current = [...docs, ...templates]
+  foldersRef.current = folders
   for (const doc of library) sourceRef.current.set(doc.id, doc.source)
+
+  useEffect(() => {
+    const stored = loadStoredChatThreads()
+    if (stored && stored.length > 0) {
+      setChatThreads(stored)
+      setActiveChatThreadId(stored[0].id)
+    }
+    chatHydratedRef.current = true
+  }, [])
+
+  useEffect(() => {
+    if (!chatHydratedRef.current || typeof window === 'undefined') return
+    try {
+      const sanitized = chatThreads.slice(0, 30).map((thread) => ({
+        ...thread,
+        messages: thread.messages.map((msg) => ({
+          ...msg,
+          isStreaming: false,
+          streamingPhase: undefined,
+        })),
+      }))
+      window.localStorage.setItem(CHAT_STORAGE_KEY, JSON.stringify(sanitized))
+    } catch {
+      // Ignore storage quota errors.
+    }
+  }, [chatThreads])
+
+  useEffect(() => {
+    return () => {
+      chatAbortRef.current?.abort()
+    }
+  }, [])
 
   const findDoc = (id: string | null | undefined) =>
     library.find((doc) => doc.id === id) ?? null
@@ -768,6 +873,16 @@ export function XDriveWorkspace({
     const live = connectedModelsFromSubscriptions(subscriptions)
     return live.length > 0 ? live : []
   }, [subscriptions])
+
+  const driveChatModels = useMemo(
+    () =>
+      buildDriveChatModels({
+        subscriptions,
+        antigravityStatus,
+        openCodeGoStatus,
+      }),
+    [subscriptions, antigravityStatus, openCodeGoStatus],
+  )
 
   const composerModels = useMemo<
     Pick<AIModelSpec, 'id' | 'name' | 'providerId' | 'badge' | 'role'>[]
@@ -2049,9 +2164,817 @@ export function XDriveWorkspace({
     return () => window.clearInterval(timer)
   }, [trashRetentionDays])
 
+  function updateChatMessage(
+    threadId: string,
+    msgId: string,
+    updater: (msg: DriveChatMessage) => DriveChatMessage,
+  ) {
+    setChatThreads((prev) =>
+      prev.map((item) =>
+        item.id !== threadId
+          ? item
+          : {
+              ...item,
+              updatedAt: new Date().toISOString(),
+              messages: item.messages.map((msg) =>
+                msg.id === msgId ? updater(msg) : msg,
+              ),
+            },
+      ),
+    )
+  }
+
+  function updateChatAction(
+    threadId: string,
+    msgId: string,
+    actionId: string,
+    updater: (action: DriveChatAction) => DriveChatAction,
+  ) {
+    updateChatMessage(threadId, msgId, (msg) => ({
+      ...msg,
+      actions: (msg.actions ?? []).map((act) =>
+        act.id === actionId ? updater(act) : act,
+      ),
+    }))
+  }
+
+  function executeDriveChatAction(
+    threadId: string,
+    msgId: string,
+    action: DriveChatAction,
+  ) {
+    const now = new Date().toISOString()
+    try {
+      if (action.kind === 'edit_document') {
+        const target = allDocsRef.current.find((d) => d.id === action.docId)
+        if (!target) {
+          throw new Error(`Document "${action.docTitle}" was not found.`)
+        }
+        const priorSource = sourceRef.current.get(target.id) ?? target.source
+        let nextSource = priorSource
+        if (action.replacementSource) {
+          nextSource = action.replacementSource
+        } else if (action.ops.length > 0) {
+          nextSource = applyMarbleOpsClient(priorSource, action.ops).source
+        }
+        sourceRef.current.set(target.id, nextSource)
+        if (activeTabRef.current === target.id) {
+          shownSourceRef.current = nextSource
+        }
+        const checkpoint: MarbleCheckpoint = {
+          sha: shortSha(),
+          label: `Chat · ${action.summary}`,
+          timestamp: Date.now(),
+          author: 'Drive Chat',
+          opsCount: Math.max(action.ops.length, 1),
+          source: nextSource,
+        }
+        patchFile(target.id, (doc) => ({
+          ...doc,
+          source: nextSource,
+          nodeCount: countMarbleNodes(nextSource),
+          byteSize: byteSizeOf(nextSource),
+          version: doc.version + 1,
+          updatedAt: now,
+          syncState: 'saving',
+          lastEditedBy: { name: 'Drive Chat', initials: 'AI', isAi: true },
+          checkpoints: [checkpoint, ...doc.checkpoints].slice(0, 40),
+        }))
+        persist(target.id, target.slug, priorSource, action.ops, nextSource)
+        chatUndoMapRef.current.set(action.id, () => {
+          sourceRef.current.set(target.id, priorSource)
+          patchFile(target.id, (doc) => ({
+            ...doc,
+            source: priorSource,
+            nodeCount: countMarbleNodes(priorSource),
+            byteSize: byteSizeOf(priorSource),
+            version: doc.version + 1,
+            updatedAt: new Date().toISOString(),
+            syncState: 'saving',
+          }))
+          persist(target.id, target.slug, nextSource, [], priorSource)
+        })
+        updateChatAction(threadId, msgId, action.id, (act) => ({
+          ...act,
+          status: 'applied',
+          error: undefined,
+        }))
+        return
+      }
+
+      if (action.kind === 'create_document') {
+        const matchedFolder =
+          (action.folderId
+            ? foldersRef.current.find((f) => f.id === action.folderId)
+            : null) ??
+          foldersRef.current.find(
+            (f) => f.name.toLowerCase() === action.folderName.toLowerCase(),
+          ) ??
+          null
+        const nodeCount = countMarbleNodes(action.source)
+        const byteSize = byteSizeOf(action.source)
+        const draftDoc: MarbleDocumentFile = {
+          id: `doc-${shortSha()}`,
+          slug: action.slug,
+          fileName: `${action.slug}.mrbl`,
+          title: action.title,
+          description: action.description,
+          category: action.category,
+          isTemplate: false,
+          source: action.source,
+          nodeCount,
+          byteSize,
+          version: 1,
+          syncState: 'saved',
+          createdAt: now,
+          updatedAt: now,
+          createdBy: { name: 'Drive Chat', initials: 'AI', isAi: true },
+          lastEditedBy: { name: 'Drive Chat', initials: 'AI', isAi: true },
+          starred: false,
+          pinned: false,
+          tags: action.tags,
+          folder: matchedFolder ? matchedFolder.name : 'My Drive',
+          folderId: matchedFolder ? matchedFolder.id : null,
+          share: {
+            isPublicLinkEnabled: false,
+            publicLinkUrl: `https://xdrive.app/d/${action.slug}`,
+            publicPermission: 'view_only',
+            allowDuplication: true,
+            sharedAiDailyLimit: 40,
+            sharedAiUsedToday: 0,
+            collaborators: [],
+          },
+          checkpoints: [
+            {
+              sha: shortSha(),
+              label: 'Created via Drive Chat',
+              timestamp: Date.now(),
+              author: 'Drive Chat',
+              opsCount: nodeCount,
+              source: action.source,
+            },
+          ],
+          intentHistory: [],
+        }
+        const adopted = adoptDocument(draftDoc, allDocsRef.current)
+        const created: MarbleDocumentFile = {
+          ...adopted,
+          folder: matchedFolder ? matchedFolder.name : 'My Drive',
+          folderId: matchedFolder ? matchedFolder.id : null,
+        }
+        allDocsRef.current = [created, ...allDocsRef.current]
+        setDocs((prev) => [created, ...prev])
+        persist(created.id, created.slug, created.source, [], created.source)
+        chatUndoMapRef.current.set(action.id, () => {
+          setDocs((prev) => prev.filter((d) => d.id !== created.id))
+          cleanupRemovedDocIds(new Set([created.id]))
+          syncTrashApi({ action: 'delete', slug: created.slug })
+        })
+        updateChatAction(threadId, msgId, action.id, (act) =>
+          act.kind === 'create_document'
+            ? {
+                ...act,
+                status: 'applied',
+                createdDocId: created.id,
+                error: undefined,
+              }
+            : act,
+        )
+        return
+      }
+
+      if (action.kind === 'rename_document') {
+        const target = allDocsRef.current.find((d) => d.id === action.docId)
+        if (!target) {
+          throw new Error(`Document "${action.docTitle}" was not found.`)
+        }
+        const prevTitle = target.title
+        const prevDescription = target.description
+        const prevTags = target.tags
+        patchFile(target.id, (doc) => ({
+          ...doc,
+          title: action.nextTitle,
+          description: action.nextDescription ?? doc.description,
+          tags: action.nextTags ?? doc.tags,
+          updatedAt: now,
+        }))
+        chatUndoMapRef.current.set(action.id, () => {
+          patchFile(target.id, (doc) => ({
+            ...doc,
+            title: prevTitle,
+            description: prevDescription,
+            tags: prevTags,
+            updatedAt: new Date().toISOString(),
+          }))
+        })
+        updateChatAction(threadId, msgId, action.id, (act) => ({
+          ...act,
+          status: 'applied',
+          error: undefined,
+        }))
+        return
+      }
+
+      if (action.kind === 'move_document') {
+        const target = allDocsRef.current.find((d) => d.id === action.docId)
+        if (!target) {
+          throw new Error(`Document "${action.docTitle}" was not found.`)
+        }
+        const prevFolderId = target.folderId ?? null
+        const prevFolder = target.folder
+        const resolvedFolder =
+          (action.targetFolderId
+            ? foldersRef.current.find((f) => f.id === action.targetFolderId)
+            : null) ??
+          foldersRef.current.find(
+            (f) =>
+              f.name.toLowerCase() === action.targetFolderName.toLowerCase(),
+          ) ??
+          null
+        const nextFolderId = resolvedFolder ? resolvedFolder.id : null
+        const nextFolderName = resolvedFolder ? resolvedFolder.name : 'My Drive'
+        patchFile(target.id, (doc) => ({
+          ...doc,
+          folderId: nextFolderId,
+          folder: nextFolderName,
+          updatedAt: now,
+        }))
+        chatUndoMapRef.current.set(action.id, () => {
+          patchFile(target.id, (doc) => ({
+            ...doc,
+            folderId: prevFolderId,
+            folder: prevFolder,
+            updatedAt: new Date().toISOString(),
+          }))
+        })
+        updateChatAction(threadId, msgId, action.id, (act) =>
+          act.kind === 'move_document'
+            ? {
+                ...act,
+                targetFolderId: nextFolderId,
+                targetFolderName: nextFolderName,
+                status: 'applied',
+                error: undefined,
+              }
+            : act,
+        )
+        return
+      }
+
+      if (action.kind === 'update_document_meta') {
+        const target = allDocsRef.current.find((d) => d.id === action.docId)
+        if (!target) {
+          throw new Error(`Document "${action.docTitle}" was not found.`)
+        }
+        const prevStarred = target.starred
+        const prevPinned = target.pinned
+        const prevTags = target.tags
+        const prevDescription = target.description
+        patchFile(target.id, (doc) => ({
+          ...doc,
+          starred: action.starred ?? doc.starred,
+          pinned: action.pinned ?? doc.pinned,
+          tags: action.tags ?? doc.tags,
+          description: action.description ?? doc.description,
+          updatedAt: now,
+        }))
+        chatUndoMapRef.current.set(action.id, () => {
+          patchFile(target.id, (doc) => ({
+            ...doc,
+            starred: prevStarred,
+            pinned: prevPinned,
+            tags: prevTags,
+            description: prevDescription,
+            updatedAt: new Date().toISOString(),
+          }))
+        })
+        updateChatAction(threadId, msgId, action.id, (act) => ({
+          ...act,
+          status: 'applied',
+          error: undefined,
+        }))
+        return
+      }
+
+      if (action.kind === 'trash_document') {
+        moveDocumentToTrash(action.docId)
+        chatUndoMapRef.current.set(action.id, () => {
+          restoreDocumentFromTrash(action.docId)
+        })
+        updateChatAction(threadId, msgId, action.id, (act) => ({
+          ...act,
+          status: 'applied',
+          error: undefined,
+        }))
+        return
+      }
+
+      if (action.kind === 'restore_document') {
+        restoreDocumentFromTrash(action.docId)
+        chatUndoMapRef.current.set(action.id, () => {
+          moveDocumentToTrash(action.docId)
+        })
+        updateChatAction(threadId, msgId, action.id, (act) => ({
+          ...act,
+          status: 'applied',
+          error: undefined,
+        }))
+        return
+      }
+
+      if (action.kind === 'create_folder') {
+        const created: DriveFolder = {
+          id: `folder-${shortSha()}`,
+          name: action.name,
+          parentId: action.parentId,
+          color: action.color,
+          createdAt: now,
+          updatedAt: now,
+        }
+        foldersRef.current = [...foldersRef.current, created]
+        setFolders((prev) => [...prev, created])
+        chatUndoMapRef.current.set(action.id, () => {
+          deleteFolder(created)
+        })
+        updateChatAction(threadId, msgId, action.id, (act) =>
+          act.kind === 'create_folder'
+            ? {
+                ...act,
+                status: 'applied',
+                createdFolderId: created.id,
+                error: undefined,
+              }
+            : act,
+        )
+        return
+      }
+
+      if (action.kind === 'rename_folder') {
+        const target = foldersRef.current.find((f) => f.id === action.folderId)
+        if (!target) {
+          throw new Error(`Folder "${action.folderName}" was not found.`)
+        }
+        const prevName = target.name
+        const prevColor = target.color
+        setFolders((prev) =>
+          prev.map((f) =>
+            f.id === target.id
+              ? {
+                  ...f,
+                  name: action.nextName,
+                  color: action.nextColor ?? f.color,
+                  updatedAt: now,
+                }
+              : f,
+          ),
+        )
+        setDocs((prev) =>
+          prev.map((doc) =>
+            doc.folderId === target.id ? { ...doc, folder: action.nextName } : doc,
+          ),
+        )
+        chatUndoMapRef.current.set(action.id, () => {
+          setFolders((prev) =>
+            prev.map((f) =>
+              f.id === target.id
+                ? { ...f, name: prevName, color: prevColor }
+                : f,
+            ),
+          )
+          setDocs((prev) =>
+            prev.map((doc) =>
+              doc.folderId === target.id ? { ...doc, folder: prevName } : doc,
+            ),
+          )
+        })
+        updateChatAction(threadId, msgId, action.id, (act) => ({
+          ...act,
+          status: 'applied',
+          error: undefined,
+        }))
+        return
+      }
+
+      {
+        const target = foldersRef.current.find((f) => f.id === action.folderId)
+        if (!target) {
+          throw new Error(`Folder "${action.folderName}" was not found.`)
+        }
+        const snapshotFolders = [...foldersRef.current]
+        const affectedDocs = docs
+          .filter((d) => d.folderId === target.id)
+          .map((d) => ({ id: d.id, folderId: d.folderId ?? null, folder: d.folder }))
+        deleteFolder(target)
+        chatUndoMapRef.current.set(action.id, () => {
+          setFolders(snapshotFolders)
+          setDocs((prev) =>
+            prev.map((d) => {
+              const restored = affectedDocs.find((item) => item.id === d.id)
+              return restored
+                ? { ...d, folderId: restored.folderId, folder: restored.folder }
+                : d
+            }),
+          )
+        })
+        updateChatAction(threadId, msgId, action.id, (act) => ({
+          ...act,
+          status: 'applied',
+          error: undefined,
+        }))
+      }
+    } catch (error) {
+      updateChatAction(threadId, msgId, action.id, (act) => ({
+        ...act,
+        status: 'failed',
+        error:
+          error instanceof Error ? error.message : 'Failed to apply action.',
+      }))
+    }
+  }
+
+  function handleApplyDriveChatAction(msgId: string, actionId: string) {
+    const chatThread = chatThreads.find((t) => t.id === activeChatThreadId)
+    const msg = chatThread?.messages.find((m) => m.id === msgId)
+    const action = msg?.actions?.find((a) => a.id === actionId)
+    if (!chatThread || !action || action.status !== 'proposed') return
+    executeDriveChatAction(chatThread.id, msgId, action)
+  }
+
+  function handleApplyAllDriveChatActions(msgId: string) {
+    const chatThread = chatThreads.find((t) => t.id === activeChatThreadId)
+    const msg = chatThread?.messages.find((m) => m.id === msgId)
+    if (!chatThread || !msg?.actions) return
+    for (const action of msg.actions) {
+      if (action.status === 'proposed') {
+        executeDriveChatAction(chatThread.id, msgId, action)
+      }
+    }
+  }
+
+  function handleDiscardDriveChatAction(msgId: string, actionId: string) {
+    updateChatAction(activeChatThreadId, msgId, actionId, (act) =>
+      act.status === 'proposed' ? { ...act, status: 'discarded' } : act,
+    )
+  }
+
+  function handleDiscardAllDriveChatActions(msgId: string) {
+    updateChatMessage(activeChatThreadId, msgId, (msg) => ({
+      ...msg,
+      actions: (msg.actions ?? []).map((act) =>
+        act.status === 'proposed' ? { ...act, status: 'discarded' } : act,
+      ),
+    }))
+  }
+
+  function handleUndoDriveChatAction(msgId: string, actionId: string) {
+    const undo = chatUndoMapRef.current.get(actionId)
+    if (!undo) return
+    undo()
+    chatUndoMapRef.current.delete(actionId)
+    updateChatAction(activeChatThreadId, msgId, actionId, (act) => ({
+      ...act,
+      status: 'undone',
+    }))
+  }
+
+  function handleNewChatThread() {
+    const next = createBlankChatThread(modelId, chatReasoningEffort, chatMode)
+    setChatThreads((prev) => [next, ...prev])
+    setActiveChatThreadId(next.id)
+  }
+
+  function handleStopDriveChat() {
+    chatAbortRef.current?.abort()
+    chatAbortRef.current = null
+    if (chatStreamingThreadId) {
+      setChatThreads((prev) =>
+        prev.map((item) =>
+          item.id !== chatStreamingThreadId
+            ? item
+            : {
+                ...item,
+                messages: item.messages.map((msg) =>
+                  msg.isStreaming
+                    ? { ...msg, isStreaming: false, streamingPhase: undefined }
+                    : msg,
+                ),
+              },
+        ),
+      )
+    }
+    setChatStreamingThreadId(null)
+  }
+
+  async function runDriveChatTurn(params: {
+    threadId: string
+    historyMessages: Array<{ role: 'user' | 'assistant'; content: string }>
+    userPrompt: string
+    contextRefs: DriveContextRef[]
+    assistantMsgId: string
+  }) {
+    const {
+      threadId,
+      historyMessages,
+      userPrompt,
+      contextRefs,
+      assistantMsgId,
+    } = params
+
+    chatAbortRef.current?.abort()
+    const abortController = new AbortController()
+    chatAbortRef.current = abortController
+    setChatStreamingThreadId(threadId)
+
+    const selectedModel =
+      driveChatModels.find((m) => m.id === modelId) ??
+      driveChatModels.find((m) => m.connected) ??
+      driveChatModels.at(0)
+    const resolvedModelId = selectedModel ? selectedModel.id : modelId
+    const resolvedProviderId = selectedModel
+      ? selectedModel.providerId
+      : providerFor(resolvedModelId, connectedModels)
+    const startedAt = Date.now()
+    let thinkingEndedAt: number | null = null
+
+    const snapshot = buildDriveSnapshot({
+      docs: activeDocs,
+      trashedDocs,
+      folders,
+      focusedRefs: contextRefs,
+      query: userPrompt,
+    })
+
+    try {
+      await streamDriveChat(
+        {
+          threadId,
+          modelId: resolvedModelId,
+          providerId: resolvedProviderId,
+          reasoningEffort: chatReasoningEffort,
+          mode: chatMode,
+          messages: historyMessages,
+          drive: snapshot,
+        },
+        (event) => {
+          if (event.type === 'status') {
+            updateChatMessage(threadId, assistantMsgId, (msg) => ({
+              ...msg,
+              streamingPhase: event.phase,
+            }))
+            return
+          }
+          if (event.type === 'thought_delta') {
+            updateChatMessage(threadId, assistantMsgId, (msg) => {
+              const prevThoughts = msg.thoughts ?? []
+              const merged =
+                prevThoughts.length > 0
+                  ? [
+                      ...prevThoughts.slice(0, -1),
+                      `${prevThoughts[prevThoughts.length - 1]}${event.delta}`,
+                    ]
+                  : [event.delta]
+              return {
+                ...msg,
+                streamingPhase: 'thinking',
+                thoughts: merged,
+              }
+            })
+            return
+          }
+          if (event.type === 'text_delta') {
+            if (thinkingEndedAt === null) thinkingEndedAt = Date.now()
+            updateChatMessage(threadId, assistantMsgId, (msg) => ({
+              ...msg,
+              streamingPhase: 'answering',
+              thinkingDurationMs:
+                msg.thinkingDurationMs ?? thinkingEndedAt! - startedAt,
+              content: `${msg.content}${event.delta}`,
+            }))
+            return
+          }
+          if (event.type === 'done') {
+            const durationMs =
+              thinkingEndedAt !== null
+                ? thinkingEndedAt - startedAt
+                : Date.now() - startedAt
+            const resolvedName =
+              driveChatModels.find((m) => m.id === event.runtime.modelId)
+                ?.name ??
+              (selectedModel ? selectedModel.name : event.runtime.modelId)
+            updateChatMessage(threadId, assistantMsgId, (msg) => ({
+              ...msg,
+              content: event.answer,
+              modelId: event.runtime.modelId,
+              modelName: resolvedName,
+              providerId: event.runtime.providerId,
+              thoughts:
+                event.thoughts.length > 0 ? event.thoughts : msg.thoughts,
+              thinkingDurationMs: durationMs,
+              referencedDocIds: event.referencedDocIds,
+              actions: event.actions,
+              isStreaming: false,
+              streamingPhase: undefined,
+            }))
+            if (chatMode === 'auto' && event.actions.length > 0) {
+              for (const action of event.actions) {
+                executeDriveChatAction(threadId, assistantMsgId, action)
+              }
+            }
+            return
+          }
+          if (
+            event.providerId === 'opencode-go' &&
+            (event.authRequired ||
+              event.entitlementRequired ||
+              event.rateLimited)
+          ) {
+            void refreshOpenCodeGo()
+          } else if (event.authRequired) {
+            void refreshAntigravity()
+          }
+          updateChatMessage(threadId, assistantMsgId, (msg) => ({
+            ...msg,
+            isStreaming: false,
+            streamingPhase: undefined,
+            error: event.error,
+          }))
+        },
+        abortController.signal,
+      )
+    } catch (error) {
+      if (!abortController.signal.aborted) {
+        updateChatMessage(threadId, assistantMsgId, (msg) => ({
+          ...msg,
+          isStreaming: false,
+          streamingPhase: undefined,
+          error:
+            error instanceof Error
+              ? error.message
+              : 'Drive Chat request failed.',
+        }))
+      }
+    } finally {
+      if (chatAbortRef.current === abortController) {
+        chatAbortRef.current = null
+      }
+      setChatStreamingThreadId((current) =>
+        current === threadId ? null : current,
+      )
+      updateChatMessage(threadId, assistantMsgId, (msg) =>
+        msg.isStreaming
+          ? { ...msg, isStreaming: false, streamingPhase: undefined }
+          : msg,
+      )
+    }
+  }
+
+  function handleSendDriveChatMessage(input: {
+    text: string
+    contextRefs: DriveContextRef[]
+  }) {
+    const text = input.text.trim()
+    if (!text) return
+    const currentThread =
+      chatThreads.find((t) => t.id === activeChatThreadId) ?? chatThreads.at(0)
+    if (!currentThread) return
+
+    const selectedModel =
+      driveChatModels.find((m) => m.id === modelId) ??
+      driveChatModels.find((m) => m.connected) ??
+      driveChatModels.at(0)
+    const now = new Date().toISOString()
+
+    const userMsg: DriveChatMessage = {
+      id: messageId('chat-u'),
+      role: 'user',
+      content: text,
+      createdAt: now,
+      contextRefs:
+        input.contextRefs.length > 0 ? input.contextRefs : undefined,
+    }
+    const assistantMsg: DriveChatMessage = {
+      id: messageId('chat-a'),
+      role: 'assistant',
+      content: '',
+      createdAt: now,
+      modelId: selectedModel ? selectedModel.id : modelId,
+      modelName: selectedModel ? selectedModel.name : modelId,
+      providerId: selectedModel ? selectedModel.providerId : undefined,
+      reasoningEffort: chatReasoningEffort,
+      mode: chatMode,
+      isStreaming: true,
+      streamingPhase: 'thinking',
+    }
+
+    const nextTitle =
+      currentThread.messages.length === 0
+        ? text.replace(/\s+/g, ' ').slice(0, 52)
+        : currentThread.title
+
+    const historyMessages = [
+      ...currentThread.messages
+        .filter((m) => m.role === 'user' || m.role === 'assistant')
+        .filter((m) => m.content.trim().length > 0)
+        .map((m) => ({
+          role: m.role as 'user' | 'assistant',
+          content: m.content,
+        })),
+      { role: 'user' as const, content: text },
+    ]
+
+    setChatThreads((prev) =>
+      prev.map((item) =>
+        item.id !== currentThread.id
+          ? item
+          : {
+              ...item,
+              title: nextTitle,
+              updatedAt: now,
+              modelId: selectedModel ? selectedModel.id : modelId,
+              reasoningEffort: chatReasoningEffort,
+              mode: chatMode,
+              messages: [...item.messages, userMsg, assistantMsg],
+            },
+      ),
+    )
+
+    void runDriveChatTurn({
+      threadId: currentThread.id,
+      historyMessages,
+      userPrompt: text,
+      contextRefs: input.contextRefs,
+      assistantMsgId: assistantMsg.id,
+    })
+  }
+
+  function handleRegenerateDriveChatMessage(assistantId: string) {
+    const targetThread = chatThreads.find((t) => t.id === activeChatThreadId)
+    if (!targetThread) return
+    const idx = targetThread.messages.findIndex((m) => m.id === assistantId)
+    if (idx <= 0) return
+    const priorMessages = targetThread.messages.slice(0, idx)
+    const lastUser = [...priorMessages]
+      .reverse()
+      .find((m) => m.role === 'user')
+    if (!lastUser) return
+
+    const selectedModel =
+      driveChatModels.find((m) => m.id === modelId) ??
+      driveChatModels.find((m) => m.connected) ??
+      driveChatModels.at(0)
+    const now = new Date().toISOString()
+    const freshAssistant: DriveChatMessage = {
+      id: messageId('chat-a'),
+      role: 'assistant',
+      content: '',
+      createdAt: now,
+      modelId: selectedModel ? selectedModel.id : modelId,
+      modelName: selectedModel ? selectedModel.name : modelId,
+      providerId: selectedModel ? selectedModel.providerId : undefined,
+      reasoningEffort: chatReasoningEffort,
+      mode: chatMode,
+      isStreaming: true,
+      streamingPhase: 'thinking',
+    }
+
+    setChatThreads((prev) =>
+      prev.map((item) =>
+        item.id !== targetThread.id
+          ? item
+          : {
+              ...item,
+              updatedAt: now,
+              messages: [...priorMessages, freshAssistant],
+            },
+      ),
+    )
+
+    const historyMessages = priorMessages
+      .filter((m) => m.role === 'user' || m.role === 'assistant')
+      .filter((m) => m.content.trim().length > 0)
+      .map((m) => ({
+        role: m.role as 'user' | 'assistant',
+        content: m.content,
+      }))
+
+    void runDriveChatTurn({
+      threadId: targetThread.id,
+      historyMessages,
+      userPrompt: lastUser.content,
+      contextRefs: lastUser.contextRefs ?? [],
+      assistantMsgId: freshAssistant.id,
+    })
+  }
+
   const paletteItems: PaletteItem[] = (() => {
     const needle = paletteQuery.trim().toLowerCase()
     const views: PaletteItem[] = [
+      {
+        id: 'nav-chat',
+        label: 'Drive Chat',
+        hint: 'Query and modify across your entire Drive with AI',
+        run: () => visit('home', 'chat'),
+      },
       {
         id: 'action-new-ai',
         label: 'New app with AI agent',
@@ -2267,7 +3190,11 @@ export function XDriveWorkspace({
       <BrowserTabStrip
         openTabs={openTabs}
         activeTabId={activeDoc ? activeDoc.id : 'home'}
-        onSelectTab={(tabId) => visit(tabId, nav)}
+        activeNav={nav}
+        onSelectTab={(tabId) =>
+          visit(tabId, tabId === 'home' ? 'drive' : nav)
+        }
+        onSelectChat={() => visit('home', 'chat')}
         onCloseTab={closeTab}
         onNewTab={() => visit('home', 'drive')}
         canGoBack={trail.cursor > 0}
@@ -2457,6 +3384,67 @@ export function XDriveWorkspace({
                   </SelectionSketchOverlay>
                 )}
               </div>
+            </div>
+          ) : nav === 'chat' ? (
+            <div className="min-h-0 flex-1 overflow-hidden">
+              <DriveChatView
+                threads={chatThreads}
+                activeThreadId={activeChatThreadId}
+                onSelectThread={setActiveChatThreadId}
+                onNewThread={handleNewChatThread}
+                onDeleteThread={(threadId) => {
+                  setChatThreads((prev) => {
+                    const next = prev.filter((t) => t.id !== threadId)
+                    if (next.length === 0) {
+                      const blank = createBlankChatThread(
+                        modelId,
+                        chatReasoningEffort,
+                        chatMode,
+                      )
+                      setActiveChatThreadId(blank.id)
+                      return [blank]
+                    }
+                    if (activeChatThreadId === threadId) {
+                      setActiveChatThreadId(next[0].id)
+                    }
+                    return next
+                  })
+                }}
+                onTogglePinThread={(threadId) =>
+                  setChatThreads((prev) =>
+                    prev.map((t) =>
+                      t.id === threadId ? { ...t, pinned: !t.pinned } : t,
+                    ),
+                  )
+                }
+                onRenameThread={(threadId, title) =>
+                  setChatThreads((prev) =>
+                    prev.map((t) => (t.id === threadId ? { ...t, title } : t)),
+                  )
+                }
+                docs={activeDocs}
+                trashedDocs={trashedDocs}
+                folders={folders}
+                models={driveChatModels}
+                selectedModelId={modelId}
+                onSelectModel={setModelId}
+                reasoningEffort={chatReasoningEffort}
+                onSelectReasoningEffort={setChatReasoningEffort}
+                mode={chatMode}
+                onSelectMode={setChatMode}
+                isStreaming={chatStreamingThreadId === activeChatThreadId}
+                onSendMessage={handleSendDriveChatMessage}
+                onStopStreaming={handleStopDriveChat}
+                onRegenerate={handleRegenerateDriveChatMessage}
+                onApplyAction={handleApplyDriveChatAction}
+                onApplyAllActions={handleApplyAllDriveChatActions}
+                onDiscardAction={handleDiscardDriveChatAction}
+                onDiscardAllActions={handleDiscardAllDriveChatActions}
+                onUndoAction={handleUndoDriveChatAction}
+                onOpenDocument={openDocument}
+                onOpenFolder={(folderId) => navigateToFolder(folderId)}
+                onOpenProviders={() => visit('home', 'subscriptions')}
+              />
             </div>
           ) : (
             <div className="min-h-0 flex-1 overflow-y-auto">

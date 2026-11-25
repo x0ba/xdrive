@@ -35,9 +35,10 @@ export function parseSlidesFromMarbleSource(source: string): SlidesDeckState {
       }
     }
 
-    // Legacy slide-deck.mrbl conversion: preserve customized title/hero/notes
+    // Legacy slide-deck.mrbl conversion or general AI-generated slide sections
     const title =
       doc.querySelector('[data-marble-id="deck-title"]')?.textContent.trim() ||
+      doc.querySelector('h1')?.textContent.trim() ||
       doc.querySelector('title')?.textContent.trim() ||
       DEFAULT_SLIDES_DECK.title
     const heroText = doc
@@ -46,6 +47,82 @@ export function parseSlidesFromMarbleSource(source: string): SlidesDeckState {
     const notesTitle = doc
       .querySelector('[data-marble-id="notes-title"]')
       ?.textContent.trim()
+
+    if (!heroText && !notesTitle) {
+      const sectionSlides = Array.from(
+        doc.querySelectorAll('section.slide, [data-slide], main > section, body > section'),
+      ).filter((sec) => (sec.textContent || '').trim().length > 0)
+
+      if (sectionSlides.length > 0) {
+        const generatedSlides: SlidePage[] = sectionSlides.map((sec, idx) => {
+          const slideId =
+            sec.getAttribute('data-slide') ||
+            sec.getAttribute('data-marble-id') ||
+            `slide-${idx + 1}`
+          const heading =
+            sec.querySelector('h1, h2, h3')?.textContent.trim() ||
+            `Slide ${idx + 1}`
+          const speaker =
+            sec.querySelector('.speaker')?.textContent.trim() || ''
+          const bodyNodes = Array.from(
+            sec.querySelectorAll('p:not(.speaker), li'),
+          )
+            .map((el) => (el.textContent || '').trim())
+            .filter(Boolean)
+          const bodyText = bodyNodes.join('\n')
+
+          return {
+            id: slideId,
+            title: heading,
+            layout: idx === 0 ? 'title' : 'title-body',
+            speakerNotes: speaker,
+            transition: 'fade',
+            transitionMs: 300,
+            elements: [
+              {
+                id: `${slideId}-title`,
+                kind: 'text',
+                x: 8,
+                y: idx === 0 ? 24 : 10,
+                w: 84,
+                h: 18,
+                text: heading,
+                fontSize: idx === 0 ? 36 : 26,
+                fontWeight: 'semibold',
+                color: '#f3f5f8',
+                align: idx === 0 ? 'center' : 'left',
+              },
+              ...(bodyText
+                ? [
+                    {
+                      id: `${slideId}-body`,
+                      kind: 'text' as const,
+                      x: 8,
+                      y: idx === 0 ? 48 : 30,
+                      w: 84,
+                      h: 56,
+                      text: bodyText,
+                      fontSize: 16,
+                      fontWeight: 'normal' as const,
+                      color: '#a2abb8',
+                      align: idx === 0 ? ('center' as const) : ('left' as const),
+                    },
+                  ]
+                : []),
+            ],
+          }
+        })
+
+        return {
+          title,
+          starred: false,
+          themeId: 'obsidian-studio',
+          aspectRatio: '16:9',
+          slides: generatedSlides,
+          activeSlideId: generatedSlides[0].id,
+        }
+      }
+    }
 
     const deck = structuredClone(DEFAULT_SLIDES_DECK)
     deck.title = title
