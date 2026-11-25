@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import type { Meta, StoryObj } from '@storybook/tanstack-react'
-import { expect, userEvent, within } from 'storybook/test'
+import { expect, userEvent, waitFor, within } from 'storybook/test'
 import type { ReasoningEffort } from '#/lib/ai/drive-chat-types'
 import { CHAT_DEMO_MODELS } from '#/components/chat/demo-fixtures'
 import { ModelPicker } from './ModelPicker'
@@ -163,6 +163,21 @@ function InteractiveStandardPicker({
   )
 }
 
+async function findOpenModelPickerPopup(): Promise<HTMLElement> {
+  await waitFor(() => {
+    expect(
+      document.querySelector('[data-xdrive-model-picker-popup="true"]'),
+    ).toBeVisible()
+  })
+  const popup = document.querySelector<HTMLElement>(
+    '[data-xdrive-model-picker-popup="true"]',
+  )
+  if (!popup) {
+    throw new Error('Model picker popup did not open')
+  }
+  return popup
+}
+
 function InteractiveDockedPicker({
   defaultOpen = true,
   initialEffort = 'high',
@@ -285,11 +300,17 @@ export const OpenCodeFreeOnly: Story = {
     />
   ),
   play: async () => {
-    const body = within(document.body)
-    await expect(await body.findByText('Tidepool Alpha')).toBeVisible()
-    await expect(body.getByText('Big Pickle')).toBeVisible()
-    await expect(body.queryByText('DeepSeek V4.1 Flash Free')).toBeNull()
-    await expect(body.getByText('DeepSeek V4.1 Flash')).toBeVisible()
+    const picker = within(await findOpenModelPickerPopup())
+    await expect(picker.getByText('Tidepool Alpha')).toBeVisible()
+    // The selected-model trigger also reads "Big Pickle". Scope to the list
+    // row so that label is not a second match.
+    const bigPickleRows = picker
+      .getAllByText('Big Pickle')
+      .filter((element) => element.closest('[role="option"]'))
+    await expect(bigPickleRows).toHaveLength(1)
+    await expect(bigPickleRows[0]).toBeVisible()
+    await expect(picker.queryByText('DeepSeek V4.1 Flash Free')).toBeNull()
+    await expect(picker.getByText('DeepSeek V4.1 Flash')).toBeVisible()
   },
 }
 
@@ -309,11 +330,12 @@ export const GrokBuildTab: Story = {
     />
   ),
   play: async () => {
-    const body = within(document.body)
-    const search = await body.findByPlaceholderText('Search models...')
-    await expect(search).toBeVisible()
-    await expect(body.getByText('Grok 4.7')).toBeVisible()
-    await expect(body.getByText('Grok 4.7 Fast')).toBeVisible()
+    const picker = within(await findOpenModelPickerPopup())
+    const search = await picker.findByPlaceholderText('Search models...')
+    await waitFor(() => expect(search).toBeVisible())
+    const list = within(picker.getByRole('listbox', { name: 'Models' }))
+    await expect(list.getByText('Grok 4.7')).toBeVisible()
+    await expect(list.getByText('Grok 4.7 Fast')).toBeVisible()
   },
 }
 

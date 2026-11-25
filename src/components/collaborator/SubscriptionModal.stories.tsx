@@ -353,6 +353,20 @@ export const GrokBuildSignedOut: Story = {
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
     await expect(canvas.getByText(/Sign in required/i)).toBeVisible()
-    await expect(canvas.getByText('grok login')).toBeVisible()
+    // The provider description and the sign-in command both say "grok login".
+    // The command block is the instruction this state exists to show.
+    const loginMentions = canvas.getAllByText('grok login')
+    await expect(loginMentions).toHaveLength(2)
+    const command = loginMentions.find((element) => element.tagName === 'PRE')
+    const description = loginMentions.find(
+      (element) => element.tagName === 'SPAN',
+    )
+    if (!command || !description) {
+      throw new Error(
+        'Expected grok login in the provider description and the sign-in command block',
+      )
+    }
+    await expect(command).toBeVisible()
+    await expect(description).toBeVisible()
   },
 }
