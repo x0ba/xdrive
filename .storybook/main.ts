@@ -10,6 +10,14 @@ const config: StorybookConfig = {
     '@storybook/addon-mcp',
   ],
   framework: '@storybook/tanstack-react',
+  async viteFinal(config, options) {
+    // The dev server and Vitest project stay at `/`. Production output is
+    // hosted by the app at `/design/`, so preview assets must use that base.
+    if (options?.configType === 'PRODUCTION') {
+      config.base = '/design/'
+    }
+    return config
+  },
 }
 
 export default config
