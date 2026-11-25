@@ -119,7 +119,6 @@ import { toXDriveOpenCodeGoModelId } from '#/lib/ai/opencode-go-types'
 import type { OpenCodeGoRuntimeStatus } from '#/lib/ai/opencode-go-types'
 import type {
   AIMessage,
-  AIModelSpec,
   AIProviderId,
   AISubscription,
   CanvasInteractionMode,
@@ -1189,25 +1188,6 @@ export function XDriveWorkspace({
       }),
     [subscriptions, antigravityStatus, openCodeGoStatus],
   )
-
-  const composerModels = useMemo<
-    Pick<AIModelSpec, 'id' | 'name' | 'providerId' | 'badge' | 'role'>[]
-  >(() => {
-    const connected = subscriptions.filter(
-      (subscription) =>
-        subscription.connected && subscription.status !== 'disconnected',
-    )
-    const source = connected.length > 0 ? connected : subscriptions
-    return source.flatMap((subscription) =>
-      subscription.models.map((model) => ({
-        id: model.id,
-        name: `${model.name} (${subscription.name})`,
-        providerId: model.providerId,
-        badge: subscription.name,
-        role: model.role,
-      })),
-    )
-  }, [subscriptions])
 
   const folderAncestors = useMemo(
     () => getFolderAncestors(folders, currentFolderId),
@@ -4138,9 +4118,14 @@ export function XDriveWorkspace({
                     mode={mode}
                     nodes={stageNodes}
                     permission={permission}
-                    models={connectedModels}
+                    models={driveChatModels}
                     modelId={modelId}
                     onModelChange={handleSelectModel}
+                    favoriteModelIds={favoriteModelIds}
+                    onFavoriteModelIdsChange={
+                      syncWithServer ? handleFavoriteModelIdsChange : undefined
+                    }
+                    onOpenProviders={() => visit('home', 'subscriptions')}
                     selectedIds={selectedIds}
                     onSelectedIdsChange={(ids) => {
                       const fromStage = new Map(
@@ -4766,6 +4751,10 @@ export function XDriveWorkspace({
                     variant="page"
                     subscriptions={subscriptions}
                     roleAssignments={roles}
+                    favoriteModelIds={favoriteModelIds}
+                    onFavoriteModelIdsChange={
+                      syncWithServer ? handleFavoriteModelIdsChange : undefined
+                    }
                     onChange={(nextSubscriptions, nextRoles) => {
                       setSubscriptions(nextSubscriptions)
                       setRoles(nextRoles)
@@ -4806,9 +4795,13 @@ export function XDriveWorkspace({
             selectedElements={selected}
             sketches={docSketches}
             strokes={docStrokes}
-            models={connectedModels}
+            models={driveChatModels}
             modelId={modelId}
             onModelChange={handleSelectModel}
+            favoriteModelIds={favoriteModelIds}
+            onFavoriteModelIdsChange={
+              syncWithServer ? handleFavoriteModelIdsChange : undefined
+            }
             permission={permission}
             evergreenRefs={evergreenRefs}
             onOpenEvergreenDoc={(slug) => {
@@ -4873,9 +4866,14 @@ export function XDriveWorkspace({
         templates={templates}
         folders={folders}
         initialFolderId={currentFolderId}
-        models={composerModels}
+        models={driveChatModels}
         selectedModelId={modelId}
         onSelectModel={handleSelectModel}
+        favoriteModelIds={favoriteModelIds}
+        onFavoriteModelIdsChange={
+          syncWithServer ? handleFavoriteModelIdsChange : undefined
+        }
+        onOpenProviders={() => visit('home', 'subscriptions')}
         onClose={() => setNewAppModalMode(null)}
         onBuildWithAgent={({ prompt, modelId: chosenModel, folderId }) =>
           buildApp(prompt, chosenModel, folderId)

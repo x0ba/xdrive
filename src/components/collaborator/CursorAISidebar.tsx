@@ -16,12 +16,10 @@ import type {
   SketchStroke,
 } from '#/lib/types'
 import {
-  ModelSelect,
   PROMPT_MODELS,
   resolveModel,
 } from '#/components/collaborator/FloatingPromptBar'
 import type {
-  ConnectedModelOption,
   MarbleIntentKind,
   MarbleIntentRequest,
 } from '#/components/collaborator/FloatingPromptBar'
@@ -29,6 +27,8 @@ import {
   aiIsBlocked,
   permissionByLevel,
 } from '#/components/collaborator/ShareModal'
+import { ModelPicker } from '#/components/model-picker'
+import type { ModelPickerInputOption } from '#/components/model-picker'
 import { cn } from '#/lib/utils'
 
 export const QUICK_PROMPTS = [
@@ -246,9 +246,11 @@ export interface CursorAISidebarProps {
   selectedElements?: SelectedMarbleElement[]
   sketches?: SketchAnnotation[]
   strokes?: SketchStroke[]
-  models?: ConnectedModelOption[]
+  models?: ModelPickerInputOption[]
   modelId?: string
   onModelChange?: (modelId: string) => void
+  favoriteModelIds?: string[]
+  onFavoriteModelIdsChange?: (ids: string[]) => void
   permission?: SharePermissionLevel
   evergreenRefs?: EvergreenDocRef[]
   onOpenEvergreenDoc?: (slug: string) => void
@@ -491,6 +493,8 @@ export function CursorAISidebar({
   models = PROMPT_MODELS,
   modelId: modelIdProp,
   onModelChange,
+  favoriteModelIds,
+  onFavoriteModelIdsChange,
   permission = 'edit_with_ai_shared',
   evergreenRefs = DEFAULT_EVERGREEN_REFS,
   onOpenEvergreenDoc,
@@ -778,10 +782,17 @@ export function CursorAISidebar({
           ))}
         </div>
 
-        <ModelSelect
+        <ModelPicker
           models={models}
-          modelId={modelId}
-          onChange={setModel}
+          selectedModelId={modelId}
+          onSelectModel={setModel}
+          favoriteModelIds={favoriteModelIds}
+          onFavoriteModelIdsChange={onFavoriteModelIdsChange}
+          onOpenProviders={onOpenProviders}
+          size="xs"
+          side="bottom"
+          align="end"
+          placeholder="No model"
           disabled={blocked}
         />
       </header>

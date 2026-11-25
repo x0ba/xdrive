@@ -1,14 +1,6 @@
-import { useEffect, useId, useImperativeHandle, useRef, useState } from 'react'
+import { useId, useImperativeHandle, useRef, useState } from 'react'
 import type { ReactNode, Ref } from 'react'
-import {
-  ChevronDown,
-  GitFork,
-  Lock,
-  PenLine,
-  Send,
-  Sparkles,
-  Wrench,
-} from 'lucide-react'
+import { GitFork, Lock, PenLine, Send, Sparkles, Wrench } from 'lucide-react'
 import type {
   AIProviderId,
   SelectedMarbleElement,
@@ -19,15 +11,18 @@ import {
   aiIsBlocked,
   permissionByLevel,
 } from '#/components/collaborator/ShareModal'
+import {
+  ModelPicker,
+  normalizeModelPickerOptions,
+} from '#/components/model-picker'
+import type {
+  ModelPickerInputOption,
+  ModelPickerOption,
+} from '#/components/model-picker'
 import { cn } from '#/lib/utils'
 
 export type MarbleIntentKind =
-  | 'instruct'
-  | 'dtrt'
-  | 'factory'
-  | 'fork-alt'
-  | 'polish'
-  | 'scale'
+  'instruct' | 'dtrt' | 'factory' | 'fork-alt' | 'polish' | 'scale'
 
 export interface MarbleIntentRequest {
   id: string
@@ -100,9 +95,12 @@ export interface FloatingPromptBarHandle {
 export interface FloatingPromptBarProps {
   selectedElements?: SelectedMarbleElement[]
   sketches?: SketchAnnotation[]
-  models?: ConnectedModelOption[]
+  models?: ModelPickerInputOption[]
   modelId?: string
   onModelChange?: (modelId: string) => void
+  favoriteModelIds?: string[]
+  onFavoriteModelIdsChange?: (ids: string[]) => void
+  onOpenProviders?: () => void
   permission?: SharePermissionLevel
   prompt?: string
   onPromptChange?: (value: string) => void
@@ -112,13 +110,13 @@ export interface FloatingPromptBarProps {
 }
 
 export function resolveModel(
-  models: ConnectedModelOption[],
+  models: ReadonlyArray<ModelPickerInputOption>,
   modelId?: string,
-): ConnectedModelOption | null {
-  const match = models.find((item) => item.id === modelId)
+): ModelPickerOption | null {
+  const normalized = normalizeModelPickerOptions(models)
+  const match = normalized.find((item) => item.id === modelId)
   if (match) return match
-  if (models.length === 0) return null
-  return models[0]
+  return normalized.find((item) => item.connected) ?? normalized.at(0) ?? null
 }
 
 let intentSeq = 0
@@ -128,116 +126,15 @@ function nextIntentId(): string {
   return `intent-${intentSeq.toString(36)}-${Date.now().toString(36)}`
 }
 
-export function ModelSelect({
-  models,
-  modelId,
-  onChange,
-  disabled,
-}: {
-  models: ConnectedModelOption[]
-  modelId: string
-  onChange: (modelId: string) => void
-  disabled?: boolean
-}) {
-  const [open, setOpen] = useState(false)
-  const rootRef = useRef<HTMLDivElement>(null)
-  const listId = useId()
-  const current = resolveModel(models, modelId)
-
-  useEffect(() => {
-    if (!open) return
-    const onPointer = (event: PointerEvent) => {
-      if (!rootRef.current?.contains(event.target as Node)) setOpen(false)
-    }
-    const onKey = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') setOpen(false)
-    }
-    window.addEventListener('pointerdown', onPointer)
-    window.addEventListener('keydown', onKey)
-    return () => {
-      window.removeEventListener('pointerdown', onPointer)
-      window.removeEventListener('keydown', onKey)
-    }
-  }, [open])
-
-  if (!current) {
-    return (
-      <span className="inline-flex h-6 items-center px-1.5 text-[11px] text-[var(--xd-ink-muted)]">
-        No model
-      </span>
-    )
-  }
-
-  const groups: Array<{ name: string; models: ConnectedModelOption[] }> = []
-  for (const model of models) {
-    const existing = groups.find((group) => group.name === model.group)
-    if (existing) existing.models.push(model)
-    else groups.push({ name: model.group, models: [model] })
-  }
-
-  return (
-    <div ref={rootRef} className="relative shrink-0">
-      <button
-        type="button"
-        disabled={disabled}
-        aria-haspopup="listbox"
-        aria-expanded={open}
-        aria-controls={listId}
-        onClick={() => setOpen((value) => !value)}
-        className="inline-flex h-6 max-w-[180px] items-center gap-1 rounded border border-[var(--xd-border)] bg-[var(--xd-canvas)] px-2 text-[11px] font-medium text-[var(--xd-ink-secondary)] hover:text-[var(--xd-ink)] disabled:opacity-45"
-      >
-        <span className="truncate">{current.modelName}</span>
-        <ChevronDown className="size-3 shrink-0 text-[var(--xd-ink-muted)]" />
-      </button>
-      {open && (
-        <div
-          id={listId}
-          role="listbox"
-          aria-label="Connected models"
-          className="absolute right-0 z-30 mt-1 max-h-64 w-56 overflow-y-auto rounded-md border border-[var(--xd-border-strong)] bg-[var(--xd-elevated)] p-1 shadow-lg"
-        >
-          {groups.map((group) => (
-            <div key={group.name} className="mb-1 last:mb-0">
-              <p className="px-2 py-1 text-[10px] font-medium text-[var(--xd-ink-muted)]">
-                {group.name}
-              </p>
-              {group.models.map((model) => {
-                const selected = model.id === current.id
-                return (
-                  <button
-                    key={model.id}
-                    type="button"
-                    role="option"
-                    aria-selected={selected}
-                    onClick={() => {
-                      onChange(model.id)
-                      setOpen(false)
-                    }}
-                    className={cn(
-                      'flex w-full items-center justify-between gap-2 rounded px-2 py-1 text-left text-[11.5px]',
-                      selected
-                        ? 'bg-[var(--xd-accent-soft)] font-medium text-[var(--xd-ink)]'
-                        : 'text-[var(--xd-ink-secondary)] hover:bg-[var(--xd-surface-hover)] hover:text-[var(--xd-ink)]',
-                    )}
-                  >
-                    <span className="truncate">{model.modelName}</span>
-                  </button>
-                )
-              })}
-            </div>
-          ))}
-        </div>
-      )}
-    </div>
-  )
-}
-
 export function FloatingPromptBar({
   selectedElements = [],
   sketches = [],
   models = PROMPT_MODELS,
   modelId: modelIdProp,
   onModelChange,
+  favoriteModelIds,
+  onFavoriteModelIdsChange,
+  onOpenProviders,
   permission = 'edit_with_ai_shared',
   prompt: promptProp,
   onPromptChange,
@@ -368,10 +265,17 @@ export function FloatingPromptBar({
             </>
           )}
         </div>
-        <ModelSelect
+        <ModelPicker
           models={models}
-          modelId={modelId}
-          onChange={setModel}
+          selectedModelId={modelId}
+          onSelectModel={setModel}
+          favoriteModelIds={favoriteModelIds}
+          onFavoriteModelIdsChange={onFavoriteModelIdsChange}
+          onOpenProviders={onOpenProviders}
+          size="xs"
+          side="top"
+          align="end"
+          placeholder="No model"
           disabled={blocked || models.length === 0}
         />
       </div>
