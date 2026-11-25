@@ -1,4 +1,5 @@
 import type { Meta, StoryObj } from '@storybook/tanstack-react'
+import { INITIAL_WORKSPACE_DOCS } from '#/lib/marble'
 import { XDriveWorkspace } from './XDriveWorkspace'
 
 /**
@@ -17,9 +18,9 @@ export default meta
 type Story = StoryObj<typeof meta>
 
 /**
- * Default My Drive landing view in dark theme.
+ * Default My Drive landing view in dark theme (starts empty with creation actions).
  *
- * @summary Drive files browser landing view
+ * @summary Empty Drive landing view
  */
 export const DriveFiles: Story = {
   args: {
@@ -56,6 +57,7 @@ export const TrashWorkspace: Story = {
     initialTheme: 'dark',
     initialNav: 'trash',
     initialActiveTabId: 'home',
+    initialDocs: INITIAL_WORKSPACE_DOCS,
     initialTrashedDocIds: ['ws-qec-threshold', 'ws-group-meeting'],
     initialAiSidebarOpen: false,
   },
@@ -71,6 +73,7 @@ export const NotesAppWorkspace: Story = {
   args: {
     initialTheme: 'dark',
     initialActiveTabId: 'ws-week-12-ablations',
+    initialDocs: INITIAL_WORKSPACE_DOCS,
     initialOpenDocIds: [
       'ws-week-12-ablations',
       'ws-logical-memory-spec',
@@ -91,6 +94,7 @@ export const DocsAppWorkspace: Story = {
   args: {
     initialTheme: 'dark',
     initialActiveTabId: 'ws-logical-memory-spec',
+    initialDocs: INITIAL_WORKSPACE_DOCS,
     initialOpenDocIds: [
       'ws-week-12-ablations',
       'ws-logical-memory-spec',
@@ -111,6 +115,7 @@ export const SlidesAppWorkspace: Story = {
   args: {
     initialTheme: 'dark',
     initialActiveTabId: 'ws-group-meeting',
+    initialDocs: INITIAL_WORKSPACE_DOCS,
     initialOpenDocIds: [
       'ws-week-12-ablations',
       'ws-logical-memory-spec',
@@ -131,6 +136,7 @@ export const LiveLatexDocument: Story = {
   args: {
     initialTheme: 'dark',
     initialActiveTabId: 'tpl-latex-studio',
+    initialDocs: INITIAL_WORKSPACE_DOCS,
     initialOpenDocIds: ['tpl-latex-studio', 'ws-qec-threshold'],
     initialMode: 'direct',
     initialAiSidebarOpen: false,
@@ -147,6 +153,7 @@ export const LiveNotebookWithCollaborator: Story = {
   args: {
     initialTheme: 'dark',
     initialActiveTabId: 'tpl-research-notebook',
+    initialDocs: INITIAL_WORKSPACE_DOCS,
     initialOpenDocIds: ['tpl-research-notebook', 'ws-week-12-ablations'],
     initialMode: 'direct',
     initialAiSidebarOpen: true,
@@ -180,6 +187,7 @@ export const EvergreenDesignSystem: Story = {
   args: {
     initialTheme: 'dark',
     initialActiveTabId: 'ws-document-design-system',
+    initialDocs: INITIAL_WORKSPACE_DOCS,
     initialOpenDocIds: [
       'ws-document-design-system',
       'ws-document-donts-system',
@@ -199,6 +207,7 @@ export const EvergreenDontsSystem: Story = {
   args: {
     initialTheme: 'dark',
     initialActiveTabId: 'ws-document-donts-system',
+    initialDocs: INITIAL_WORKSPACE_DOCS,
     initialOpenDocIds: [
       'ws-document-design-system',
       'ws-document-donts-system',

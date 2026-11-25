@@ -87,6 +87,26 @@ function buildStarterPrompts(
   const secondDoc = nonEvergreen.at(1)
   const firstFolder = folders.at(0)
 
+  if (nonEvergreen.length === 0) {
+    return [
+      {
+        label: 'Create a new document',
+        prompt:
+          'Create a new .mrbl document titled "Project Notes" with an overview, key questions, and next steps.',
+      },
+      {
+        label: 'Set up Drive folders',
+        prompt:
+          'Create a clean starter folder structure in my Drive for Notes, Docs, and Slides.',
+      },
+      {
+        label: 'Draft a slide deck',
+        prompt:
+          'Create a new 5-slide .mrbl presentation outlining a project proposal and timeline.',
+      },
+    ]
+  }
+
   return [
     {
       label:
@@ -597,8 +617,7 @@ export function DriveChatView({
                                 folders,
                                 folder.id,
                               )
-                              const selected =
-                                pinnedFolderRef?.id === folder.id
+                              const selected = pinnedFolderRef?.id === folder.id
                               return (
                                 <button
                                   key={folder.id}
@@ -627,7 +646,9 @@ export function DriveChatView({
                                 >
                                   <span className="flex min-w-0 items-center gap-2">
                                     <Folder className="size-3.5 shrink-0 text-[var(--xd-ink-muted)]" />
-                                    <span className="truncate">{pathLabel}</span>
+                                    <span className="truncate">
+                                      {pathLabel}
+                                    </span>
                                   </span>
                                   {selected && (
                                     <Check className="size-3.5 shrink-0 text-[var(--xd-ink)]" />

@@ -76,7 +76,6 @@ import {
   DOCUMENT_DESIGN_SYSTEM_SLUG,
   DOCUMENT_DONTS_SYSTEM_SLUG,
   INITIAL_AI_SUBSCRIPTIONS,
-  INITIAL_WORKSPACE_DOCS,
   MarbleCollaborationError,
   PREDEFINED_MARBLE_TEMPLATES,
   applyMarbleOpsClient,
@@ -175,6 +174,7 @@ export interface XDriveWorkspaceProps {
   initialTheme?: 'dark' | 'light'
   initialNav?: PrimaryNavId
   initialActiveTabId?: 'home' | string
+  initialDocs?: MarbleDocumentFile[]
   initialOpenDocIds?: string[]
   initialTrashedDocIds?: string[]
   trashRetentionDays?: number
@@ -198,11 +198,6 @@ type TrashUndoBanner = { docId: string; title: string }
 type PaletteItem = { id: string; label: string; hint: string; run: () => void }
 
 const YOU = { name: 'You', initials: 'YO' }
-const DEFAULT_OPEN = [
-  'ws-week-12-ablations',
-  'ws-logical-memory-spec',
-  'ws-group-meeting',
-]
 
 const ROLE_LABEL: Record<SimulatedRole, string> = {
   owner: 'Owner',
@@ -331,14 +326,13 @@ function relativeTime(iso: string): string {
   })
 }
 
-function knownDocs(): MarbleDocumentFile[] {
-  return [...INITIAL_WORKSPACE_DOCS, ...PREDEFINED_MARBLE_TEMPLATES]
-}
-
-function resolveOpenIds(ids: string[] | undefined, active?: string): string[] {
-  const known = new Set(knownDocs().map((doc) => doc.id))
-  const picked = (ids ?? DEFAULT_OPEN).filter((id) => known.has(id))
-  const open = picked.length > 0 ? picked : [...DEFAULT_OPEN]
+function resolveOpenIds(
+  availableDocs: MarbleDocumentFile[],
+  ids: string[] | undefined,
+  active?: string,
+): string[] {
+  const known = new Set(availableDocs.map((doc) => doc.id))
+  const open = (ids ?? []).filter((id) => known.has(id))
   if (
     active &&
     active !== 'home' &&
@@ -464,11 +458,12 @@ function measureNodes(
 }
 
 function seedSelection(
+  availableDocs: MarbleDocumentFile[],
   active: string | undefined,
   ids: string[] | undefined,
 ): Record<string, SelectedMarbleElement[]> {
   if (!active || active === 'home' || !ids?.length) return {}
-  const doc = knownDocs().find((item) => item.id === active)
+  const doc = availableDocs.find((item) => item.id === active)
   if (!doc) return {}
   const elements = elementsFromSource(doc.source, ids)
   if (!elements.length) return {}
@@ -630,6 +625,7 @@ export function XDriveWorkspace({
   initialTheme = 'dark',
   initialNav = 'drive',
   initialActiveTabId = 'home',
+  initialDocs = [],
   initialOpenDocIds,
   initialTrashedDocIds,
   trashRetentionDays = TRASH_RETENTION_DAYS,
@@ -642,6 +638,10 @@ export function XDriveWorkspace({
     () => new Set(initialTrashedDocIds ?? []),
     [initialTrashedDocIds],
   )
+  const initialAvailableDocs = useMemo(
+    () => [...initialDocs, ...PREDEFINED_MARBLE_TEMPLATES],
+    [initialDocs],
+  )
   const [theme, setTheme] = useState(initialTheme)
   const [nav, setNav] = useState<PrimaryNavId>(initialNav)
   const [activeTabId, setActiveTabId] = useState<'home' | string>(() =>
@@ -650,14 +650,16 @@ export function XDriveWorkspace({
       : initialActiveTabId,
   )
   const [openTabIds, setOpenTabIds] = useState<string[]>(() =>
-    resolveOpenIds(initialOpenDocIds, initialActiveTabId).filter(
-      (id) => !initialTrashedSet.has(id),
-    ),
+    resolveOpenIds(
+      initialAvailableDocs,
+      initialOpenDocIds,
+      initialActiveTabId,
+    ).filter((id) => !initialTrashedSet.has(id)),
   )
   const initialDrive = useMemo(() => {
     const nowMs = Date.now()
     const seeded = seedDriveFolders(
-      INITIAL_WORKSPACE_DOCS.map((doc) => {
+      initialDocs.map((doc) => {
         if (!initialTrashedSet.has(doc.id)) return { ...doc }
         const index = (initialTrashedDocIds ?? []).indexOf(doc.id)
         const daysAgo = index <= 0 ? 2 : Math.min(26, 2 + index * 9)
@@ -675,7 +677,7 @@ export function XDriveWorkspace({
       trashRetentionDays,
     )
     return { folders: seeded.folders, docs: prunedDocs }
-  }, [initialTrashedDocIds, initialTrashedSet, trashRetentionDays])
+  }, [initialDocs, initialTrashedDocIds, initialTrashedSet, trashRetentionDays])
   const [folders, setFolders] = useState<DriveFolder[]>(
     () => initialDrive.folders,
   )
@@ -709,7 +711,9 @@ export function XDriveWorkspace({
   )
   const [selection, setSelection] = useState<
     Record<string, SelectedMarbleElement[]>
-  >(() => seedSelection(initialActiveTabId, initialSelectedIds))
+  >(() =>
+    seedSelection(initialAvailableDocs, initialActiveTabId, initialSelectedIds),
+  )
   const [sketches, setSketches] = useState<Record<string, SketchAnnotation[]>>(
     {},
   )
@@ -3500,30 +3504,64 @@ export function XDriveWorkspace({
                   />
 
                   {visibleFolders.length === 0 && filteredDocs.length === 0 ? (
-                    <div className="flex flex-col items-center justify-center rounded-lg border border-dashed border-[var(--xd-border-strong)] py-14 text-center">
-                      <p className="text-[13px] font-medium text-[var(--xd-ink)]">
-                        {currentFolderId
-                          ? 'This folder is empty'
-                          : 'No matching files or folders'}
-                      </p>
-                      <p className="mt-1 text-[12px] text-[var(--xd-ink-muted)]">
-                        {currentFolderId
-                          ? 'Create a subfolder or drag files here from My Drive.'
-                          : 'Try clearing your search filter.'}
-                      </p>
-                      {currentFolderId && (
-                        <button
-                          type="button"
-                          onClick={() =>
-                            setFolderModal({
-                              mode: 'create',
-                              parentId: currentFolderId,
-                            })
-                          }
-                          className="mt-3 rounded border border-[var(--xd-border-strong)] bg-[var(--xd-canvas)] px-3 py-1.5 text-[12px] font-medium text-[var(--xd-ink)] hover:bg-[var(--xd-surface-hover)]"
-                        >
-                          Create subfolder
-                        </button>
+                    <div className="flex flex-col items-center justify-center rounded-lg border border-dashed border-[var(--xd-border-strong)] px-6 py-16 text-center">
+                      {searchQuery.trim() ? (
+                        <>
+                          <p className="text-[13px] font-medium text-[var(--xd-ink)]">
+                            No matching files or folders
+                          </p>
+                          <p className="mt-1 text-[12px] text-[var(--xd-ink-muted)]">
+                            Try a different search query or clear the filter.
+                          </p>
+                          <button
+                            type="button"
+                            onClick={() => setSearchQuery('')}
+                            className="mt-3.5 rounded border border-[var(--xd-border-strong)] bg-[var(--xd-canvas)] px-3 py-1.5 text-[12px] font-medium text-[var(--xd-ink)] hover:bg-[var(--xd-surface-hover)]"
+                          >
+                            Clear search
+                          </button>
+                        </>
+                      ) : (
+                        <>
+                          <p className="text-[13.5px] font-medium text-[var(--xd-ink)]">
+                            {currentFolderId
+                              ? 'This folder is empty'
+                              : 'Your Drive is empty'}
+                          </p>
+                          <p className="mt-1 max-w-sm text-[12px] text-[var(--xd-ink-muted)]">
+                            {currentFolderId
+                              ? 'Create a new file, add a subfolder, or drag files here from My Drive.'
+                              : 'Create a file with AI, start from a template, or organize with a folder.'}
+                          </p>
+                          <div className="mt-4 flex flex-wrap items-center justify-center gap-2">
+                            <button
+                              type="button"
+                              onClick={() => setNewAppModalMode('agent')}
+                              className="rounded bg-[var(--xd-accent)] px-3 py-1.5 text-[12px] font-medium text-white transition-colors hover:bg-[var(--xd-accent-hover)]"
+                            >
+                              New with AI
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setNewAppModalMode('templates')}
+                              className="rounded border border-[var(--xd-border-strong)] bg-[var(--xd-canvas)] px-3 py-1.5 text-[12px] font-medium text-[var(--xd-ink)] transition-colors hover:bg-[var(--xd-surface-hover)]"
+                            >
+                              From template
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() =>
+                                setFolderModal({
+                                  mode: 'create',
+                                  parentId: currentFolderId,
+                                })
+                              }
+                              className="rounded border border-[var(--xd-border-strong)] bg-[var(--xd-canvas)] px-3 py-1.5 text-[12px] font-medium text-[var(--xd-ink)] transition-colors hover:bg-[var(--xd-surface-hover)]"
+                            >
+                              {currentFolderId ? 'New subfolder' : 'New folder'}
+                            </button>
+                          </div>
+                        </>
                       )}
                     </div>
                   ) : viewMode === 'list' ? (
