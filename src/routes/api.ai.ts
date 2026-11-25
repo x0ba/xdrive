@@ -1,5 +1,9 @@
 import { createFileRoute } from '@tanstack/react-router'
 import {
+  isAcpClientAbortError,
+  logAcpServerError,
+} from '#/lib/ai/acp-runtime.server'
+import {
   AntigravityAcpError,
   getAntigravityAcpManager,
 } from '#/lib/ai/antigravity-acp.server'
@@ -29,6 +33,20 @@ import {
 } from '#/lib/ai/marble-prompt.server'
 import type { ServerCollaborateInput } from '#/lib/ai/marble-prompt.server'
 
+const SSE_HEARTBEAT_INTERVAL_MS = 15_000
+const SSE_PROGRESS_THROTTLE_MS = 500
+
+interface ApiErrorPayload {
+  ok: false
+  providerId?: string
+  code: string
+  authRequired?: boolean
+  entitlementRequired?: boolean
+  rateLimited?: boolean
+  binaryMissing?: boolean
+  error: string
+}
+
 function json(data: unknown, status = 200) {
   return Response.json(data, {
     status,
@@ -36,10 +54,17 @@ function json(data: unknown, status = 200) {
   })
 }
 
-function errorResponse(error: unknown) {
+function encodeSseEvent(event: Record<string, unknown>): Uint8Array {
+  return new TextEncoder().encode(`data: ${JSON.stringify(event)}\n\n`)
+}
+
+function toApiError(error: unknown): {
+  payload: ApiErrorPayload
+  httpStatus: number
+} {
   if (error instanceof AntigravityAcpError) {
-    return json(
-      {
+    return {
+      payload: {
         ok: false,
         providerId: 'antigravity',
         code: error.code,
@@ -47,12 +72,12 @@ function errorResponse(error: unknown) {
         binaryMissing: error.code === 'BINARY_MISSING',
         error: error.message,
       },
-      error.httpStatus,
-    )
+      httpStatus: error.httpStatus,
+    }
   }
   if (error instanceof OpenCodeAcpError) {
-    return json(
-      {
+    return {
+      payload: {
         ok: false,
         providerId: 'opencode-go',
         code: error.code,
@@ -60,12 +85,12 @@ function errorResponse(error: unknown) {
         binaryMissing: error.code === 'BINARY_MISSING',
         error: error.message,
       },
-      error.httpStatus,
-    )
+      httpStatus: error.httpStatus,
+    }
   }
   if (error instanceof OpenCodeGoError) {
-    return json(
-      {
+    return {
+      payload: {
         ok: false,
         providerId: 'opencode-go',
         code: error.code,
@@ -74,12 +99,12 @@ function errorResponse(error: unknown) {
         rateLimited: error.code === 'RATE_LIMITED',
         error: error.message,
       },
-      error.httpStatus,
-    )
+      httpStatus: error.httpStatus,
+    }
   }
   if (error instanceof GrokBuildAcpError) {
-    return json(
-      {
+    return {
+      payload: {
         ok: false,
         providerId: 'grok-build',
         code: error.code,
@@ -87,12 +112,20 @@ function errorResponse(error: unknown) {
         binaryMissing: error.code === 'BINARY_MISSING',
         error: error.message,
       },
-      error.httpStatus,
-    )
+      httpStatus: error.httpStatus,
+    }
   }
   const message =
     error instanceof Error ? error.message : 'AI collaborator request failed'
-  return json({ ok: false, code: 'AI_ERROR', error: message }, 500)
+  return {
+    payload: { ok: false, code: 'AI_ERROR', error: message },
+    httpStatus: 500,
+  }
+}
+
+function errorResponse(error: unknown) {
+  const { payload, httpStatus } = toApiError(error)
+  return json(payload, httpStatus)
 }
 
 function resolveProviderId(body: Record<string, unknown>): string {
@@ -111,6 +144,7 @@ export async function GET({ request }: { request: Request }) {
   const url = new URL(request.url)
   const provider = url.searchParams.get('provider')
   const refresh = url.searchParams.get('refresh') === '1'
+  const startedAt = Date.now()
 
   try {
     if (provider === 'grok-build') {
@@ -141,11 +175,157 @@ export async function GET({ request }: { request: Request }) {
       },
     })
   } catch (error) {
+    logAcpServerError({
+      route: '/api/ai',
+      action: 'status',
+      providerId: provider ?? 'all',
+      elapsedMs: Date.now() - startedAt,
+      clientAborted: request.signal.aborted,
+      error,
+    })
     return errorResponse(error)
   }
 }
 
+async function runCollaborateExecution(params: {
+  providerId: 'antigravity' | 'opencode-go' | 'grok-build'
+  collaborateInput: ServerCollaborateInput
+  prompt: string
+  sessionId?: string
+  imageDataUrls?: string[]
+  signal: AbortSignal
+  onTextDelta?: (delta: string) => void
+  onThoughtDelta?: (delta: string) => void
+  onBeforeParse?: () => void
+}) {
+  const {
+    providerId,
+    collaborateInput,
+    prompt,
+    sessionId,
+    imageDataUrls,
+    signal,
+    onTextDelta,
+    onThoughtDelta,
+    onBeforeParse,
+  } = params
+
+  if (providerId === 'grok-build') {
+    const grokResult = await runGrokBuildPrompt({
+      prompt,
+      modelId: collaborateInput.modelId,
+      imageDataUrls,
+      signal,
+      onTextDelta,
+      onThoughtDelta,
+    })
+
+    onBeforeParse?.()
+    const resolvedModelId = toXDriveGrokBuildModelId(grokResult.modelId)
+    const parsed = parseMarbleAcpResponse(
+      grokResult.text,
+      collaborateInput,
+      resolvedModelId,
+    )
+
+    return {
+      ok: true as const,
+      source: 'grok-build-acp' as const,
+      proposal: parsed.proposal,
+      stages: parsed.stages,
+      newDocument: parsed.newDocument,
+      thoughts: grokResult.thoughts,
+      runtime: {
+        protocol: 'acp',
+        agentName: grokResult.agentName,
+        agentVersion: grokResult.agentVersion,
+        modelId: resolvedModelId,
+        acpModelId: grokResult.modelId,
+        stopReason: grokResult.stopReason,
+      },
+    }
+  }
+
+  if (providerId === 'opencode-go') {
+    const openCodeResult = await runOpenCodePrompt({
+      prompt,
+      modelId: collaborateInput.modelId,
+      sessionId,
+      imageDataUrls,
+      signal,
+      onTextDelta,
+      onThoughtDelta,
+    })
+
+    onBeforeParse?.()
+    const resolvedModelId = toXDriveOpenCodeGoModelId(openCodeResult.modelId)
+    const parsed = parseMarbleAcpResponse(
+      openCodeResult.text,
+      collaborateInput,
+      resolvedModelId,
+    )
+
+    return {
+      ok: true as const,
+      source:
+        openCodeResult.transport === 'acp'
+          ? ('opencode-acp' as const)
+          : ('opencode-go' as const),
+      proposal: parsed.proposal,
+      stages: parsed.stages,
+      newDocument: parsed.newDocument,
+      thoughts: openCodeResult.thoughts,
+      runtime: {
+        protocol: openCodeResult.protocol,
+        agentName: openCodeResult.agentName,
+        agentVersion: openCodeResult.agentVersion,
+        modelId: resolvedModelId,
+        ...(openCodeResult.acpModelId
+          ? { acpModelId: openCodeResult.acpModelId }
+          : {}),
+        stopReason: openCodeResult.stopReason,
+      },
+    }
+  }
+
+  const antigravity = getAntigravityAcpManager()
+  const acpResult = await antigravity.runPrompt({
+    prompt,
+    modelId: collaborateInput.modelId,
+    imageDataUrls,
+    signal,
+    onTextDelta,
+    onThoughtDelta,
+  })
+
+  onBeforeParse?.()
+  const resolvedModelId = toXDriveAntigravityModelId(acpResult.modelId)
+  const parsed = parseMarbleAcpResponse(
+    acpResult.text,
+    collaborateInput,
+    resolvedModelId,
+  )
+
+  return {
+    ok: true as const,
+    source: 'antigravity-acp' as const,
+    proposal: parsed.proposal,
+    stages: parsed.stages,
+    newDocument: parsed.newDocument,
+    thoughts: acpResult.thoughts,
+    runtime: {
+      protocol: 'acp',
+      agentName: acpResult.agentName,
+      agentVersion: acpResult.agentVersion,
+      modelId: resolvedModelId,
+      acpModelId: acpResult.modelId,
+      stopReason: acpResult.stopReason,
+    },
+  }
+}
+
 export async function POST({ request }: { request: Request }) {
+  const startedAt = Date.now()
   let body: Record<string, unknown>
   try {
     const parsed: unknown = await request.json()
@@ -162,6 +342,10 @@ export async function POST({ request }: { request: Request }) {
 
   const action = typeof body.action === 'string' ? body.action : 'collaborate'
   const providerId = resolveProviderId(body)
+  const requestedModelId =
+    typeof body.modelId === 'string' && body.modelId.trim()
+      ? body.modelId.trim()
+      : undefined
   const antigravity = getAntigravityAcpManager()
 
   try {
@@ -280,10 +464,7 @@ export async function POST({ request }: { request: Request }) {
       const collaborateInput: ServerCollaborateInput = {
         source: typeof body.source === 'string' ? body.source : '',
         instruction,
-        modelId:
-          typeof body.modelId === 'string' && body.modelId.trim()
-            ? body.modelId.trim()
-            : defaultModel,
+        modelId: requestedModelId ?? defaultModel,
         providerId,
         action:
           typeof body.actionKind === 'string'
@@ -311,112 +492,148 @@ export async function POST({ request }: { request: Request }) {
         typeof body.sketchDataUrl === 'string' && body.sketchDataUrl
           ? [body.sketchDataUrl]
           : undefined
+      const sessionId =
+        typeof body.sessionId === 'string' && body.sessionId.trim()
+          ? body.sessionId.trim()
+          : undefined
 
-      if (providerId === 'grok-build') {
-        const grokResult = await runGrokBuildPrompt({
-          prompt,
-          modelId: collaborateInput.modelId,
-          imageDataUrls,
-          signal: request.signal,
-        })
+      const acceptHeader = request.headers.get('accept') ?? ''
+      const wantsSse =
+        body.stream === true ||
+        acceptHeader.toLowerCase().includes('text/event-stream')
 
-        const resolvedModelId = toXDriveGrokBuildModelId(grokResult.modelId)
-        const parsed = parseMarbleAcpResponse(
-          grokResult.text,
+      if (!wantsSse) {
+        const result = await runCollaborateExecution({
+          providerId,
           collaborateInput,
-          resolvedModelId,
-        )
-
-        return json({
-          ok: true,
-          source: 'grok-build-acp',
-          proposal: parsed.proposal,
-          stages: parsed.stages,
-          newDocument: parsed.newDocument,
-          thoughts: grokResult.thoughts,
-          runtime: {
-            protocol: 'acp',
-            agentName: grokResult.agentName,
-            agentVersion: grokResult.agentVersion,
-            modelId: resolvedModelId,
-            acpModelId: grokResult.modelId,
-            stopReason: grokResult.stopReason,
-          },
-        })
-      }
-
-      if (providerId === 'opencode-go') {
-        const sessionId =
-          typeof body.sessionId === 'string' && body.sessionId.trim()
-            ? body.sessionId.trim()
-            : undefined
-
-        const openCodeResult = await runOpenCodePrompt({
           prompt,
-          modelId: collaborateInput.modelId,
           sessionId,
           imageDataUrls,
           signal: request.signal,
         })
-
-        const resolvedModelId = toXDriveOpenCodeGoModelId(
-          openCodeResult.modelId,
-        )
-        const parsed = parseMarbleAcpResponse(
-          openCodeResult.text,
-          collaborateInput,
-          resolvedModelId,
-        )
-
-        return json({
-          ok: true,
-          source:
-            openCodeResult.transport === 'acp' ? 'opencode-acp' : 'opencode-go',
-          proposal: parsed.proposal,
-          stages: parsed.stages,
-          newDocument: parsed.newDocument,
-          thoughts: openCodeResult.thoughts,
-          runtime: {
-            protocol: openCodeResult.protocol,
-            agentName: openCodeResult.agentName,
-            agentVersion: openCodeResult.agentVersion,
-            modelId: resolvedModelId,
-            ...(openCodeResult.acpModelId
-              ? { acpModelId: openCodeResult.acpModelId }
-              : {}),
-            stopReason: openCodeResult.stopReason,
-          },
-        })
+        return json(result)
       }
 
-      const acpResult = await antigravity.runPrompt({
-        prompt,
-        modelId: collaborateInput.modelId,
-        imageDataUrls,
-        signal: request.signal,
+      const stream = new ReadableStream<Uint8Array>({
+        async start(controller) {
+          let closed = false
+          const send = (event: Record<string, unknown>) => {
+            if (closed || request.signal.aborted) return
+            try {
+              controller.enqueue(encodeSseEvent(event))
+            } catch {
+              closed = true
+            }
+          }
+
+          const close = () => {
+            if (closed) return
+            closed = true
+            try {
+              controller.close()
+            } catch {
+              // ignore
+            }
+          }
+
+          const heartbeat = setInterval(() => {
+            send({
+              type: 'heartbeat',
+              elapsedMs: Date.now() - startedAt,
+            })
+          }, SSE_HEARTBEAT_INTERVAL_MS)
+
+          let receivedChars = 0
+          let announcedGenerating = false
+          let lastProgressAt = 0
+
+          try {
+            send({
+              type: 'status',
+              phase: 'thinking',
+              label: 'Thinking…',
+              elapsedMs: 0,
+            })
+
+            const result = await runCollaborateExecution({
+              providerId,
+              collaborateInput,
+              prompt,
+              sessionId,
+              imageDataUrls,
+              signal: request.signal,
+              onThoughtDelta: (delta) => {
+                if (!delta) return
+                send({ type: 'thought_delta', delta })
+              },
+              onTextDelta: (delta) => {
+                if (!delta) return
+                receivedChars += delta.length
+                const now = Date.now()
+                if (!announcedGenerating) {
+                  announcedGenerating = true
+                  send({
+                    type: 'status',
+                    phase: 'generating',
+                    label: 'Drafting Marble edits…',
+                    elapsedMs: now - startedAt,
+                  })
+                }
+                if (now - lastProgressAt >= SSE_PROGRESS_THROTTLE_MS) {
+                  lastProgressAt = now
+                  send({
+                    type: 'progress',
+                    chars: receivedChars,
+                    elapsedMs: now - startedAt,
+                  })
+                }
+              },
+              onBeforeParse: () => {
+                send({
+                  type: 'status',
+                  phase: 'parsing',
+                  label: 'Validating Marble proposal…',
+                  elapsedMs: Date.now() - startedAt,
+                })
+              },
+            })
+
+            send({
+              type: 'done',
+              ...result,
+            })
+          } catch (error) {
+            if (request.signal.aborted || isAcpClientAbortError(error)) {
+              return
+            }
+            logAcpServerError({
+              route: '/api/ai',
+              action: 'collaborate',
+              providerId,
+              modelId: collaborateInput.modelId,
+              elapsedMs: Date.now() - startedAt,
+              clientAborted: request.signal.aborted,
+              error,
+            })
+            const { payload, httpStatus } = toApiError(error)
+            send({
+              type: 'error',
+              ...payload,
+              httpStatus,
+            })
+          } finally {
+            clearInterval(heartbeat)
+            close()
+          }
+        },
       })
 
-      const resolvedModelId = toXDriveAntigravityModelId(acpResult.modelId)
-      const parsed = parseMarbleAcpResponse(
-        acpResult.text,
-        collaborateInput,
-        resolvedModelId,
-      )
-
-      return json({
-        ok: true,
-        source: 'antigravity-acp',
-        proposal: parsed.proposal,
-        stages: parsed.stages,
-        newDocument: parsed.newDocument,
-        thoughts: acpResult.thoughts,
-        runtime: {
-          protocol: 'acp',
-          agentName: acpResult.agentName,
-          agentVersion: acpResult.agentVersion,
-          modelId: resolvedModelId,
-          acpModelId: acpResult.modelId,
-          stopReason: acpResult.stopReason,
+      return new Response(stream, {
+        status: 200,
+        headers: {
+          'content-type': 'text/event-stream; charset=utf-8',
+          'cache-control': 'no-cache, no-transform',
+          connection: 'keep-alive',
         },
       })
     }
@@ -430,6 +647,18 @@ export async function POST({ request }: { request: Request }) {
       400,
     )
   } catch (error) {
+    if (request.signal.aborted || isAcpClientAbortError(error)) {
+      return new Response(null, { status: 499 })
+    }
+    logAcpServerError({
+      route: '/api/ai',
+      action,
+      providerId,
+      modelId: requestedModelId,
+      elapsedMs: Date.now() - startedAt,
+      clientAborted: request.signal.aborted,
+      error,
+    })
     return errorResponse(error)
   }
 }

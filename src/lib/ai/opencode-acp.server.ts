@@ -83,6 +83,8 @@ export interface OpenCodeUnifiedPromptInput {
   sessionId?: string
   imageDataUrls?: string[]
   signal?: AbortSignal
+  idleTimeoutMs?: number
+  maxDurationMs?: number
   onTextDelta?: (delta: string) => void
   onThoughtDelta?: (delta: string) => void
 }
@@ -537,7 +539,6 @@ class OpenCodeAcpManager {
       },
       authRequiredMessage: () =>
         'OpenCode CLI is not signed in to OpenCode Go. Run `opencode auth login` in your terminal, select OpenCode Go, and click Refresh in Models & Providers.',
-      promptTimeoutMs: 180_000,
       createError: (code, message, httpStatus) =>
         new OpenCodeAcpError(code, message, httpStatus),
     })
@@ -667,11 +668,76 @@ class OpenCodeAcpManager {
 
     const authInfo = await inspectOpenCodeAuthList(binary)
 
-    let connState: Awaited<
-      ReturnType<AcpProcessRuntime<OpenCodeBinarySource>['ensureConnected']>
-    >
     try {
-      connState = await this.runtime.ensureConnected()
+      return await this.runtime.withConnection(async (state) => {
+        const { init } = state
+        const supportsImages = Boolean(
+          init.agentCapabilities?.promptCapabilities?.image,
+        )
+
+        try {
+          const { discovery } = await this.runtime.probeSessionOn(state, 15_000)
+          const hasEnvOpenCodeKey = Boolean(
+            process.env.OPENCODE_API_KEY?.trim() ||
+            process.env.OPENCODE_GO_API_KEY?.trim(),
+          )
+
+          const { authenticated, selectedAcpModels } = selectOpenCodeAcpModels(
+            discovery.models,
+            authInfo,
+            hasEnvOpenCodeKey,
+          )
+
+          if (!authenticated && selectedAcpModels.length === 0) {
+            this.cachedModels = []
+            this.cachedCurrentModelId = null
+            this.cachedConfigOptions = []
+            return this.buildAcpStatus(
+              init,
+              binary,
+              false,
+              authInfo,
+              catalogModels,
+              'OpenCode CLI was found, but no OpenCode Go login was detected. Run `opencode auth login` in your terminal and select OpenCode Go, then click Refresh.',
+            )
+          }
+
+          const enriched = enrichAcpModels(
+            selectedAcpModels,
+            catalogModels,
+            supportsImages,
+          )
+          this.cacheDiscovery(discovery, enriched)
+          return this.buildAcpStatus(
+            init,
+            binary,
+            authenticated,
+            authInfo,
+            catalogModels,
+          )
+        } catch (error) {
+          if (isAcpAuthRequiredError(error)) {
+            this.cachedModels = []
+            this.cachedCurrentModelId = null
+            this.cachedConfigOptions = []
+            return this.buildAcpStatus(
+              init,
+              binary,
+              false,
+              authInfo,
+              catalogModels,
+            )
+          }
+          return this.buildAcpStatus(
+            init,
+            binary,
+            false,
+            authInfo,
+            catalogModels,
+            error instanceof Error ? error.message : String(error),
+          )
+        }
+      })
     } catch (error) {
       return {
         ok: true,
@@ -699,68 +765,6 @@ class OpenCodeAcpManager {
             ? error.message
             : 'OpenCode ACP runtime unavailable.',
       }
-    }
-
-    const { init } = connState
-    const supportsImages = Boolean(
-      init.agentCapabilities?.promptCapabilities?.image,
-    )
-
-    try {
-      const { discovery } = await this.runtime.probeSession(15_000)
-      const hasEnvOpenCodeKey = Boolean(
-        process.env.OPENCODE_API_KEY?.trim() ||
-        process.env.OPENCODE_GO_API_KEY?.trim(),
-      )
-
-      const { authenticated, selectedAcpModels } = selectOpenCodeAcpModels(
-        discovery.models,
-        authInfo,
-        hasEnvOpenCodeKey,
-      )
-
-      if (!authenticated && selectedAcpModels.length === 0) {
-        this.cachedModels = []
-        this.cachedCurrentModelId = null
-        this.cachedConfigOptions = []
-        return this.buildAcpStatus(
-          init,
-          binary,
-          false,
-          authInfo,
-          catalogModels,
-          'OpenCode CLI was found, but no OpenCode Go login was detected. Run `opencode auth login` in your terminal and select OpenCode Go, then click Refresh.',
-        )
-      }
-
-      const enriched = enrichAcpModels(
-        selectedAcpModels,
-        catalogModels,
-        supportsImages,
-      )
-      this.cacheDiscovery(discovery, enriched)
-      return this.buildAcpStatus(
-        init,
-        binary,
-        authenticated,
-        authInfo,
-        catalogModels,
-      )
-    } catch (error) {
-      if (isAcpAuthRequiredError(error)) {
-        this.cachedModels = []
-        this.cachedCurrentModelId = null
-        this.cachedConfigOptions = []
-        return this.buildAcpStatus(init, binary, false, authInfo, catalogModels)
-      }
-      return this.buildAcpStatus(
-        init,
-        binary,
-        false,
-        authInfo,
-        catalogModels,
-        error instanceof Error ? error.message : String(error),
-      )
     }
   }
 
@@ -859,6 +863,8 @@ export async function runOpenCodePrompt(
       reasoningEffort: input.reasoningEffort,
       imageDataUrls: input.imageDataUrls,
       signal: input.signal,
+      idleTimeoutMs: input.idleTimeoutMs,
+      maxDurationMs: input.maxDurationMs,
       onTextDelta: input.onTextDelta,
       onThoughtDelta: input.onThoughtDelta,
     })

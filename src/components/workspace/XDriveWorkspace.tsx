@@ -874,7 +874,10 @@ export function XDriveWorkspace({
   const [grokBuildError, setGrokBuildError] = useState<string | null>(null)
   const [thinkingState, setThinkingState] = useState<{
     threadId: string
+    phase: 'connecting' | 'thinking' | 'generating' | 'parsing'
     label: string
+    detail?: string
+    elapsedMs: number
   } | null>(null)
   const [localSortBy, setLocalSortBy] = useState<SortOption>('updated')
   const [localViewMode, setLocalViewMode] = useState<DriveViewMode>('preview')
@@ -2648,16 +2651,27 @@ export function XDriveWorkspace({
       attachedSketches: input.sketchAnnotations,
     }
     const threadId = input.doc?.id ?? 'drive'
+    const providerTag =
+      input.providerId === 'grok-build'
+        ? `Grok Build ACP (${input.model.replace(/^grok-build\//, '')})`
+        : input.providerId === 'opencode-go'
+          ? `${openCodeGoStatus?.transport === 'http-fallback' ? 'OpenCode Go' : 'OpenCode ACP'} (${input.model.replace(/^opencode-go\/(?:opencode\/)?/, '')})`
+          : `Antigravity ACP (${input.model.replace(/^antigravity\//, '')})`
+    const startedAt = Date.now()
     upsertThreadMessage(threadId, user)
     setThinkingState({
       threadId,
-      label:
-        input.providerId === 'grok-build'
-          ? `Running Grok Build ACP (${input.model.replace(/^grok-build\//, '')})…`
-          : input.providerId === 'opencode-go'
-            ? `Running ${openCodeGoStatus?.transport === 'http-fallback' ? 'OpenCode Go' : 'OpenCode ACP'} (${input.model.replace(/^opencode-go\/(?:opencode\/)?/, '')})…`
-            : `Running Google Antigravity ACP (${input.model.replace(/^antigravity\//, '')})…`,
+      phase: 'thinking',
+      label: `Thinking… · ${providerTag}`,
+      elapsedMs: 0,
     })
+    const elapsedTicker = window.setInterval(() => {
+      setThinkingState((current) =>
+        current?.threadId === threadId
+          ? { ...current, elapsedMs: Date.now() - startedAt }
+          : current,
+      )
+    }, 1000)
     try {
       const liveEvergreen = libraryRef.current.filter(
         (item) =>
@@ -2675,6 +2689,18 @@ export function XDriveWorkspace({
         selectedElements: input.selectedElements,
         sketchAnnotations: input.sketchAnnotations,
         evergreenDocs: liveEvergreen,
+        onProgress: (progress) => {
+          setThinkingState((current) => {
+            if (current && current.threadId !== threadId) return current
+            return {
+              threadId,
+              phase: progress.phase,
+              label: `${progress.label} · ${providerTag}`,
+              detail: progress.thoughtSnippet ?? current?.detail,
+              elapsedMs: progress.elapsedMs ?? Date.now() - startedAt,
+            }
+          })
+        },
       })
       if (result.newDocument) {
         const adopted = adoptDocument(result.newDocument, allDocsRef.current)
@@ -2817,6 +2843,7 @@ export function XDriveWorkspace({
         timestamp: new Date().toISOString(),
       })
     } finally {
+      window.clearInterval(elapsedTicker)
       setThinkingState((current) =>
         current?.threadId === threadId ? null : current,
       )
@@ -5759,7 +5786,26 @@ export function XDriveWorkspace({
             onDiscard={discardProposal}
             onOpenProviders={() => visit('home', 'subscriptions')}
             isThinking={thinkingState?.threadId === (activeDoc?.id ?? 'drive')}
-            thinkingLabel={thinkingState?.label}
+            thinkingPhase={
+              thinkingState?.threadId === (activeDoc?.id ?? 'drive')
+                ? thinkingState.phase
+                : undefined
+            }
+            thinkingLabel={
+              thinkingState?.threadId === (activeDoc?.id ?? 'drive')
+                ? thinkingState.label
+                : undefined
+            }
+            thinkingDetail={
+              thinkingState?.threadId === (activeDoc?.id ?? 'drive')
+                ? thinkingState.detail
+                : undefined
+            }
+            thinkingElapsedMs={
+              thinkingState?.threadId === (activeDoc?.id ?? 'drive')
+                ? thinkingState.elapsedMs
+                : undefined
+            }
             antigravityConnected={
               antigravityStatus ? antigravityStatus.authenticated : undefined
             }

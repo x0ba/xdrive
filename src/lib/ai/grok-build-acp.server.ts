@@ -427,7 +427,6 @@ export class GrokBuildAcpManager {
       },
       authRequiredMessage: () =>
         'Grok Build CLI is not signed in. Run `grok login` in your terminal (or set `XAI_API_KEY` in `.env.local`), then click Refresh in Models & Providers.',
-      promptTimeoutMs: 180_000,
       createError: (code, message, httpStatus) =>
         new GrokBuildAcpError(code, message, httpStatus),
     })

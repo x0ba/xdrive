@@ -423,11 +423,29 @@ class AntigravityAcpManager {
   }
 
   async getStatus(): Promise<AntigravityRuntimeStatus> {
-    let connState: Awaited<
-      ReturnType<AcpProcessRuntime<AntigravityBinarySource>['ensureConnected']>
-    >
     try {
-      connState = await this.runtime.ensureConnected()
+      return await this.runtime.withConnection(async (state) => {
+        const { init, binary } = state
+        try {
+          const { discovery } = await this.runtime.probeSessionOn(state, 15_000)
+          this.cacheDiscovery(discovery)
+          return this.buildStatus(init, binary, true)
+        } catch (error) {
+          if (isAcpAuthRequiredError(error)) {
+            this.cachedModels = []
+            this.cachedCurrentModelId = null
+            this.cachedConfigOptions = []
+            this.cachedTier = null
+            return this.buildStatus(init, binary, false)
+          }
+          return this.buildStatus(
+            init,
+            binary,
+            false,
+            error instanceof Error ? error.message : String(error),
+          )
+        }
+      })
     } catch (error) {
       const missing =
         error instanceof AntigravityAcpError && error.code === 'BINARY_MISSING'
@@ -450,27 +468,6 @@ class AntigravityAcpManager {
             ? error.message
             : 'Antigravity ACP runtime unavailable',
       }
-    }
-
-    const { init, binary } = connState
-    try {
-      const { discovery } = await this.runtime.probeSession(15_000)
-      this.cacheDiscovery(discovery)
-      return this.buildStatus(init, binary, true)
-    } catch (error) {
-      if (isAcpAuthRequiredError(error)) {
-        this.cachedModels = []
-        this.cachedCurrentModelId = null
-        this.cachedConfigOptions = []
-        this.cachedTier = null
-        return this.buildStatus(init, binary, false)
-      }
-      return this.buildStatus(
-        init,
-        binary,
-        false,
-        error instanceof Error ? error.message : String(error),
-      )
     }
   }
 
@@ -499,15 +496,16 @@ class AntigravityAcpManager {
         this.runtime.retireConnection()
       }
 
-      const { connection } = await this.runtime.ensureConnected()
-      await connection.agent.request(
-        'authenticate',
-        { methodId },
-        {
-          cancellationSignal: AbortSignal.timeout(5 * 60_000),
-          stopWaitingOnCancel: true,
-        },
-      )
+      await this.runtime.withConnection(async ({ connection }) => {
+        await connection.agent.request(
+          'authenticate',
+          { methodId },
+          {
+            cancellationSignal: AbortSignal.timeout(5 * 60_000),
+            stopWaitingOnCancel: true,
+          },
+        )
+      })
       this.activeAuthMethod = methodId
       return await this.getStatus()
     })()
@@ -529,15 +527,16 @@ class AntigravityAcpManager {
     this.cachedTier = null
 
     try {
-      const { connection } = await this.runtime.ensureConnected()
-      await connection.agent.request(
-        'logout',
-        {},
-        {
-          cancellationSignal: AbortSignal.timeout(10_000),
-          stopWaitingOnCancel: true,
-        },
-      )
+      await this.runtime.withConnection(async ({ connection }) => {
+        await connection.agent.request(
+          'logout',
+          {},
+          {
+            cancellationSignal: AbortSignal.timeout(10_000),
+            stopWaitingOnCancel: true,
+          },
+        )
+      })
     } catch {
       // Ignore if logout is already cleared or connection was down.
     }

@@ -46,6 +46,18 @@ export interface EvergreenDesignContext {
   refs: EvergreenDocRef[]
 }
 
+export const DEFAULT_COLLABORATE_CLIENT_TIMEOUT_MS = 630_000
+
+export type CollaborationProgressPhase =
+  'connecting' | 'thinking' | 'generating' | 'parsing'
+
+export interface CollaborationProgress {
+  phase: CollaborationProgressPhase
+  label: string
+  thoughtSnippet?: string
+  elapsedMs?: number
+}
+
 export interface CollaborationRequest {
   source: string
   instruction: string
@@ -59,6 +71,9 @@ export interface CollaborationRequest {
   evergreenDocs?: MarbleDocumentFile[]
   /** Allow deterministic local synthesizer fallback only when /api/ai is absent (e.g. static Storybook). */
   allowOfflineFallback?: boolean
+  signal?: AbortSignal
+  timeoutMs?: number
+  onProgress?: (progress: CollaborationProgress) => void
 }
 
 export interface CollaborationResult {
@@ -90,6 +105,7 @@ export class MarbleCollaborationError extends Error {
     | 'RATE_LIMITED'
     | 'BINARY_MISSING'
     | 'PROVIDER_UNAVAILABLE'
+    | 'TIMEOUT'
     | 'AI_ERROR'
 
   constructor(code: MarbleCollaborationError['code'], message: string) {
@@ -1545,22 +1561,94 @@ const STOP = new Set([
   'more',
 ])
 
+interface CollaborateErrorPayload {
+  code?: string
+  authRequired?: boolean
+  entitlementRequired?: boolean
+  rateLimited?: boolean
+  binaryMissing?: boolean
+  error?: string
+  httpStatus?: number
+}
+
+export function toMarbleCollaborationError(
+  rawPayload: unknown,
+  fallbackStatus?: number,
+): MarbleCollaborationError {
+  const payload =
+    rawPayload && typeof rawPayload === 'object'
+      ? (rawPayload as CollaborateErrorPayload)
+      : {}
+  const code: MarbleCollaborationError['code'] =
+    payload.authRequired || payload.code === 'AUTH_REQUIRED'
+      ? 'AUTH_REQUIRED'
+      : payload.entitlementRequired || payload.code === 'ENTITLEMENT_REQUIRED'
+        ? 'ENTITLEMENT_REQUIRED'
+        : payload.rateLimited || payload.code === 'RATE_LIMITED'
+          ? 'RATE_LIMITED'
+          : payload.binaryMissing || payload.code === 'BINARY_MISSING'
+            ? 'BINARY_MISSING'
+            : payload.code === 'PROVIDER_UNAVAILABLE'
+              ? 'PROVIDER_UNAVAILABLE'
+              : payload.code === 'TIMEOUT' ||
+                  payload.httpStatus === 504 ||
+                  fallbackStatus === 504
+                ? 'TIMEOUT'
+                : 'AI_ERROR'
+  const status = payload.httpStatus ?? fallbackStatus
+  return new MarbleCollaborationError(
+    code,
+    payload.error ||
+      (status
+        ? `AI collaboration failed (HTTP ${status}).`
+        : 'AI collaboration failed.'),
+  )
+}
+
+function extractThoughtSnippet(accumulated: string, maxChars = 140): string {
+  const lines = accumulated
+    .split(/\r?\n/)
+    .map((line) => line.replace(/^[\s#>*`-]+/, '').trim())
+    .filter(Boolean)
+  const latest = lines.at(-1) ?? accumulated.replace(/\s+/g, ' ').trim()
+  if (!latest) return ''
+  return latest.length <= maxChars
+    ? latest
+    : `…${latest.slice(-(maxChars - 1))}`
+}
+
 async function askMarbleApi(
   request: CollaborationRequest,
   evergreenContext: EvergreenDesignContext,
 ): Promise<CollaborationResult | null> {
   if (typeof fetch !== 'function') return null
+  const timeoutMs = request.timeoutMs ?? DEFAULT_COLLABORATE_CLIENT_TIMEOUT_MS
   const controller = new AbortController()
-  const timer = setTimeout(() => controller.abort(), 310_000)
+  const timeoutState = { fired: false }
+  const timer = setTimeout(() => {
+    timeoutState.fired = true
+    controller.abort()
+  }, timeoutMs)
+
+  const onExternalAbort = () => controller.abort(request.signal?.reason)
+  if (request.signal) {
+    if (request.signal.aborted) {
+      onExternalAbort()
+    } else {
+      request.signal.addEventListener('abort', onExternalAbort, { once: true })
+    }
+  }
+
   try {
     const response = await fetch('/api/ai', {
       method: 'POST',
       headers: {
         'content-type': 'application/json',
-        accept: 'application/json',
+        accept: 'text/event-stream, application/json',
       },
       body: JSON.stringify({
         action: 'collaborate',
+        stream: true,
         actionKind: request.action,
         source: request.source,
         instruction: request.instruction,
@@ -1580,38 +1668,166 @@ async function askMarbleApi(
       // Static environments (such as Storybook without TanStack Start server).
       return null
     }
-    const data: unknown = await response.json().catch(() => null)
     if (!response.ok) {
-      const payload = (data ?? {}) as {
-        code?: string
-        authRequired?: boolean
-        entitlementRequired?: boolean
-        rateLimited?: boolean
-        binaryMissing?: boolean
-        error?: string
-      }
-      const code =
-        payload.authRequired || payload.code === 'AUTH_REQUIRED'
-          ? 'AUTH_REQUIRED'
-          : payload.entitlementRequired ||
-              payload.code === 'ENTITLEMENT_REQUIRED'
-            ? 'ENTITLEMENT_REQUIRED'
-            : payload.rateLimited || payload.code === 'RATE_LIMITED'
-              ? 'RATE_LIMITED'
-              : payload.binaryMissing || payload.code === 'BINARY_MISSING'
-                ? 'BINARY_MISSING'
-                : payload.code === 'PROVIDER_UNAVAILABLE'
-                  ? 'PROVIDER_UNAVAILABLE'
-                  : 'AI_ERROR'
-      throw new MarbleCollaborationError(
-        code,
-        payload.error || `AI collaboration failed (HTTP ${response.status}).`,
-      )
+      const data: unknown = await response.json().catch(() => null)
+      throw toMarbleCollaborationError(data, response.status)
     }
-    return normalizeApi(data, request, evergreenContext)
+
+    const contentType = (
+      response.headers.get('content-type') ?? ''
+    ).toLowerCase()
+    if (!contentType.includes('text/event-stream') || !response.body) {
+      const data: unknown = await response.json().catch(() => null)
+      return normalizeApi(data, request, evergreenContext)
+    }
+
+    const reader = response.body.getReader()
+    const decoder = new TextDecoder()
+    let buffer = ''
+    let thoughtBuffer = ''
+    let currentPhase: CollaborationProgressPhase = 'thinking'
+    let currentLabel = 'Thinking…'
+    const streamOutcome: {
+      donePayload: unknown
+      error: MarbleCollaborationError | null
+    } = {
+      donePayload: null,
+      error: null,
+    }
+
+    const handleEvent = (rawEvent: Record<string, unknown>) => {
+      const type = rawEvent.type
+      if (type === 'status') {
+        const phase = rawEvent.phase
+        if (
+          phase === 'connecting' ||
+          phase === 'thinking' ||
+          phase === 'generating' ||
+          phase === 'parsing'
+        ) {
+          currentPhase = phase
+        }
+        if (typeof rawEvent.label === 'string' && rawEvent.label.trim()) {
+          currentLabel = rawEvent.label.trim()
+        }
+        request.onProgress?.({
+          phase: currentPhase,
+          label: currentLabel,
+          thoughtSnippet: thoughtBuffer
+            ? extractThoughtSnippet(thoughtBuffer)
+            : undefined,
+          elapsedMs:
+            typeof rawEvent.elapsedMs === 'number'
+              ? rawEvent.elapsedMs
+              : undefined,
+        })
+        return
+      }
+      if (type === 'thought_delta' && typeof rawEvent.delta === 'string') {
+        thoughtBuffer += rawEvent.delta
+        currentPhase = 'thinking'
+        request.onProgress?.({
+          phase: 'thinking',
+          label: 'Thinking…',
+          thoughtSnippet: extractThoughtSnippet(thoughtBuffer),
+        })
+        return
+      }
+      if (type === 'progress') {
+        request.onProgress?.({
+          phase: currentPhase,
+          label: currentLabel,
+          thoughtSnippet: thoughtBuffer
+            ? extractThoughtSnippet(thoughtBuffer)
+            : undefined,
+          elapsedMs:
+            typeof rawEvent.elapsedMs === 'number'
+              ? rawEvent.elapsedMs
+              : undefined,
+        })
+        return
+      }
+      if (type === 'heartbeat') {
+        request.onProgress?.({
+          phase: currentPhase,
+          label: currentLabel,
+          thoughtSnippet: thoughtBuffer
+            ? extractThoughtSnippet(thoughtBuffer)
+            : undefined,
+          elapsedMs:
+            typeof rawEvent.elapsedMs === 'number'
+              ? rawEvent.elapsedMs
+              : undefined,
+        })
+        return
+      }
+      if (type === 'done') {
+        streamOutcome.donePayload = rawEvent
+        return
+      }
+      if (type === 'error') {
+        streamOutcome.error = toMarbleCollaborationError(rawEvent)
+      }
+    }
+
+    const flushLine = (line: string) => {
+      const clean = line.endsWith('\r') ? line.slice(0, -1) : line
+      if (!clean.startsWith('data:')) return
+      const raw = clean.slice('data:'.length).trim()
+      if (!raw || raw === '[DONE]') return
+      try {
+        const parsed: unknown = JSON.parse(raw)
+        if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+          handleEvent(parsed as Record<string, unknown>)
+        }
+      } catch {
+        // ignore malformed chunk
+      }
+    }
+
+    try {
+      for (;;) {
+        const { done, value } = await reader.read()
+        if (done) break
+        buffer += decoder.decode(value, { stream: true })
+        let idx = buffer.indexOf('\n')
+        while (idx !== -1) {
+          flushLine(buffer.slice(0, idx))
+          buffer = buffer.slice(idx + 1)
+          idx = buffer.indexOf('\n')
+        }
+      }
+      buffer += decoder.decode()
+      if (buffer.trim()) {
+        for (const line of buffer.split('\n')) flushLine(line)
+      }
+    } finally {
+      try {
+        reader.releaseLock()
+      } catch {
+        // ignore
+      }
+    }
+
+    if (streamOutcome.error) {
+      throw streamOutcome.error
+    }
+    if (streamOutcome.donePayload) {
+      return normalizeApi(streamOutcome.donePayload, request, evergreenContext)
+    }
+    throw new MarbleCollaborationError(
+      'AI_ERROR',
+      'AI collaborator stream ended unexpectedly before returning a proposal.',
+    )
   } catch (error) {
     if (error instanceof MarbleCollaborationError) throw error
-    if (error instanceof Error && error.name === 'AbortError') {
+    if (request.signal?.aborted) {
+      throw error
+    }
+    if (
+      timeoutState.fired ||
+      (error instanceof Error && error.name === 'AbortError')
+    ) {
       const label =
         request.providerId === 'grok-build'
           ? 'Grok Build'
@@ -1619,13 +1835,14 @@ async function askMarbleApi(
             ? 'OpenCode Go'
             : 'Antigravity'
       throw new MarbleCollaborationError(
-        'AI_ERROR',
-        `${label} request timed out before returning a Marble proposal.`,
+        'TIMEOUT',
+        `${label} timed out before returning a Marble proposal.`,
       )
     }
     return null
   } finally {
     clearTimeout(timer)
+    request.signal?.removeEventListener('abort', onExternalAbort)
   }
 }
 

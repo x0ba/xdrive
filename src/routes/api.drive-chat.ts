@@ -3,6 +3,10 @@ import { chat } from '@tanstack/ai'
 import { openaiText } from '@tanstack/ai-openai'
 import { anthropicText } from '@tanstack/ai-anthropic'
 import {
+  isAcpClientAbortError,
+  logAcpServerError,
+} from '#/lib/ai/acp-runtime.server'
+import {
   AntigravityAcpError,
   getAntigravityAcpManager,
 } from '#/lib/ai/antigravity-acp.server'
@@ -222,11 +226,22 @@ export async function POST({ request }: { request: Request }) {
 
   const stream = new ReadableStream<Uint8Array>({
     async start(controller) {
+      const startedAt = Date.now()
       let closed = false
+      const encoder = new TextEncoder()
       const send = (event: DriveChatStreamEvent) => {
         if (closed || request.signal.aborted) return
         try {
           controller.enqueue(encodeSse(event))
+        } catch {
+          closed = true
+        }
+      }
+
+      const sendHeartbeat = () => {
+        if (closed || request.signal.aborted) return
+        try {
+          controller.enqueue(encoder.encode(': heartbeat\n\n'))
         } catch {
           closed = true
         }
@@ -241,6 +256,8 @@ export async function POST({ request }: { request: Request }) {
           // ignore
         }
       }
+
+      const heartbeat = setInterval(sendHeartbeat, 15_000)
 
       let rawAccumulated = ''
       let enteredActionsFence = false
@@ -389,10 +406,19 @@ export async function POST({ request }: { request: Request }) {
           },
         })
       } catch (error) {
-        if (!request.signal.aborted) {
+        if (!request.signal.aborted && !isAcpClientAbortError(error)) {
+          logAcpServerError({
+            route: '/api/drive-chat',
+            providerId,
+            modelId: body.modelId,
+            elapsedMs: Date.now() - startedAt,
+            clientAborted: request.signal.aborted,
+            error,
+          })
           send(extractStreamError(error, providerId))
         }
       } finally {
+        clearInterval(heartbeat)
         close()
       }
     },

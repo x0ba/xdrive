@@ -261,7 +261,10 @@ export interface CursorAISidebarProps {
   onDiscard?: (proposalId: string) => void
   onOpenProviders?: () => void
   isThinking?: boolean
+  thinkingPhase?: 'connecting' | 'thinking' | 'generating' | 'parsing'
   thinkingLabel?: string
+  thinkingDetail?: string
+  thinkingElapsedMs?: number
   antigravityConnected?: boolean
   hasConnectedProvider?: boolean
   pendingIntent?: MarbleIntentRequest | null
@@ -284,6 +287,14 @@ function formatWhen(value: string | number): string {
     hour: 'numeric',
     minute: '2-digit',
   })
+}
+
+function formatElapsedDuration(ms: number): string {
+  const totalSeconds = Math.max(0, Math.floor(ms / 1000))
+  if (totalSeconds < 60) return `${totalSeconds}s`
+  const minutes = Math.floor(totalSeconds / 60)
+  const seconds = totalSeconds % 60
+  return seconds > 0 ? `${minutes}m ${seconds}s` : `${minutes}m`
 }
 
 function opLines(op: MarbleOp): string[] {
@@ -506,7 +517,10 @@ export function CursorAISidebar({
   onDiscard,
   onOpenProviders,
   isThinking = false,
+  thinkingPhase,
   thinkingLabel,
+  thinkingDetail,
+  thinkingElapsedMs,
   antigravityConnected,
   hasConnectedProvider,
   pendingIntent = null,
@@ -905,12 +919,32 @@ export function CursorAISidebar({
               </li>
             ))}
             {isThinking && (
-              <li>
-                <div className="flex items-center gap-2 rounded border border-[var(--xd-border)] bg-[var(--xd-canvas)] px-2.5 py-2 text-[11.5px] text-[var(--xd-ink-secondary)]">
-                  <Loader2 className="size-3.5 shrink-0 animate-spin text-[var(--xd-accent)]" />
-                  <span className="truncate">
-                    {thinkingLabel || 'Running AI collaborator…'}
-                  </span>
+              <li data-component="cursor-ai-thinking" aria-live="polite">
+                <div className="rounded border border-[var(--xd-border)] bg-[var(--xd-canvas)] px-2.5 py-2 text-[11.5px] text-[var(--xd-ink-secondary)]">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="flex min-w-0 items-center gap-2">
+                      <Loader2 className="size-3.5 shrink-0 animate-spin text-[var(--xd-accent)]" />
+                      <span className="truncate font-medium text-[var(--xd-ink)]">
+                        {thinkingLabel ||
+                          (thinkingPhase === 'generating'
+                            ? 'Drafting edits…'
+                            : thinkingPhase === 'parsing'
+                              ? 'Validating proposal…'
+                              : 'Thinking…')}
+                      </span>
+                    </span>
+                    {typeof thinkingElapsedMs === 'number' &&
+                      thinkingElapsedMs >= 1000 && (
+                        <span className="xd-mono shrink-0 text-[10.5px] tabular-nums text-[var(--xd-ink-muted)]">
+                          {formatElapsedDuration(thinkingElapsedMs)}
+                        </span>
+                      )}
+                  </div>
+                  {thinkingDetail && (
+                    <p className="mt-1 line-clamp-2 pl-5.5 text-[11px] leading-snug text-[var(--xd-ink-muted)]">
+                      {thinkingDetail}
+                    </p>
+                  )}
                 </div>
               </li>
             )}
@@ -992,7 +1026,9 @@ export function CursorAISidebar({
               className="inline-flex h-7 items-center rounded bg-[var(--xd-accent)] px-2.5 text-[11.5px] font-medium text-white disabled:opacity-35"
             >
               {isThinking
-                ? 'Working…'
+                ? thinkingPhase === 'generating'
+                  ? 'Drafting…'
+                  : 'Thinking…'
                 : spec.ai === 'propose'
                   ? 'Propose'
                   : 'Send'}
