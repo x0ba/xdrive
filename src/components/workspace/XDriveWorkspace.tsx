@@ -64,6 +64,16 @@ import {
   buildDriveSnapshot,
   streamDriveChat,
 } from '#/lib/ai/drive-chat-client'
+import {
+  deleteDocChatHistory,
+  deleteDriveChatThread,
+  fetchDocChatHistories,
+  fetchDriveChatThread,
+  fetchDriveChatThreads,
+  importDriveChatThreads,
+  saveDocChatHistory,
+  saveDriveChatThread,
+} from '#/lib/ai/chat-history-client'
 import type {
   DriveChatAction,
   DriveChatMessage,
@@ -129,6 +139,7 @@ import type {
 } from '#/lib/types'
 import { cn } from '#/lib/utils'
 
+// Legacy localStorage key read once on first load to migrate existing Drive Chat threads to disk.
 const CHAT_STORAGE_KEY = 'xdrive.drive-chat.threads.v1'
 const LEGACY_FAVORITE_MODELS_STORAGE_KEY =
   'xdrive.drive-chat.favorite-models.v1'
@@ -151,14 +162,43 @@ function createBlankChatThread(
   }
 }
 
-function loadStoredChatThreads(): DriveChatThread[] | null {
-  if (typeof window === 'undefined') return null
+function isMeaningfulChatThread(thread: DriveChatThread): boolean {
+  return (
+    thread.messages.length > 0 ||
+    Boolean(thread.pinned) ||
+    (thread.title.trim().length > 0 && thread.title.trim() !== 'New chat')
+  )
+}
+
+function mergeProposalsWithThread(
+  intentHistory: MarbleOpProposal[],
+  messages: AIMessage[],
+): MarbleOpProposal[] {
+  const byId = new Map<string, MarbleOpProposal>()
+  for (const proposal of intentHistory) {
+    byId.set(proposal.id, proposal)
+  }
+  for (const msg of messages) {
+    if (msg.proposal && !byId.has(msg.proposal.id)) {
+      byId.set(msg.proposal.id, msg.proposal)
+    }
+  }
+  return [...byId.values()].sort((a, b) => b.createdAt - a.createdAt)
+}
+
+function loadLegacyLocalStorageChatThreads(): {
+  hasKey: boolean
+  threads: DriveChatThread[]
+} {
+  if (typeof window === 'undefined') return { hasKey: false, threads: [] }
   try {
     const raw = window.localStorage.getItem(CHAT_STORAGE_KEY)
-    if (!raw) return null
+    if (raw === null) return { hasKey: false, threads: [] }
     const parsed: unknown = JSON.parse(raw)
-    if (!Array.isArray(parsed) || parsed.length === 0) return null
-    return (parsed as DriveChatThread[]).map((item) => ({
+    if (!Array.isArray(parsed) || parsed.length === 0) {
+      return { hasKey: true, threads: [] }
+    }
+    const threads = (parsed as DriveChatThread[]).map((item) => ({
       ...item,
       messages: (Array.isArray(item.messages) ? item.messages : []).map(
         (msg) => ({
@@ -168,8 +208,9 @@ function loadStoredChatThreads(): DriveChatThread[] | null {
         }),
       ),
     }))
+    return { hasKey: true, threads }
   } catch {
-    return null
+    return { hasKey: true, threads: [] }
   }
 }
 
@@ -813,7 +854,17 @@ export function XDriveWorkspace({
   const driveSyncQueueRef = useRef<Promise<unknown>>(Promise.resolve())
   const chatAbortRef = useRef<AbortController | null>(null)
   const chatUndoMapRef = useRef(new Map<string, () => void>())
-  const chatHydratedRef = useRef(false)
+  const chatThreadsRef = useRef<DriveChatThread[]>(chatThreads)
+  chatThreadsRef.current = chatThreads
+  const activeChatThreadIdRef = useRef<string>(activeChatThreadId)
+  activeChatThreadIdRef.current = activeChatThreadId
+  const docThreadsRef = useRef<Partial<Record<string, AIMessage[]>>>(threads)
+  docThreadsRef.current = threads
+  const chatSyncQueueRef = useRef<Promise<unknown>>(Promise.resolve())
+  const pendingChatSaveIdsRef = useRef<Set<string>>(new Set())
+  const persistedChatIdsRef = useRef<Set<string>>(new Set())
+  const docChatSyncQueueRef = useRef<Promise<unknown>>(Promise.resolve())
+  const pendingDocChatSaveIdsRef = useRef<Set<string>>(new Set())
   const sourceRef = useRef(new Map<string, string>())
   const previewRun = useRef(0)
   const shownSourceRef = useRef<string | null>(null)
@@ -854,31 +905,156 @@ export function XDriveWorkspace({
   foldersRef.current = folders
   for (const doc of library) sourceRef.current.set(doc.id, doc.source)
 
-  useEffect(() => {
-    const stored = loadStoredChatThreads()
-    if (stored && stored.length > 0) {
-      setChatThreads(stored)
-      setActiveChatThreadId(stored[0].id)
-    }
-    chatHydratedRef.current = true
-  }, [])
+  function updateChatThreads(
+    updater: (prev: DriveChatThread[]) => DriveChatThread[],
+  ) {
+    const next = updater(chatThreadsRef.current)
+    chatThreadsRef.current = next
+    setChatThreads(next)
+    return next
+  }
+
+  function updateDocThreads(
+    updater: (
+      prev: Partial<Record<string, AIMessage[]>>,
+    ) => Partial<Record<string, AIMessage[]>>,
+  ) {
+    const next = updater(docThreadsRef.current)
+    docThreadsRef.current = next
+    setThreads(next)
+    return next
+  }
+
+  function scheduleChatThreadSave(threadId: string) {
+    if (!syncWithServer || !threadId) return
+    if (pendingChatSaveIdsRef.current.has(threadId)) return
+    pendingChatSaveIdsRef.current.add(threadId)
+    queueMicrotask(() => {
+      if (!pendingChatSaveIdsRef.current.delete(threadId)) return
+      const latest = chatThreadsRef.current.find((t) => t.id === threadId)
+      if (
+        !latest ||
+        (!isMeaningfulChatThread(latest) &&
+          !persistedChatIdsRef.current.has(threadId))
+      ) {
+        return
+      }
+      persistedChatIdsRef.current.add(threadId)
+      chatSyncQueueRef.current = chatSyncQueueRef.current
+        .then(() => saveDriveChatThread(latest))
+        .catch(() => null)
+    })
+  }
+
+  function queueChatThreadDelete(threadId: string) {
+    if (!syncWithServer || !threadId) return
+    pendingChatSaveIdsRef.current.delete(threadId)
+    persistedChatIdsRef.current.delete(threadId)
+    chatSyncQueueRef.current = chatSyncQueueRef.current
+      .then(() => deleteDriveChatThread(threadId))
+      .catch(() => false)
+  }
+
+  function scheduleDocChatSave(docId: string) {
+    if (!syncWithServer || !docId) return
+    if (pendingDocChatSaveIdsRef.current.has(docId)) return
+    pendingDocChatSaveIdsRef.current.add(docId)
+    queueMicrotask(() => {
+      if (!pendingDocChatSaveIdsRef.current.delete(docId)) return
+      const latest = docThreadsRef.current[docId]
+      if (!latest) return
+      docChatSyncQueueRef.current = docChatSyncQueueRef.current
+        .then(() => saveDocChatHistory(docId, latest))
+        .catch(() => false)
+    })
+  }
+
+  function queueDocChatDelete(docId: string) {
+    if (!syncWithServer || !docId) return
+    pendingDocChatSaveIdsRef.current.delete(docId)
+    docChatSyncQueueRef.current = docChatSyncQueueRef.current
+      .then(() => deleteDocChatHistory(docId))
+      .catch(() => false)
+  }
 
   useEffect(() => {
-    if (!chatHydratedRef.current || typeof window === 'undefined') return
-    try {
-      const sanitized = chatThreads.slice(0, 30).map((thread) => ({
-        ...thread,
-        messages: thread.messages.map((msg) => ({
-          ...msg,
-          isStreaming: false,
-          streamingPhase: undefined,
-        })),
-      }))
-      window.localStorage.setItem(CHAT_STORAGE_KEY, JSON.stringify(sanitized))
-    } catch {
-      // Ignore storage quota errors.
+    if (!syncWithServer) return
+    let cancelled = false
+
+    async function hydrateChatsFromServer() {
+      const legacy = loadLegacyLocalStorageChatThreads()
+      const meaningfulLegacy = legacy.threads.filter(isMeaningfulChatThread)
+      let serverThreads: DriveChatThread[] | null = null
+
+      if (meaningfulLegacy.length > 0) {
+        const imported = await importDriveChatThreads(meaningfulLegacy)
+        if (imported) {
+          serverThreads = imported.threads
+          try {
+            window.localStorage.removeItem(CHAT_STORAGE_KEY)
+          } catch {
+            // ignore storage errors
+          }
+        }
+      } else {
+        serverThreads = await fetchDriveChatThreads()
+        if (serverThreads !== null && legacy.hasKey) {
+          try {
+            window.localStorage.removeItem(CHAT_STORAGE_KEY)
+          } catch {
+            // ignore storage errors
+          }
+        }
+      }
+
+      if (cancelled || !serverThreads) return
+
+      if (serverThreads.length > 0) {
+        for (const item of serverThreads) {
+          persistedChatIdsRef.current.add(item.id)
+        }
+        const current = chatThreadsRef.current
+        const serverIds = new Set(serverThreads.map((item) => item.id))
+        const unsyncedLocal = current.filter(
+          (item) => !serverIds.has(item.id) && isMeaningfulChatThread(item),
+        )
+        const merged = [...unsyncedLocal, ...serverThreads]
+        chatThreadsRef.current = merged
+        setChatThreads(merged)
+
+        const currentActive = current.find(
+          (item) => item.id === activeChatThreadIdRef.current,
+        )
+        if (!currentActive || !isMeaningfulChatThread(currentActive)) {
+          activeChatThreadIdRef.current = merged[0].id
+          setActiveChatThreadId(merged[0].id)
+        }
+      }
     }
-  }, [chatThreads])
+
+    async function hydrateDocChatsFromServer() {
+      const serverDocThreads = await fetchDocChatHistories()
+      if (cancelled || !serverDocThreads) return
+      updateDocThreads((prev) => {
+        const merged: Partial<Record<string, AIMessage[]>> = {
+          ...serverDocThreads,
+        }
+        for (const [docId, messages] of Object.entries(prev)) {
+          if (messages && messages.length > 0) {
+            merged[docId] = messages
+          }
+        }
+        return merged
+      })
+    }
+
+    void hydrateChatsFromServer()
+    void hydrateDocChatsFromServer()
+
+    return () => {
+      cancelled = true
+    }
+  }, [syncWithServer])
 
   useEffect(() => {
     return () => {
@@ -1562,7 +1738,7 @@ export function XDriveWorkspace({
   }
 
   function upsertThreadMessage(docId: string, message: AIMessage) {
-    setThreads((prev) => {
+    updateDocThreads((prev) => {
       const current = prev[docId] ?? []
       const exists = current.some((item) => item.id === message.id)
       const next = exists
@@ -1570,6 +1746,7 @@ export function XDriveWorkspace({
         : [...current, message]
       return { ...prev, [docId]: next }
     })
+    scheduleDocChatSave(docId)
   }
 
   hostOpRef.current = (op, options) => {
@@ -1751,7 +1928,7 @@ export function XDriveWorkspace({
         () => {
           if (previewRun.current !== run) return
           const done = index === total - 1
-          setThreads((prev) => {
+          updateDocThreads((prev) => {
             const current = prev[docId] ?? []
             return {
               ...prev,
@@ -1795,6 +1972,7 @@ export function XDriveWorkspace({
             ops: done ? fullOps : completedOps,
           })
           if (done) {
+            scheduleDocChatSave(docId)
             const proposal = assistant.proposal
             if (proposal) {
               rememberProposal(docId, {
@@ -1898,10 +2076,11 @@ export function XDriveWorkspace({
           proposal: committedProposal,
           stages: result.stages.map((stage) => ({ ...stage, completed: true })),
         }
-        setThreads((prev) => ({
+        updateDocThreads((prev) => ({
           ...prev,
           [created.id]: [user, assistant],
         }))
+        scheduleDocChatSave(created.id)
         persist(
           created.id,
           created.slug,
@@ -2133,7 +2312,7 @@ export function XDriveWorkspace({
       intentHistory: nextIntentHistory,
     }
     patchFile(activeDoc.id, () => updatedDoc)
-    setThreads((prev) => ({
+    updateDocThreads((prev) => ({
       ...prev,
       [activeDoc.id]: (prev[activeDoc.id] ?? []).map((item) =>
         item.proposal?.id === committed.id
@@ -2141,6 +2320,7 @@ export function XDriveWorkspace({
           : item,
       ),
     }))
+    scheduleDocChatSave(activeDoc.id)
     persist(
       activeDoc.id,
       activeDoc.slug,
@@ -2162,7 +2342,7 @@ export function XDriveWorkspace({
       activeDoc.intentHistory.find((item) => item.id === proposalId)
     if (!discardedAt) return
     const discarded: MarbleOpProposal = { ...discardedAt, status: 'discarded' }
-    setThreads((prev) => ({
+    updateDocThreads((prev) => ({
       ...prev,
       [activeDoc.id]: (prev[activeDoc.id] ?? []).map((item) =>
         item.proposal?.id === proposalId
@@ -2170,6 +2350,7 @@ export function XDriveWorkspace({
           : item,
       ),
     }))
+    scheduleDocChatSave(activeDoc.id)
     rememberProposal(activeDoc.id, discarded)
   }
 
@@ -2400,11 +2581,14 @@ export function XDriveWorkspace({
       for (const id of removedIds) delete next[id]
       return next
     })
-    setThreads((prev) => {
+    updateDocThreads((prev) => {
       const next = { ...prev }
       for (const id of removedIds) delete next[id]
       return next
     })
+    for (const id of removedIds) {
+      queueDocChatDelete(id)
+    }
     for (const id of removedIds) sourceRef.current.delete(id)
     setLivePreview((prev) => (prev && removedIds.has(prev.docId) ? null : prev))
     setShareId((prev) => (prev && removedIds.has(prev) ? null : prev))
@@ -2529,8 +2713,9 @@ export function XDriveWorkspace({
     threadId: string,
     msgId: string,
     updater: (msg: DriveChatMessage) => DriveChatMessage,
+    options?: { persist?: boolean },
   ) {
-    setChatThreads((prev) =>
+    updateChatThreads((prev) =>
       prev.map((item) =>
         item.id !== threadId
           ? item
@@ -2543,6 +2728,9 @@ export function XDriveWorkspace({
             },
       ),
     )
+    if (options?.persist) {
+      scheduleChatThreadSave(threadId)
+    }
   }
 
   function updateChatAction(
@@ -2551,12 +2739,17 @@ export function XDriveWorkspace({
     actionId: string,
     updater: (action: DriveChatAction) => DriveChatAction,
   ) {
-    updateChatMessage(threadId, msgId, (msg) => ({
-      ...msg,
-      actions: (msg.actions ?? []).map((act) =>
-        act.id === actionId ? updater(act) : act,
-      ),
-    }))
+    updateChatMessage(
+      threadId,
+      msgId,
+      (msg) => ({
+        ...msg,
+        actions: (msg.actions ?? []).map((act) =>
+          act.id === actionId ? updater(act) : act,
+        ),
+      }),
+      { persist: true },
+    )
   }
 
   function executeDriveChatAction(
@@ -3166,12 +3359,17 @@ export function XDriveWorkspace({
   }
 
   function handleDiscardAllDriveChatActions(msgId: string) {
-    updateChatMessage(activeChatThreadId, msgId, (msg) => ({
-      ...msg,
-      actions: (msg.actions ?? []).map((act) =>
-        act.status === 'proposed' ? { ...act, status: 'discarded' } : act,
-      ),
-    }))
+    updateChatMessage(
+      activeChatThreadId,
+      msgId,
+      (msg) => ({
+        ...msg,
+        actions: (msg.actions ?? []).map((act) =>
+          act.status === 'proposed' ? { ...act, status: 'discarded' } : act,
+        ),
+      }),
+      { persist: true },
+    )
   }
 
   function handleUndoDriveChatAction(msgId: string, actionId: string) {
@@ -3185,9 +3383,30 @@ export function XDriveWorkspace({
     }))
   }
 
+  function handleSelectChatThread(threadId: string) {
+    activeChatThreadIdRef.current = threadId
+    setActiveChatThreadId(threadId)
+    if (!syncWithServer || chatStreamingThreadId === threadId) return
+    void chatSyncQueueRef.current
+      .then(() => fetchDriveChatThread(threadId))
+      .then((fresh) => {
+        if (!fresh || pendingChatSaveIdsRef.current.has(threadId)) return
+        updateChatThreads((prev) =>
+          prev.map((item) => {
+            if (item.id !== fresh.id) return item
+            if (item.messages.some((m) => m.isStreaming)) return item
+            return Date.parse(fresh.updatedAt) >= Date.parse(item.updatedAt)
+              ? fresh
+              : item
+          }),
+        )
+      })
+  }
+
   function handleNewChatThread() {
     const next = createBlankChatThread(modelId, chatReasoningEffort, chatMode)
-    setChatThreads((prev) => [next, ...prev])
+    updateChatThreads((prev) => [next, ...prev])
+    activeChatThreadIdRef.current = next.id
     setActiveChatThreadId(next.id)
   }
 
@@ -3195,9 +3414,10 @@ export function XDriveWorkspace({
     chatAbortRef.current?.abort()
     chatAbortRef.current = null
     if (chatStreamingThreadId) {
-      setChatThreads((prev) =>
+      const stoppedThreadId = chatStreamingThreadId
+      updateChatThreads((prev) =>
         prev.map((item) =>
-          item.id !== chatStreamingThreadId
+          item.id !== stoppedThreadId
             ? item
             : {
                 ...item,
@@ -3209,6 +3429,7 @@ export function XDriveWorkspace({
               },
         ),
       )
+      scheduleChatThreadSave(stoppedThreadId)
     }
     setChatStreamingThreadId(null)
   }
@@ -3309,20 +3530,25 @@ export function XDriveWorkspace({
               driveChatModels.find((m) => m.id === event.runtime.modelId)
                 ?.name ??
               (selectedModel ? selectedModel.name : event.runtime.modelId)
-            updateChatMessage(threadId, assistantMsgId, (msg) => ({
-              ...msg,
-              content: event.answer,
-              modelId: event.runtime.modelId,
-              modelName: resolvedName,
-              providerId: event.runtime.providerId,
-              thoughts:
-                event.thoughts.length > 0 ? event.thoughts : msg.thoughts,
-              thinkingDurationMs: durationMs,
-              referencedDocIds: event.referencedDocIds,
-              actions: event.actions,
-              isStreaming: false,
-              streamingPhase: undefined,
-            }))
+            updateChatMessage(
+              threadId,
+              assistantMsgId,
+              (msg) => ({
+                ...msg,
+                content: event.answer,
+                modelId: event.runtime.modelId,
+                modelName: resolvedName,
+                providerId: event.runtime.providerId,
+                thoughts:
+                  event.thoughts.length > 0 ? event.thoughts : msg.thoughts,
+                thinkingDurationMs: durationMs,
+                referencedDocIds: event.referencedDocIds,
+                actions: event.actions,
+                isStreaming: false,
+                streamingPhase: undefined,
+              }),
+              { persist: true },
+            )
             if (chatMode === 'auto' && event.actions.length > 0) {
               for (const action of event.actions) {
                 executeDriveChatAction(threadId, assistantMsgId, action)
@@ -3340,26 +3566,36 @@ export function XDriveWorkspace({
           } else if (event.authRequired) {
             void refreshAntigravity()
           }
-          updateChatMessage(threadId, assistantMsgId, (msg) => ({
-            ...msg,
-            isStreaming: false,
-            streamingPhase: undefined,
-            error: event.error,
-          }))
+          updateChatMessage(
+            threadId,
+            assistantMsgId,
+            (msg) => ({
+              ...msg,
+              isStreaming: false,
+              streamingPhase: undefined,
+              error: event.error,
+            }),
+            { persist: true },
+          )
         },
         abortController.signal,
       )
     } catch (error) {
       if (!abortController.signal.aborted) {
-        updateChatMessage(threadId, assistantMsgId, (msg) => ({
-          ...msg,
-          isStreaming: false,
-          streamingPhase: undefined,
-          error:
-            error instanceof Error
-              ? error.message
-              : 'Drive Chat request failed.',
-        }))
+        updateChatMessage(
+          threadId,
+          assistantMsgId,
+          (msg) => ({
+            ...msg,
+            isStreaming: false,
+            streamingPhase: undefined,
+            error:
+              error instanceof Error
+                ? error.message
+                : 'Drive Chat request failed.',
+          }),
+          { persist: true },
+        )
       }
     } finally {
       if (chatAbortRef.current === abortController) {
@@ -3368,11 +3604,22 @@ export function XDriveWorkspace({
       setChatStreamingThreadId((current) =>
         current === threadId ? null : current,
       )
-      updateChatMessage(threadId, assistantMsgId, (msg) =>
-        msg.isStreaming
-          ? { ...msg, isStreaming: false, streamingPhase: undefined }
-          : msg,
+      const wasStreaming = Boolean(
+        chatThreadsRef.current
+          .find((t) => t.id === threadId)
+          ?.messages.some((m) => m.id === assistantMsgId && m.isStreaming),
       )
+      if (wasStreaming) {
+        updateChatMessage(
+          threadId,
+          assistantMsgId,
+          (msg) =>
+            msg.isStreaming
+              ? { ...msg, isStreaming: false, streamingPhase: undefined }
+              : msg,
+          { persist: true },
+        )
+      }
     }
   }
 
@@ -3429,7 +3676,7 @@ export function XDriveWorkspace({
       { role: 'user' as const, content: text },
     ]
 
-    setChatThreads((prev) =>
+    updateChatThreads((prev) =>
       prev.map((item) =>
         item.id !== currentThread.id
           ? item
@@ -3444,6 +3691,7 @@ export function XDriveWorkspace({
             },
       ),
     )
+    scheduleChatThreadSave(currentThread.id)
 
     void runDriveChatTurn({
       threadId: currentThread.id,
@@ -3482,7 +3730,7 @@ export function XDriveWorkspace({
       streamingPhase: 'thinking',
     }
 
-    setChatThreads((prev) =>
+    updateChatThreads((prev) =>
       prev.map((item) =>
         item.id !== targetThread.id
           ? item
@@ -3493,6 +3741,7 @@ export function XDriveWorkspace({
             },
       ),
     )
+    scheduleChatThreadSave(targetThread.id)
 
     const historyMessages = priorMessages
       .filter((m) => m.role === 'user' || m.role === 'assistant')
@@ -3954,38 +4203,55 @@ export function XDriveWorkspace({
               <DriveChatView
                 threads={chatThreads}
                 activeThreadId={activeChatThreadId}
-                onSelectThread={setActiveChatThreadId}
+                onSelectThread={handleSelectChatThread}
                 onNewThread={handleNewChatThread}
                 onDeleteThread={(threadId) => {
-                  setChatThreads((prev) => {
-                    const next = prev.filter((t) => t.id !== threadId)
-                    if (next.length === 0) {
+                  const next = updateChatThreads((prev) => {
+                    const filtered = prev.filter((t) => t.id !== threadId)
+                    if (filtered.length === 0) {
                       const blank = createBlankChatThread(
                         modelId,
                         chatReasoningEffort,
                         chatMode,
                       )
-                      setActiveChatThreadId(blank.id)
                       return [blank]
                     }
-                    if (activeChatThreadId === threadId) {
-                      setActiveChatThreadId(next[0].id)
-                    }
-                    return next
+                    return filtered
                   })
+                  if (activeChatThreadIdRef.current === threadId) {
+                    activeChatThreadIdRef.current = next[0].id
+                    setActiveChatThreadId(next[0].id)
+                  }
+                  queueChatThreadDelete(threadId)
                 }}
-                onTogglePinThread={(threadId) =>
-                  setChatThreads((prev) =>
+                onTogglePinThread={(threadId) => {
+                  updateChatThreads((prev) =>
                     prev.map((t) =>
-                      t.id === threadId ? { ...t, pinned: !t.pinned } : t,
+                      t.id === threadId
+                        ? {
+                            ...t,
+                            pinned: !t.pinned,
+                            updatedAt: new Date().toISOString(),
+                          }
+                        : t,
                     ),
                   )
-                }
-                onRenameThread={(threadId, title) =>
-                  setChatThreads((prev) =>
-                    prev.map((t) => (t.id === threadId ? { ...t, title } : t)),
+                  scheduleChatThreadSave(threadId)
+                }}
+                onRenameThread={(threadId, title) => {
+                  updateChatThreads((prev) =>
+                    prev.map((t) =>
+                      t.id === threadId
+                        ? {
+                            ...t,
+                            title,
+                            updatedAt: new Date().toISOString(),
+                          }
+                        : t,
+                    ),
                   )
-                }
+                  scheduleChatThreadSave(threadId)
+                }}
                 docs={activeDocs}
                 trashedDocs={trashedDocs}
                 folders={folders}
@@ -4547,8 +4813,9 @@ export function XDriveWorkspace({
             messages={thread}
             checkpoints={activeDoc?.checkpoints ?? []}
             proposals={
-              activeDoc?.intentHistory ??
-              recentProposals.map((item) => item.proposal)
+              activeDoc
+                ? mergeProposalsWithThread(activeDoc.intentHistory, thread)
+                : recentProposals.map((item) => item.proposal)
             }
             selectedElements={selected}
             sketches={docSketches}

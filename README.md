@@ -106,7 +106,7 @@ are the security boundary. See Clerk's [TanStack Start docs](https://clerk.com/d
 
 ## Local Drive Storage
 
-All Drive data—folders, `.mrbl` documents, metadata, share settings, checkpoints, AI intent history, trash state, and per-drive settings—lives in a single local directory configured by `XDRIVE_DRIVE_DIR` (defaults to `./marble-drive`). Copying that folder moves the entire Drive with no external database required.
+All Drive data—folders, `.mrbl` documents, metadata, share settings, checkpoints, AI intent history, Drive Chat and document AI chat histories, trash state, and per-drive settings—lives in a single local directory configured by `XDRIVE_DRIVE_DIR` (defaults to `./marble-drive`). Copying that folder moves the entire Drive with no external database required.
 
 See [docs/drive-layout.md](./docs/drive-layout.md) for the complete on-disk layout, schemas, and backward-compatibility details.
 

@@ -14,6 +14,10 @@ import { Route as ApiAiRouteImport } from './routes/api.ai'
 import { Route as ApiDriveChatRouteImport } from './routes/api.drive-chat'
 import { Route as ApiLatexRouteImport } from './routes/api.latex'
 import { Route as ApiMarbleRouteImport } from './routes/api.marble'
+import { Route as ApiAiHistoryRouteImport } from './routes/api.ai.history'
+import { Route as ApiDriveChatThreadsRouteImport } from './routes/api.drive-chat.threads'
+import { Route as ApiAiHistoryDocIdRouteImport } from './routes/api.ai.history.$docId'
+import { Route as ApiDriveChatThreadsThreadIdRouteImport } from './routes/api.drive-chat.threads.$threadId'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
@@ -40,34 +44,85 @@ const ApiMarbleRoute = ApiMarbleRouteImport.update({
   path: '/api/marble',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiAiHistoryRoute = ApiAiHistoryRouteImport.update({
+  id: '/history',
+  path: '/history',
+  getParentRoute: () => ApiAiRoute,
+} as any)
+const ApiDriveChatThreadsRoute = ApiDriveChatThreadsRouteImport.update({
+  id: '/threads',
+  path: '/threads',
+  getParentRoute: () => ApiDriveChatRoute,
+} as any)
+const ApiAiHistoryDocIdRoute = ApiAiHistoryDocIdRouteImport.update({
+  id: '/$docId',
+  path: '/$docId',
+  getParentRoute: () => ApiAiHistoryRoute,
+} as any)
+const ApiDriveChatThreadsThreadIdRoute =
+  ApiDriveChatThreadsThreadIdRouteImport.update({
+    id: '/$threadId',
+    path: '/$threadId',
+    getParentRoute: () => ApiDriveChatThreadsRoute,
+  } as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
-  '/api/ai': typeof ApiAiRoute
-  '/api/drive-chat': typeof ApiDriveChatRoute
+  '/api/ai': typeof ApiAiRouteWithChildren
+  '/api/drive-chat': typeof ApiDriveChatRouteWithChildren
   '/api/latex': typeof ApiLatexRoute
   '/api/marble': typeof ApiMarbleRoute
+  '/api/ai/history': typeof ApiAiHistoryRouteWithChildren
+  '/api/drive-chat/threads': typeof ApiDriveChatThreadsRouteWithChildren
+  '/api/ai/history/$docId': typeof ApiAiHistoryDocIdRoute
+  '/api/drive-chat/threads/$threadId': typeof ApiDriveChatThreadsThreadIdRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
-  '/api/ai': typeof ApiAiRoute
-  '/api/drive-chat': typeof ApiDriveChatRoute
+  '/api/ai': typeof ApiAiRouteWithChildren
+  '/api/drive-chat': typeof ApiDriveChatRouteWithChildren
   '/api/latex': typeof ApiLatexRoute
   '/api/marble': typeof ApiMarbleRoute
+  '/api/ai/history': typeof ApiAiHistoryRouteWithChildren
+  '/api/drive-chat/threads': typeof ApiDriveChatThreadsRouteWithChildren
+  '/api/ai/history/$docId': typeof ApiAiHistoryDocIdRoute
+  '/api/drive-chat/threads/$threadId': typeof ApiDriveChatThreadsThreadIdRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
-  '/api/ai': typeof ApiAiRoute
-  '/api/drive-chat': typeof ApiDriveChatRoute
+  '/api/ai': typeof ApiAiRouteWithChildren
+  '/api/drive-chat': typeof ApiDriveChatRouteWithChildren
   '/api/latex': typeof ApiLatexRoute
   '/api/marble': typeof ApiMarbleRoute
+  '/api/ai/history': typeof ApiAiHistoryRouteWithChildren
+  '/api/drive-chat/threads': typeof ApiDriveChatThreadsRouteWithChildren
+  '/api/ai/history/$docId': typeof ApiAiHistoryDocIdRoute
+  '/api/drive-chat/threads/$threadId': typeof ApiDriveChatThreadsThreadIdRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/api/ai' | '/api/drive-chat' | '/api/latex' | '/api/marble'
+  fullPaths:
+    | '/'
+    | '/api/ai'
+    | '/api/drive-chat'
+    | '/api/latex'
+    | '/api/marble'
+    | '/api/ai/history'
+    | '/api/drive-chat/threads'
+    | '/api/ai/history/$docId'
+    | '/api/drive-chat/threads/$threadId'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/api/ai' | '/api/drive-chat' | '/api/latex' | '/api/marble'
+  to:
+    | '/'
+    | '/api/ai'
+    | '/api/drive-chat'
+    | '/api/latex'
+    | '/api/marble'
+    | '/api/ai/history'
+    | '/api/drive-chat/threads'
+    | '/api/ai/history/$docId'
+    | '/api/drive-chat/threads/$threadId'
   id:
     | '__root__'
     | '/'
@@ -75,12 +130,16 @@ export interface FileRouteTypes {
     | '/api/drive-chat'
     | '/api/latex'
     | '/api/marble'
+    | '/api/ai/history'
+    | '/api/drive-chat/threads'
+    | '/api/ai/history/$docId'
+    | '/api/drive-chat/threads/$threadId'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
-  ApiAiRoute: typeof ApiAiRoute
-  ApiDriveChatRoute: typeof ApiDriveChatRoute
+  ApiAiRoute: typeof ApiAiRouteWithChildren
+  ApiDriveChatRoute: typeof ApiDriveChatRouteWithChildren
   ApiLatexRoute: typeof ApiLatexRoute
   ApiMarbleRoute: typeof ApiMarbleRoute
 }
@@ -122,13 +181,86 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiMarbleRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/ai/history': {
+      id: '/api/ai/history'
+      path: '/history'
+      fullPath: '/api/ai/history'
+      preLoaderRoute: typeof ApiAiHistoryRouteImport
+      parentRoute: typeof ApiAiRoute
+    }
+    '/api/drive-chat/threads': {
+      id: '/api/drive-chat/threads'
+      path: '/threads'
+      fullPath: '/api/drive-chat/threads'
+      preLoaderRoute: typeof ApiDriveChatThreadsRouteImport
+      parentRoute: typeof ApiDriveChatRoute
+    }
+    '/api/ai/history/$docId': {
+      id: '/api/ai/history/$docId'
+      path: '/$docId'
+      fullPath: '/api/ai/history/$docId'
+      preLoaderRoute: typeof ApiAiHistoryDocIdRouteImport
+      parentRoute: typeof ApiAiHistoryRoute
+    }
+    '/api/drive-chat/threads/$threadId': {
+      id: '/api/drive-chat/threads/$threadId'
+      path: '/$threadId'
+      fullPath: '/api/drive-chat/threads/$threadId'
+      preLoaderRoute: typeof ApiDriveChatThreadsThreadIdRouteImport
+      parentRoute: typeof ApiDriveChatThreadsRoute
+    }
   }
 }
 
+interface ApiAiHistoryRouteChildren {
+  ApiAiHistoryDocIdRoute: typeof ApiAiHistoryDocIdRoute
+}
+
+const ApiAiHistoryRouteChildren: ApiAiHistoryRouteChildren = {
+  ApiAiHistoryDocIdRoute: ApiAiHistoryDocIdRoute,
+}
+
+const ApiAiHistoryRouteWithChildren = ApiAiHistoryRoute._addFileChildren(
+  ApiAiHistoryRouteChildren,
+)
+
+interface ApiAiRouteChildren {
+  ApiAiHistoryRoute: typeof ApiAiHistoryRouteWithChildren
+}
+
+const ApiAiRouteChildren: ApiAiRouteChildren = {
+  ApiAiHistoryRoute: ApiAiHistoryRouteWithChildren,
+}
+
+const ApiAiRouteWithChildren = ApiAiRoute._addFileChildren(ApiAiRouteChildren)
+
+interface ApiDriveChatThreadsRouteChildren {
+  ApiDriveChatThreadsThreadIdRoute: typeof ApiDriveChatThreadsThreadIdRoute
+}
+
+const ApiDriveChatThreadsRouteChildren: ApiDriveChatThreadsRouteChildren = {
+  ApiDriveChatThreadsThreadIdRoute: ApiDriveChatThreadsThreadIdRoute,
+}
+
+const ApiDriveChatThreadsRouteWithChildren =
+  ApiDriveChatThreadsRoute._addFileChildren(ApiDriveChatThreadsRouteChildren)
+
+interface ApiDriveChatRouteChildren {
+  ApiDriveChatThreadsRoute: typeof ApiDriveChatThreadsRouteWithChildren
+}
+
+const ApiDriveChatRouteChildren: ApiDriveChatRouteChildren = {
+  ApiDriveChatThreadsRoute: ApiDriveChatThreadsRouteWithChildren,
+}
+
+const ApiDriveChatRouteWithChildren = ApiDriveChatRoute._addFileChildren(
+  ApiDriveChatRouteChildren,
+)
+
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
-  ApiAiRoute: ApiAiRoute,
-  ApiDriveChatRoute: ApiDriveChatRoute,
+  ApiAiRoute: ApiAiRouteWithChildren,
+  ApiDriveChatRoute: ApiDriveChatRouteWithChildren,
   ApiLatexRoute: ApiLatexRoute,
   ApiMarbleRoute: ApiMarbleRoute,
 }

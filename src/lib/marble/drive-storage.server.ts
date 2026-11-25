@@ -199,6 +199,10 @@ function getHistoryDir(): string {
   return path.resolve(getMetaDir(), 'history')
 }
 
+function getDocChatsDir(): string {
+  return path.resolve(getMetaDir(), 'doc-chats')
+}
+
 function safeHistoryKey(docId: string): string {
   const trimmed = docId.trim()
   if (SAFE_ID_PATTERN.test(trimmed) && !trimmed.includes('..')) {
@@ -904,6 +908,18 @@ async function deleteDocumentHistory(docId: string | undefined): Promise<void> {
     await rm(historyFilePath(docId), { force: true })
   } catch {
     // Ignore invalid ids or missing files during cleanup.
+  }
+  const trimmed = docId.trim()
+  if (SAFE_ID_PATTERN.test(trimmed) && !trimmed.includes('..')) {
+    const docChatsDir = getDocChatsDir()
+    const docChatFile = path.resolve(docChatsDir, `${trimmed}.json`)
+    if (path.dirname(docChatFile) === docChatsDir) {
+      try {
+        await rm(docChatFile, { force: true })
+      } catch {
+        // Ignore missing doc-chat files during cleanup.
+      }
+    }
   }
 }
 
