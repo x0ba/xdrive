@@ -38,6 +38,10 @@ import {
   Tooltip as TooltipPrimitive,
 } from 'radix-ui'
 import type { AIProviderId } from '#/lib/types'
+import {
+  resolveReasoningEffort,
+  supportedReasoningEfforts,
+} from '#/lib/ai/drive-chat-client'
 import { REASONING_EFFORT_META } from '#/lib/ai/drive-chat-types'
 import type { ReasoningEffort } from '#/lib/ai/drive-chat-types'
 import { cn } from '#/lib/utils'
@@ -50,13 +54,6 @@ import type {
 } from './types'
 
 const FAVORITES_STORAGE_KEY = 'xdrive.drive-chat.favorite-models.v1'
-const DEFAULT_EFFORTS: ReasoningEffort[] = [
-  'off',
-  'low',
-  'medium',
-  'high',
-  'max',
-]
 
 // Rendered heights in px matching t3code's stable popup height calculation
 const ROW_HEIGHT_PX = 32
@@ -968,26 +965,19 @@ export const ModelPicker = memo(function ModelPicker({
     )
   }, [models, favoriteSet, providerTabs, onOpenProviders])
 
-  const supportedEfforts: ReasoningEffort[] = useMemo(() => {
-    if (!activeModel) return DEFAULT_EFFORTS
-    if (activeModel.supportsReasoning === false) return ['off']
-    if (
-      activeModel.reasoningEfforts &&
-      activeModel.reasoningEfforts.length > 0
-    ) {
-      return activeModel.reasoningEfforts
-    }
-    return DEFAULT_EFFORTS
-  }, [activeModel])
+  const supportedEfforts: ReasoningEffort[] = useMemo(
+    () => supportedReasoningEfforts(activeModel),
+    [activeModel],
+  )
 
   const supportsReasoning = activeModel
     ? activeModel.supportsReasoning !== false && supportedEfforts.length > 1
     : false
 
-  const effectiveEffort: ReasoningEffort =
-    reasoningEffort && supportedEfforts.includes(reasoningEffort)
-      ? reasoningEffort
-      : (supportedEfforts.at(-1) ?? 'off')
+  const effectiveEffort = resolveReasoningEffort(
+    reasoningEffort,
+    supportedEfforts,
+  )
 
   const focusEffortColumn = useCallback((rows: 'levels' | 'any' = 'any') => {
     const column = popupRef.current?.querySelector('[data-model-picker-effort]')

@@ -4,8 +4,11 @@ import type {
   PointerEvent as ReactPointerEvent,
 } from 'react'
 import { Loader2, Lock, ShieldCheck, X } from 'lucide-react'
+import type { ReasoningEffort } from '#/lib/ai/drive-chat-types'
+import { reasoningEffortForModel } from '#/lib/ai/drive-chat-client'
 import type {
   AIMessage,
+  AIProviderId,
   EvergreenDocRef,
   MarbleCheckpoint,
   MarbleOp,
@@ -249,6 +252,8 @@ export interface CursorAISidebarProps {
   models?: ModelPickerInputOption[]
   modelId?: string
   onModelChange?: (modelId: string) => void
+  reasoningEffort?: ReasoningEffort
+  onSelectReasoningEffort?: (effort: ReasoningEffort) => void
   favoriteModelIds?: string[]
   onFavoriteModelIdsChange?: (ids: string[]) => void
   permission?: SharePermissionLevel
@@ -256,7 +261,14 @@ export interface CursorAISidebarProps {
   onOpenEvergreenDoc?: (slug: string) => void
   onRemoveElement?: (id: string) => void
   onRemoveSketch?: (id: string) => void
-  onSend?: (text: string) => void
+  onSend?: (
+    text: string,
+    context: {
+      modelId: string
+      providerId: AIProviderId
+      reasoningEffort: ReasoningEffort
+    },
+  ) => void
   onKeep?: (proposalId: string) => void
   onDiscard?: (proposalId: string) => void
   onOpenProviders?: () => void
@@ -507,6 +519,8 @@ export function CursorAISidebar({
   models = PROMPT_MODELS,
   modelId: modelIdProp,
   onModelChange,
+  reasoningEffort: reasoningEffortProp,
+  onSelectReasoningEffort,
   favoriteModelIds,
   onFavoriteModelIdsChange,
   permission = 'edit_with_ai_shared',
@@ -542,6 +556,9 @@ export function CursorAISidebar({
   const [internalModel, setInternalModel] = useState(
     () => modelIdProp ?? resolveModel(models)?.id ?? 'antigravity/default',
   )
+  const [internalEffort, setInternalEffort] = useState<ReasoningEffort>(
+    () => reasoningEffortProp ?? 'high',
+  )
   const [hiddenElements, setHiddenElements] = useState<string[]>([])
   const [hiddenSketches, setHiddenSketches] = useState<string[]>([])
   const seenIntent = useRef<string | null>(null)
@@ -549,6 +566,7 @@ export function CursorAISidebar({
   const spec = permissionByLevel(permission)
   const blocked = aiIsBlocked(permission)
   const modelId = modelIdProp ?? internalModel
+  const reasoningEffort = reasoningEffortProp ?? internalEffort
   const width = widthProp ?? internalWidth
   const model = resolveModel(models, modelId)
 
@@ -580,6 +598,15 @@ export function CursorAISidebar({
   function setModel(next: string) {
     if (modelIdProp === undefined) setInternalModel(next)
     onModelChange?.(next)
+  }
+
+  function setEffort(next: ReasoningEffort) {
+    if (reasoningEffortProp === undefined) setInternalEffort(next)
+    onSelectReasoningEffort?.(next)
+  }
+
+  function sentEffort(): ReasoningEffort {
+    return reasoningEffortForModel(model, reasoningEffort)
   }
 
   function play(messageId: string, proposalId: string, total: number) {
@@ -653,16 +680,27 @@ export function CursorAISidebar({
     setProposalList((prev) => [proposal, ...prev])
     setTab('chat')
     play(assistant.id, proposal.id, assistant.stages?.length ?? 4)
-    onSend?.(request.instruction)
+    onSend?.(request.instruction, {
+      modelId: request.modelId,
+      providerId: request.providerId,
+      reasoningEffort:
+        request.reasoningEffort ??
+        reasoningEffortForModel(model, reasoningEffort),
+    })
   }
 
   function sendText(text: string) {
     const instruction = text.trim()
     if (!instruction) return
     setDraft('')
+    const effort = sentEffort()
     if (onSend) {
       setTab('chat')
-      onSend(instruction)
+      onSend(instruction, {
+        modelId: model?.id ?? modelId,
+        providerId: model?.providerId ?? 'antigravity',
+        reasoningEffort: effort,
+      })
       return
     }
     if (!model) return
@@ -673,6 +711,7 @@ export function CursorAISidebar({
       targetIds: visibleElements.map((element) => element.id),
       modelId: model.id,
       providerId: model.providerId,
+      reasoningEffort: effort,
       sketches: visibleSketches,
     })
   }
@@ -805,6 +844,8 @@ export function CursorAISidebar({
           models={models}
           selectedModelId={modelId}
           onSelectModel={setModel}
+          reasoningEffort={reasoningEffort}
+          onSelectReasoningEffort={setEffort}
           favoriteModelIds={favoriteModelIds}
           onFavoriteModelIdsChange={onFavoriteModelIdsChange}
           onOpenProviders={onOpenProviders}

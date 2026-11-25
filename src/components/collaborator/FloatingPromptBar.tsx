@@ -1,6 +1,8 @@
 import { useId, useImperativeHandle, useRef, useState } from 'react'
 import type { ReactNode, Ref } from 'react'
 import { GitFork, Lock, PenLine, Send, Sparkles, Wrench } from 'lucide-react'
+import type { ReasoningEffort } from '#/lib/ai/drive-chat-types'
+import { reasoningEffortForModel } from '#/lib/ai/drive-chat-client'
 import type {
   AIProviderId,
   SelectedMarbleElement,
@@ -31,6 +33,7 @@ export interface MarbleIntentRequest {
   targetIds: string[]
   modelId: string
   providerId: AIProviderId
+  reasoningEffort?: ReasoningEffort
   gesture?: { x: number; y: number }
   sketches?: SketchAnnotation[]
 }
@@ -99,6 +102,8 @@ export interface FloatingPromptBarProps {
   models?: ModelPickerInputOption[]
   modelId?: string
   onModelChange?: (modelId: string) => void
+  reasoningEffort?: ReasoningEffort
+  onSelectReasoningEffort?: (effort: ReasoningEffort) => void
   favoriteModelIds?: string[]
   onFavoriteModelIdsChange?: (ids: string[]) => void
   onOpenProviders?: () => void
@@ -133,6 +138,8 @@ export function FloatingPromptBar({
   models = PROMPT_MODELS,
   modelId: modelIdProp,
   onModelChange,
+  reasoningEffort: reasoningEffortProp,
+  onSelectReasoningEffort,
   favoriteModelIds,
   onFavoriteModelIdsChange,
   onOpenProviders,
@@ -148,8 +155,12 @@ export function FloatingPromptBar({
   const [internalModel, setInternalModel] = useState(
     () => modelIdProp ?? resolveModel(models)?.id ?? 'xai/grok-4.7',
   )
+  const [internalEffort, setInternalEffort] = useState<ReasoningEffort>(
+    () => reasoningEffortProp ?? 'high',
+  )
   const prompt = promptProp ?? internalPrompt
   const modelId = modelIdProp ?? internalModel
+  const reasoningEffort = reasoningEffortProp ?? internalEffort
   const spec = permissionByLevel(permission)
   const blocked = aiIsBlocked(permission)
   const model = resolveModel(models, modelId)
@@ -171,6 +182,11 @@ export function FloatingPromptBar({
     onModelChange?.(next)
   }
 
+  function setEffort(next: ReasoningEffort) {
+    if (reasoningEffortProp === undefined) setInternalEffort(next)
+    onSelectReasoningEffort?.(next)
+  }
+
   function emit(kind: MarbleIntentKind, instruction: string) {
     if (blocked || model === null || !instruction.trim()) return
     onIntent?.({
@@ -180,6 +196,7 @@ export function FloatingPromptBar({
       targetIds: selectedElements.map((element) => element.id),
       modelId: model.id,
       providerId: model.providerId,
+      reasoningEffort: reasoningEffortForModel(model, reasoningEffort),
       sketches: sketches.length ? sketches : undefined,
     })
     if (kind === 'instruct') setPrompt('')
@@ -270,6 +287,8 @@ export function FloatingPromptBar({
           models={models}
           selectedModelId={modelId}
           onSelectModel={setModel}
+          reasoningEffort={reasoningEffort}
+          onSelectReasoningEffort={setEffort}
           favoriteModelIds={favoriteModelIds}
           onFavoriteModelIdsChange={onFavoriteModelIdsChange}
           onOpenProviders={onOpenProviders}

@@ -19,6 +19,8 @@ import {
   Sparkles,
   X,
 } from 'lucide-react'
+import type { ReasoningEffort } from '#/lib/ai/drive-chat-types'
+import { reasoningEffortForModel } from '#/lib/ai/drive-chat-client'
 import type {
   AIModelSpec,
   DriveFolder,
@@ -308,6 +310,8 @@ export interface NewAppModalProps {
   models?: ModelPickerInputOption[]
   selectedModelId?: string
   onSelectModel?: (modelId: string) => void
+  reasoningEffort?: ReasoningEffort
+  onSelectReasoningEffort?: (effort: ReasoningEffort) => void
   favoriteModelIds?: string[]
   onFavoriteModelIdsChange?: (ids: string[]) => void
   onOpenProviders?: () => void
@@ -316,6 +320,7 @@ export interface NewAppModalProps {
     prompt: string
     modelId: string
     folderId: string | null
+    reasoningEffort: ReasoningEffort
   }) => void
   onCreateFromTemplate: (input: {
     template: MarbleDocumentFile
@@ -336,6 +341,8 @@ export function NewAppModal({
   models = DEFAULT_COMPOSER_MODELS,
   selectedModelId,
   onSelectModel,
+  reasoningEffort: reasoningEffortProp,
+  onSelectReasoningEffort,
   favoriteModelIds,
   onFavoriteModelIdsChange,
   onOpenProviders,
@@ -349,6 +356,10 @@ export function NewAppModal({
   const [currentModelId, setCurrentModelId] = useState(
     selectedModelId ?? models.at(0)?.id ?? 'grok-4.7',
   )
+  const [internalEffort, setInternalEffort] = useState<ReasoningEffort>(
+    () => reasoningEffortProp ?? 'high',
+  )
+  const reasoningEffort = reasoningEffortProp ?? internalEffort
   const [folderId, setFolderId] = useState<string | null>(initialFolderId)
   const [templateSearch, setTemplateSearch] = useState('')
   const [templateCategory, setTemplateCategory] = useState<
@@ -435,10 +446,13 @@ export function NewAppModal({
   const submitAgent = () => {
     const trimmed = prompt.trim()
     if (!trimmed) return
+    const model =
+      models.find((item) => item.id === currentModelId) ?? models.at(0)
     onBuildWithAgent({
       prompt: trimmed,
       modelId: currentModelId,
       folderId,
+      reasoningEffort: reasoningEffortForModel(model, reasoningEffort),
     })
     setPrompt('')
     onClose()
@@ -596,6 +610,13 @@ export function NewAppModal({
                     setCurrentModelId(nextId)
                     onSelectModel?.(nextId)
                   }}
+                  reasoningEffort={reasoningEffort}
+                  onSelectReasoningEffort={(next) => {
+                    if (reasoningEffortProp === undefined)
+                      setInternalEffort(next)
+                    onSelectReasoningEffort?.(next)
+                  }}
+                  effortDisplay="both"
                   favoriteModelIds={favoriteModelIds}
                   onFavoriteModelIdsChange={onFavoriteModelIdsChange}
                   onOpenProviders={

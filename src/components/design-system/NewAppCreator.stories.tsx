@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import type { Meta, StoryObj } from '@storybook/tanstack-react'
-import { expect, userEvent, within } from 'storybook/test'
+import { expect, userEvent, waitFor, within } from 'storybook/test'
 import { CHAT_DEMO_MODELS } from '#/components/chat/demo-fixtures'
 import { seedDriveFolders } from './DriveExplorer'
 import { SidebarRail } from './NavigationShell'
@@ -246,7 +246,7 @@ export const CreateWithAIAgentModal: Story = {
     ).toBeNull()
 
     const trigger = within(dialog).getByRole('button', {
-      name: 'Select AI model',
+      name: /Select AI model/i,
     })
     await expect(trigger).toHaveAttribute('data-xdrive-model-picker', 'true')
     await expect(trigger).toHaveTextContent('Gemini 4 Neon')
@@ -262,6 +262,10 @@ export const CreateWithAIAgentModal: Story = {
     const chosenFolder = folderSelect?.value ?? ''
 
     await userEvent.click(trigger)
+    const effortGroup = await body.findByRole('radiogroup', {
+      name: 'Reasoning effort',
+    })
+    await waitFor(() => expect(effortGroup).toBeVisible())
     const search = await body.findByPlaceholderText('Search models...')
     await expect(search).toBeVisible()
     const glmOption = await body.findByRole('option', { name: /GLM-5\.3/i })

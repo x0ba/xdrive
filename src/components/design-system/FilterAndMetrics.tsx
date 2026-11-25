@@ -11,6 +11,8 @@ import {
   ArrowUp,
   Pin,
 } from 'lucide-react'
+import type { ReasoningEffort } from '#/lib/ai/drive-chat-types'
+import { reasoningEffortForModel } from '#/lib/ai/drive-chat-client'
 import type {
   MarbleAppCategory,
   MarbleDocumentFile,
@@ -417,7 +419,13 @@ export interface AgentHeroComposerProps {
   favoriteModelIds?: string[]
   onFavoriteModelIdsChange?: (ids: string[]) => void
   onOpenProviders?: () => void
-  onSubmitPrompt?: (prompt: string, modelId: string) => void
+  onSubmitPrompt?: (
+    prompt: string,
+    modelId: string,
+    reasoningEffort: ReasoningEffort,
+  ) => void
+  reasoningEffort?: ReasoningEffort
+  onSelectReasoningEffort?: (effort: ReasoningEffort) => void
   onTriggerSketchMode?: () => void
   onTriggerAttachNode?: () => void
   onQuickStartTemplate?: (category: MarbleAppCategory, prompt: string) => void
@@ -479,20 +487,42 @@ export function AgentHeroComposer({
   onFavoriteModelIdsChange,
   onOpenProviders,
   onSubmitPrompt,
+  reasoningEffort: reasoningEffortProp,
+  onSelectReasoningEffort,
 }: AgentHeroComposerProps) {
   const [prompt, setPrompt] = useState('')
   const [currentModelId, setCurrentModelId] = useState(selectedModelId)
+  const [internalEffort, setInternalEffort] = useState<ReasoningEffort>(
+    () => reasoningEffortProp ?? 'high',
+  )
+  const reasoningEffort = reasoningEffortProp ?? internalEffort
 
   const handleModelChange = (nextId: string) => {
     setCurrentModelId(nextId)
     onSelectModel?.(nextId)
   }
 
+  const setEffort = (next: ReasoningEffort) => {
+    if (reasoningEffortProp === undefined) setInternalEffort(next)
+    onSelectReasoningEffort?.(next)
+  }
+
+  const submitPrompt = () => {
+    const trimmed = prompt.trim()
+    if (!trimmed) return
+    const model =
+      models.find((item) => item.id === currentModelId) ?? models.at(0)
+    onSubmitPrompt?.(
+      trimmed,
+      currentModelId,
+      reasoningEffortForModel(model, reasoningEffort),
+    )
+    setPrompt('')
+  }
+
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault()
-    if (!prompt.trim()) return
-    onSubmitPrompt?.(prompt.trim(), currentModelId)
-    setPrompt('')
+    submitPrompt()
   }
 
   return (
@@ -508,10 +538,7 @@ export function AgentHeroComposer({
           onKeyDown={(e) => {
             if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
               e.preventDefault()
-              if (prompt.trim()) {
-                onSubmitPrompt?.(prompt.trim(), currentModelId)
-                setPrompt('')
-              }
+              submitPrompt()
             }
           }}
           placeholder="Describe a new .mrbl document or app to build..."
@@ -525,6 +552,9 @@ export function AgentHeroComposer({
               models={models}
               selectedModelId={currentModelId}
               onSelectModel={handleModelChange}
+              reasoningEffort={reasoningEffort}
+              onSelectReasoningEffort={setEffort}
+              effortDisplay="both"
               favoriteModelIds={favoriteModelIds}
               onFavoriteModelIdsChange={onFavoriteModelIdsChange}
               onOpenProviders={onOpenProviders}

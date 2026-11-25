@@ -32,6 +32,8 @@ import {
   parseMarbleAcpResponse,
 } from '#/lib/ai/marble-prompt.server'
 import type { ServerCollaborateInput } from '#/lib/ai/marble-prompt.server'
+import { parseReasoningEffort } from '#/lib/ai/drive-chat-types'
+import { collaborateProviderPrompt } from '#/lib/ai/reasoning-effort'
 
 const SSE_HEARTBEAT_INTERVAL_MS = 15_000
 const SSE_PROGRESS_THROTTLE_MS = 500
@@ -210,11 +212,21 @@ async function runCollaborateExecution(params: {
     onBeforeParse,
   } = params
 
+  const call = collaborateProviderPrompt({
+    providerId,
+    prompt,
+    modelId: collaborateInput.modelId,
+    reasoningEffort: collaborateInput.reasoningEffort,
+    sessionId,
+    imageDataUrls,
+  })
+
   if (providerId === 'grok-build') {
     const grokResult = await runGrokBuildPrompt({
-      prompt,
-      modelId: collaborateInput.modelId,
-      imageDataUrls,
+      prompt: call.prompt,
+      modelId: call.modelId,
+      reasoningEffort: call.reasoningEffort,
+      imageDataUrls: call.imageDataUrls,
       signal,
       onTextDelta,
       onThoughtDelta,
@@ -248,10 +260,11 @@ async function runCollaborateExecution(params: {
 
   if (providerId === 'opencode-go') {
     const openCodeResult = await runOpenCodePrompt({
-      prompt,
-      modelId: collaborateInput.modelId,
-      sessionId,
-      imageDataUrls,
+      prompt: call.prompt,
+      modelId: call.modelId,
+      reasoningEffort: call.reasoningEffort,
+      sessionId: call.sessionId,
+      imageDataUrls: call.imageDataUrls,
       signal,
       onTextDelta,
       onThoughtDelta,
@@ -290,9 +303,10 @@ async function runCollaborateExecution(params: {
 
   const antigravity = getAntigravityAcpManager()
   const acpResult = await antigravity.runPrompt({
-    prompt,
-    modelId: collaborateInput.modelId,
-    imageDataUrls,
+    prompt: call.prompt,
+    modelId: call.modelId,
+    reasoningEffort: call.reasoningEffort,
+    imageDataUrls: call.imageDataUrls,
     signal,
     onTextDelta,
     onThoughtDelta,
@@ -485,6 +499,7 @@ export async function POST({ request }: { request: Request }) {
         dontsGuardrails: Array.isArray(body.dontsGuardrails)
           ? (body.dontsGuardrails as string[])
           : undefined,
+        reasoningEffort: parseReasoningEffort(body.reasoningEffort),
       }
 
       const prompt = buildMarbleAcpPrompt(collaborateInput)

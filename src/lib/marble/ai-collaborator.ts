@@ -3,6 +3,7 @@
 // documents (`document-design-system.mrbl` and `document-donts-system.mrbl`) so
 // generated apps and edits follow xDrive's design language and reject AI slop.
 
+import type { ReasoningEffort } from '../ai/drive-chat-types'
 import type {
   AIMessage,
   AIProviderId,
@@ -66,6 +67,7 @@ export interface CollaborationRequest {
   sketchDataUrl?: string
   modelId: string
   providerId: AIProviderId
+  reasoningEffort?: ReasoningEffort
   sessionId?: string
   action?: MarbleActionKind
   evergreenDocs?: MarbleDocumentFile[]
@@ -1657,6 +1659,7 @@ async function askMarbleApi(
         sketchDataUrl: request.sketchDataUrl,
         modelId: request.modelId,
         providerId: request.providerId,
+        reasoningEffort: request.reasoningEffort,
         sessionId: request.sessionId,
         evergreenRefs: evergreenContext.refs,
         designContracts: evergreenContext.designSystem.contracts,

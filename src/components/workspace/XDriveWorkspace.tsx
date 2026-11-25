@@ -86,6 +86,8 @@ import { DriveChatView } from '#/components/chat'
 import {
   buildDriveChatModels,
   buildDriveSnapshot,
+  prepareDriveChatRequest,
+  reasoningEffortForModel,
   streamDriveChat,
 } from '#/lib/ai/drive-chat-client'
 import {
@@ -2635,9 +2637,18 @@ export function XDriveWorkspace({
     selectedElements?: SelectedMarbleElement[]
     sketchAnnotations?: SketchAnnotation[]
     targetFolderId?: string | null
+    reasoningEffort?: ReasoningEffort
   }) {
     const instruction = input.instruction.trim()
     if (!instruction) return
+    const selectedChatModel =
+      driveChatModels.find((item) => item.id === input.model) ??
+      driveChatModels.find((item) => item.connected) ??
+      driveChatModels.at(0)
+    const reasoningEffort = reasoningEffortForModel(
+      selectedChatModel,
+      input.reasoningEffort ?? chatReasoningEffort,
+    )
     setAgentStatus(null)
     setAiSidebarOpen(true)
     const user: AIMessage = {
@@ -2684,6 +2695,7 @@ export function XDriveWorkspace({
         instruction,
         modelId: input.model,
         providerId: input.providerId,
+        reasoningEffort,
         sessionId: input.doc?.slug ?? threadId,
         action: input.action,
         selectedElements: input.selectedElements,
@@ -2854,6 +2866,7 @@ export function XDriveWorkspace({
     prompt: string,
     nextModelId: string,
     targetFolderId?: string | null,
+    reasoningEffort?: ReasoningEffort,
   ) {
     setModelId(nextModelId)
     void collaborate({
@@ -2863,6 +2876,7 @@ export function XDriveWorkspace({
       providerId: providerFor(nextModelId, connectedModels),
       action: 'new_app',
       targetFolderId,
+      reasoningEffort,
     })
   }
 
@@ -2907,6 +2921,7 @@ export function XDriveWorkspace({
       instruction: request.instruction,
       model: request.modelId,
       providerId: request.providerId,
+      reasoningEffort: request.reasoningEffort,
       action: actionForIntent(request.kind),
       selectedElements: attached.length > 0 ? attached : selected,
       sketchAnnotations: request.sketches ?? docSketches,
@@ -4190,17 +4205,22 @@ export function XDriveWorkspace({
       query: userPrompt,
     })
 
+    const request = prepareDriveChatRequest(
+      {
+        threadId,
+        modelId: resolvedModelId,
+        providerId: resolvedProviderId,
+        reasoningEffort: chatReasoningEffort,
+        mode: chatMode,
+        messages: historyMessages,
+        drive: snapshot,
+      },
+      selectedModel,
+    )
+
     try {
       await streamDriveChat(
-        {
-          threadId,
-          modelId: resolvedModelId,
-          providerId: resolvedProviderId,
-          reasoningEffort: chatReasoningEffort,
-          mode: chatMode,
-          messages: historyMessages,
-          drive: snapshot,
-        },
+        request,
         (event) => {
           if (event.type === 'status') {
             updateChatMessage(threadId, assistantMsgId, (msg) => ({
@@ -4373,7 +4393,10 @@ export function XDriveWorkspace({
       modelId: selectedModel ? selectedModel.id : modelId,
       modelName: selectedModel ? selectedModel.name : modelId,
       providerId: selectedModel ? selectedModel.providerId : undefined,
-      reasoningEffort: chatReasoningEffort,
+      reasoningEffort: reasoningEffortForModel(
+        selectedModel,
+        chatReasoningEffort,
+      ),
       mode: chatMode,
       isStreaming: true,
       streamingPhase: 'thinking',
@@ -4404,7 +4427,10 @@ export function XDriveWorkspace({
               title: nextTitle,
               updatedAt: now,
               modelId: selectedModel ? selectedModel.id : modelId,
-              reasoningEffort: chatReasoningEffort,
+              reasoningEffort: reasoningEffortForModel(
+                selectedModel,
+                chatReasoningEffort,
+              ),
               mode: chatMode,
               messages: [...item.messages, userMsg, assistantMsg],
             },
@@ -4452,7 +4478,10 @@ export function XDriveWorkspace({
       modelId: selectedModel ? selectedModel.id : modelId,
       modelName: selectedModel ? selectedModel.name : modelId,
       providerId: selectedModel ? selectedModel.providerId : undefined,
-      reasoningEffort: chatReasoningEffort,
+      reasoningEffort: reasoningEffortForModel(
+        selectedModel,
+        chatReasoningEffort,
+      ),
       mode: chatMode,
       isStreaming: true,
       streamingPhase: 'thinking',
@@ -4989,6 +5018,8 @@ export function XDriveWorkspace({
                     models={driveChatModels}
                     modelId={modelId}
                     onModelChange={handleSelectModel}
+                    reasoningEffort={chatReasoningEffort}
+                    onSelectReasoningEffort={setChatReasoningEffort}
                     favoriteModelIds={favoriteModelIds}
                     onFavoriteModelIdsChange={
                       syncWithServer ? handleFavoriteModelIdsChange : undefined
@@ -5740,6 +5771,8 @@ export function XDriveWorkspace({
             models={driveChatModels}
             modelId={modelId}
             onModelChange={handleSelectModel}
+            reasoningEffort={chatReasoningEffort}
+            onSelectReasoningEffort={setChatReasoningEffort}
             favoriteModelIds={favoriteModelIds}
             onFavoriteModelIdsChange={
               syncWithServer ? handleFavoriteModelIdsChange : undefined
@@ -5768,16 +5801,19 @@ export function XDriveWorkspace({
                 ),
               }))
             }}
-            onSend={(text) => {
+            onSend={(text, context) => {
+              const chosenModel = context.modelId
+              const chosenProvider = context.providerId
               if (!activeDoc) {
-                buildApp(text, modelId)
+                buildApp(text, chosenModel, undefined, context.reasoningEffort)
                 return
               }
               void collaborate({
                 doc: activeDoc,
                 instruction: text,
-                model: modelId,
-                providerId: providerFor(modelId, connectedModels),
+                model: chosenModel,
+                providerId: chosenProvider,
+                reasoningEffort: context.reasoningEffort,
                 selectedElements: selected,
                 sketchAnnotations: docSketches,
               })
@@ -5832,15 +5868,20 @@ export function XDriveWorkspace({
         models={driveChatModels}
         selectedModelId={modelId}
         onSelectModel={handleSelectModel}
+        reasoningEffort={chatReasoningEffort}
+        onSelectReasoningEffort={setChatReasoningEffort}
         favoriteModelIds={favoriteModelIds}
         onFavoriteModelIdsChange={
           syncWithServer ? handleFavoriteModelIdsChange : undefined
         }
         onOpenProviders={() => visit('home', 'subscriptions')}
         onClose={() => setNewAppModalMode(null)}
-        onBuildWithAgent={({ prompt, modelId: chosenModel, folderId }) =>
-          buildApp(prompt, chosenModel, folderId)
-        }
+        onBuildWithAgent={({
+          prompt,
+          modelId: chosenModel,
+          folderId,
+          reasoningEffort,
+        }) => buildApp(prompt, chosenModel, folderId, reasoningEffort)}
         onCreateFromTemplate={createAppFromTemplate}
         onPreviewTemplate={(tpl) => openDocument(tpl.id)}
       />
