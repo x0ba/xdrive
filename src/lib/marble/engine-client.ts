@@ -134,6 +134,32 @@ export function byteSizeOf(source: string): number {
   return bytes
 }
 
+export function applyDocumentContentUpdate(
+  doc: MarbleDocumentFile,
+  input: {
+    source: string
+    updatedAt: string
+    lastEditedBy: MarbleDocumentFile['lastEditedBy']
+    checkpoint?: MarbleDocumentFile['checkpoints'][number]
+    syncState?: MarbleDocumentFile['syncState']
+  },
+): MarbleDocumentFile {
+  const checkpoints = input.checkpoint
+    ? [input.checkpoint, ...doc.checkpoints].slice(0, 40)
+    : doc.checkpoints
+  return {
+    ...doc,
+    source: input.source,
+    nodeCount: countMarbleNodes(input.source),
+    byteSize: byteSizeOf(input.source),
+    version: doc.version + 1,
+    updatedAt: input.updatedAt,
+    syncState: input.syncState ?? 'saving',
+    lastEditedBy: input.lastEditedBy,
+    checkpoints,
+  }
+}
+
 export function extractAddressableNodes(
   source: string,
 ): SelectedMarbleElement[] {

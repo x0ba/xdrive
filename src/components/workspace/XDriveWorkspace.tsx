@@ -88,6 +88,7 @@ import {
   INITIAL_AI_SUBSCRIPTIONS,
   MarbleCollaborationError,
   PREDEFINED_MARBLE_TEMPLATES,
+  applyDocumentContentUpdate,
   applyMarbleOpsClient,
   buildInteractiveMarbleIframeDoc,
   byteSizeOf,
@@ -1119,12 +1120,20 @@ export function XDriveWorkspace({
                   (item): item is string => typeof item === 'string',
                 )
                 setFavoriteModelIds(migrated)
-                void syncDriveApi({
+                const saved = await syncDriveApi({
                   action: 'update_settings',
                   settings: { favoriteModelIds: migrated },
                 })
+                if (saved) {
+                  window.localStorage.removeItem(
+                    LEGACY_FAVORITE_MODELS_STORAGE_KEY,
+                  )
+                }
+              } else {
+                window.localStorage.removeItem(
+                  LEGACY_FAVORITE_MODELS_STORAGE_KEY,
+                )
               }
-              window.localStorage.removeItem(LEGACY_FAVORITE_MODELS_STORAGE_KEY)
             }
           } catch {
             // Ignore legacy localStorage migration failures.
@@ -1523,6 +1532,9 @@ export function XDriveWorkspace({
     id: string,
     updater: (doc: MarbleDocumentFile) => MarbleDocumentFile,
   ) {
+    allDocsRef.current = allDocsRef.current.map((doc) =>
+      doc.id === id ? updater(doc) : doc,
+    )
     setDocs((prev) =>
       prev.some((doc) => doc.id === id)
         ? prev.map((doc) => (doc.id === id ? updater(doc) : doc))
@@ -2783,46 +2795,60 @@ export function XDriveWorkspace({
           opsCount: Math.max(action.ops.length, 1),
           source: nextSource,
         }
-        const updatedDoc: MarbleDocumentFile = {
-          ...target,
-          source: nextSource,
-          nodeCount: countMarbleNodes(nextSource),
-          byteSize: byteSizeOf(nextSource),
-          version: target.version + 1,
-          updatedAt: now,
-          syncState: 'saving',
-          lastEditedBy: { name: 'Drive Chat', initials: 'AI', isAi: true },
-          checkpoints: [checkpoint, ...target.checkpoints].slice(0, 40),
-        }
-        patchFile(target.id, () => updatedDoc)
+        patchFile(target.id, (doc) =>
+          applyDocumentContentUpdate(doc, {
+            source: nextSource,
+            updatedAt: now,
+            lastEditedBy: { name: 'Drive Chat', initials: 'AI', isAi: true },
+            checkpoint,
+          }),
+        )
+        const updatedDoc = allDocsRef.current.find((d) => d.id === target.id)
         persist(
           target.id,
-          target.slug,
+          updatedDoc?.slug ?? target.slug,
           priorSource,
           action.ops,
           nextSource,
           updatedDoc,
         )
         chatUndoMapRef.current.set(action.id, () => {
+          const current = allDocsRef.current.find((d) => d.id === target.id)
+          if (!current) return
+          const currentSource =
+            sourceRef.current.get(target.id) ?? current.source
           sourceRef.current.set(target.id, priorSource)
-          const revertedDoc: MarbleDocumentFile = {
-            ...updatedDoc,
-            source: priorSource,
-            nodeCount: countMarbleNodes(priorSource),
-            byteSize: byteSizeOf(priorSource),
-            version: updatedDoc.version + 1,
-            updatedAt: new Date().toISOString(),
-            syncState: 'saving',
+          if (activeTabRef.current === target.id) {
+            shownSourceRef.current = priorSource
           }
-          patchFile(target.id, () => revertedDoc)
-          persist(
-            target.id,
-            target.slug,
-            nextSource,
-            [],
-            priorSource,
-            revertedDoc,
+          const undoCheckpoint: MarbleCheckpoint = {
+            sha: shortSha(),
+            label: `Undo · ${action.summary}`,
+            timestamp: Date.now(),
+            author: YOU.name,
+            opsCount: 1,
+            source: priorSource,
+          }
+          const revertedAt = new Date().toISOString()
+          patchFile(target.id, (doc) =>
+            applyDocumentContentUpdate(doc, {
+              source: priorSource,
+              updatedAt: revertedAt,
+              lastEditedBy: YOU,
+              checkpoint: undoCheckpoint,
+            }),
           )
+          const revertedDoc = allDocsRef.current.find((d) => d.id === target.id)
+          if (revertedDoc) {
+            persist(
+              revertedDoc.id,
+              revertedDoc.slug,
+              currentSource,
+              [],
+              priorSource,
+              revertedDoc,
+            )
+          }
         })
         updateChatAction(threadId, msgId, action.id, (act) => ({
           ...act,
@@ -2932,13 +2958,6 @@ export function XDriveWorkspace({
         const prevTitle = target.title
         const prevDescription = target.description
         const prevTags = target.tags
-        const nextDoc: MarbleDocumentFile = {
-          ...target,
-          title: action.nextTitle,
-          description: action.nextDescription ?? target.description,
-          tags: action.nextTags ?? target.tags,
-          updatedAt: now,
-        }
         patchFile(target.id, (doc) => ({
           ...doc,
           title: action.nextTitle,
@@ -2946,12 +2965,15 @@ export function XDriveWorkspace({
           tags: action.nextTags ?? doc.tags,
           updatedAt: now,
         }))
-        void syncDriveApi({
-          action: 'update_document_meta',
-          slug: target.slug,
-          folderPath: folderDiskPath(foldersRef.current, target.folderId),
-          meta: serializeDocMeta(nextDoc),
-        })
+        const renamedDoc = allDocsRef.current.find((d) => d.id === target.id)
+        if (renamedDoc) {
+          void syncDriveApi({
+            action: 'update_document_meta',
+            slug: renamedDoc.slug,
+            folderPath: folderDiskPath(foldersRef.current, renamedDoc.folderId),
+            meta: serializeDocMeta(renamedDoc),
+          })
+        }
         chatUndoMapRef.current.set(action.id, () => {
           const revertedAt = new Date().toISOString()
           patchFile(target.id, (doc) => ({
@@ -2961,18 +2983,18 @@ export function XDriveWorkspace({
             tags: prevTags,
             updatedAt: revertedAt,
           }))
-          void syncDriveApi({
-            action: 'update_document_meta',
-            slug: target.slug,
-            folderPath: folderDiskPath(foldersRef.current, target.folderId),
-            meta: serializeDocMeta({
-              ...target,
-              title: prevTitle,
-              description: prevDescription,
-              tags: prevTags,
-              updatedAt: revertedAt,
-            }),
-          })
+          const revertedDoc = allDocsRef.current.find((d) => d.id === target.id)
+          if (revertedDoc) {
+            void syncDriveApi({
+              action: 'update_document_meta',
+              slug: revertedDoc.slug,
+              folderPath: folderDiskPath(
+                foldersRef.current,
+                revertedDoc.folderId,
+              ),
+              meta: serializeDocMeta(revertedDoc),
+            })
+          }
         })
         updateChatAction(threadId, msgId, action.id, (act) => ({
           ...act,
@@ -3008,23 +3030,32 @@ export function XDriveWorkspace({
           folder: nextFolderName,
           updatedAt: now,
         }))
+        const movedDoc = allDocsRef.current.find((d) => d.id === target.id)
         void syncDriveApi(
           {
             action: 'move_document',
-            slug: target.slug,
+            slug: movedDoc?.slug ?? target.slug,
             fromFolderPath,
             toFolderPath,
             source: sourceRef.current.get(target.id) ?? target.source,
-            meta: serializeDocMeta({
-              ...target,
-              folderId: nextFolderId,
-              folder: nextFolderName,
-              updatedAt: now,
-            }),
+            meta: serializeDocMeta(
+              movedDoc ?? {
+                ...target,
+                folderId: nextFolderId,
+                folder: nextFolderName,
+                updatedAt: now,
+              },
+            ),
           },
           { reloadOnError: true },
         )
         chatUndoMapRef.current.set(action.id, () => {
+          const current = allDocsRef.current.find((d) => d.id === target.id)
+          if (!current) return
+          const currentFromPath = folderDiskPath(
+            foldersRef.current,
+            current.folderId ?? null,
+          )
           const revertedAt = new Date().toISOString()
           patchFile(target.id, (doc) => ({
             ...doc,
@@ -3032,22 +3063,21 @@ export function XDriveWorkspace({
             folder: prevFolder,
             updatedAt: revertedAt,
           }))
-          void syncDriveApi(
-            {
-              action: 'move_document',
-              slug: target.slug,
-              fromFolderPath: folderDiskPath(foldersRef.current, nextFolderId),
-              toFolderPath: folderDiskPath(foldersRef.current, prevFolderId),
-              source: sourceRef.current.get(target.id) ?? target.source,
-              meta: serializeDocMeta({
-                ...target,
-                folderId: prevFolderId,
-                folder: prevFolder,
-                updatedAt: revertedAt,
-              }),
-            },
-            { reloadOnError: true },
-          )
+          const revertedDoc = allDocsRef.current.find((d) => d.id === target.id)
+          if (revertedDoc) {
+            void syncDriveApi(
+              {
+                action: 'move_document',
+                slug: revertedDoc.slug,
+                fromFolderPath: currentFromPath,
+                toFolderPath: folderDiskPath(foldersRef.current, prevFolderId),
+                source:
+                  sourceRef.current.get(revertedDoc.id) ?? revertedDoc.source,
+                meta: serializeDocMeta(revertedDoc),
+              },
+              { reloadOnError: true },
+            )
+          }
         })
         updateChatAction(threadId, msgId, action.id, (act) =>
           act.kind === 'move_document'
@@ -3072,14 +3102,6 @@ export function XDriveWorkspace({
         const prevPinned = target.pinned
         const prevTags = target.tags
         const prevDescription = target.description
-        const nextDoc: MarbleDocumentFile = {
-          ...target,
-          starred: action.starred ?? target.starred,
-          pinned: action.pinned ?? target.pinned,
-          tags: action.tags ?? target.tags,
-          description: action.description ?? target.description,
-          updatedAt: now,
-        }
         patchFile(target.id, (doc) => ({
           ...doc,
           starred: action.starred ?? doc.starred,
@@ -3088,12 +3110,20 @@ export function XDriveWorkspace({
           description: action.description ?? doc.description,
           updatedAt: now,
         }))
-        void syncDriveApi({
-          action: 'update_document_meta',
-          slug: target.slug,
-          folderPath: folderDiskPath(foldersRef.current, target.folderId),
-          meta: serializeDocMeta(nextDoc),
-        })
+        const updatedMetaDoc = allDocsRef.current.find(
+          (d) => d.id === target.id,
+        )
+        if (updatedMetaDoc) {
+          void syncDriveApi({
+            action: 'update_document_meta',
+            slug: updatedMetaDoc.slug,
+            folderPath: folderDiskPath(
+              foldersRef.current,
+              updatedMetaDoc.folderId,
+            ),
+            meta: serializeDocMeta(updatedMetaDoc),
+          })
+        }
         chatUndoMapRef.current.set(action.id, () => {
           const revertedAt = new Date().toISOString()
           patchFile(target.id, (doc) => ({
@@ -3104,19 +3134,18 @@ export function XDriveWorkspace({
             description: prevDescription,
             updatedAt: revertedAt,
           }))
-          void syncDriveApi({
-            action: 'update_document_meta',
-            slug: target.slug,
-            folderPath: folderDiskPath(foldersRef.current, target.folderId),
-            meta: serializeDocMeta({
-              ...target,
-              starred: prevStarred,
-              pinned: prevPinned,
-              tags: prevTags,
-              description: prevDescription,
-              updatedAt: revertedAt,
-            }),
-          })
+          const revertedDoc = allDocsRef.current.find((d) => d.id === target.id)
+          if (revertedDoc) {
+            void syncDriveApi({
+              action: 'update_document_meta',
+              slug: revertedDoc.slug,
+              folderPath: folderDiskPath(
+                foldersRef.current,
+                revertedDoc.folderId,
+              ),
+              meta: serializeDocMeta(revertedDoc),
+            })
+          }
         })
         updateChatAction(threadId, msgId, action.id, (act) => ({
           ...act,

@@ -1,4 +1,5 @@
 export {
+  applyDocumentContentUpdate,
   applyMarbleOpsClient,
   buildInteractiveMarbleIframeDoc,
   byteSizeOf,

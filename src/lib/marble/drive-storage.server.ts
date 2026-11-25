@@ -1678,10 +1678,10 @@ async function purgeExpiredTrashUnlocked(options?: {
         throw error
       }
     }
-    const expiresMs =
-      explicitRetention === undefined && meta?.purgeAt
-        ? Date.parse(meta.purgeAt)
-        : trashedMs + cutoffMs
+    const parsedPurgeMs = meta?.purgeAt ? Date.parse(meta.purgeAt) : Number.NaN
+    const expiresMs = !Number.isNaN(parsedPurgeMs)
+      ? parsedPurgeMs
+      : trashedMs + cutoffMs
     if (now >= expiresMs) {
       await Promise.all([
         rm(full, { force: true }),
