@@ -39,49 +39,6 @@ export type NewAppModelOption = Pick<
   'id' | 'name' | 'providerId' | 'badge' | 'role'
 >
 
-const AGENT_STARTERS: Array<{
-  category: MarbleAppCategory
-  label: string
-  prompt: string
-}> = [
-  {
-    category: 'latex',
-    label: 'LaTeX paper',
-    prompt:
-      'Build a two-column LaTeX quantum error correction manuscript with interactive theorem proofs.',
-  },
-  {
-    category: 'notebook',
-    label: 'Lab notebook',
-    prompt:
-      'Create an interactive mechanistic interpretability lab notebook with sortable ablation runs.',
-  },
-  {
-    category: 'document',
-    label: 'Research spec',
-    prompt:
-      'Draft a structured technical design specification with an outline, callouts, and margin comments.',
-  },
-  {
-    category: 'slides',
-    label: 'Slide deck',
-    prompt:
-      'Generate a 6-slide research review deck with speaker notes and layout switches.',
-  },
-  {
-    category: 'matrix',
-    label: 'Literature matrix',
-    prompt:
-      'Synthesize a filterable transformer scaling law literature comparison matrix.',
-  },
-  {
-    category: 'sandbox',
-    label: 'Data sandbox',
-    prompt:
-      'Build an editable benchmark table with live SVG bar chart visualization.',
-  },
-]
-
 const TEMPLATE_CATEGORIES: Array<{
   value: MarbleAppCategory | 'all'
   label: string
@@ -668,27 +625,6 @@ export function NewAppModal({
                     <ArrowUp className="h-3.5 w-3.5" />
                   </button>
                 </div>
-              </div>
-            </div>
-
-            <div className="space-y-2">
-              <div className="text-[11.5px] font-medium text-[var(--xd-ink-muted)]">
-                Starter prompts
-              </div>
-              <div className="flex flex-wrap gap-1.5">
-                {AGENT_STARTERS.map((starter) => (
-                  <button
-                    key={starter.label}
-                    type="button"
-                    onClick={() => setPrompt(starter.prompt)}
-                    className="inline-flex items-center gap-1.5 rounded border border-[var(--xd-border)] bg-[var(--xd-rail)] px-2.5 py-1 text-[12px] text-[var(--xd-ink-secondary)] transition-colors hover:border-[var(--xd-border-strong)] hover:bg-[var(--xd-elevated)] hover:text-[var(--xd-ink)]"
-                  >
-                    <span className="text-[var(--xd-accent)]">
-                      {getCategoryIcon(starter.category, 'h-3 w-3')}
-                    </span>
-                    <span>{starter.label}</span>
-                  </button>
-                ))}
               </div>
             </div>
           </form>
