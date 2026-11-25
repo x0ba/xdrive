@@ -31,6 +31,21 @@ export const DriveFiles: Story = {
 }
 
 /**
+ * Full-screen Drive Chat view inside the xDrive workspace shell for querying and modifying across the Drive.
+ *
+ * @summary Full-screen Drive Chat view in workspace
+ */
+export const DriveChatWorkspace: Story = {
+  name: 'Drive · AI Chat',
+  args: {
+    initialTheme: 'dark',
+    initialNav: 'chat',
+    initialActiveTabId: 'home',
+    initialAiSidebarOpen: false,
+  },
+}
+
+/**
  * Trash view pre-populated with recently deleted files showing 30-day retention, restore, and permanent delete.
  *
  * @summary Drive Trash view with restore and permanent delete

@@ -12,6 +12,7 @@ import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as McpRouteImport } from './routes/mcp'
 import { Route as ApiAiRouteImport } from './routes/api.ai'
+import { Route as ApiDriveChatRouteImport } from './routes/api.drive-chat'
 import { Route as ApiLatexRouteImport } from './routes/api.latex'
 import { Route as ApiMarbleRouteImport } from './routes/api.marble'
 
@@ -30,6 +31,11 @@ const ApiAiRoute = ApiAiRouteImport.update({
   path: '/api/ai',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiDriveChatRoute = ApiDriveChatRouteImport.update({
+  id: '/api/drive-chat',
+  path: '/api/drive-chat',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ApiLatexRoute = ApiLatexRouteImport.update({
   id: '/api/latex',
   path: '/api/latex',
@@ -45,6 +51,7 @@ export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/mcp': typeof McpRoute
   '/api/ai': typeof ApiAiRoute
+  '/api/drive-chat': typeof ApiDriveChatRoute
   '/api/latex': typeof ApiLatexRoute
   '/api/marble': typeof ApiMarbleRoute
 }
@@ -52,6 +59,7 @@ export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/mcp': typeof McpRoute
   '/api/ai': typeof ApiAiRoute
+  '/api/drive-chat': typeof ApiDriveChatRoute
   '/api/latex': typeof ApiLatexRoute
   '/api/marble': typeof ApiMarbleRoute
 }
@@ -60,21 +68,32 @@ export interface FileRoutesById {
   '/': typeof IndexRoute
   '/mcp': typeof McpRoute
   '/api/ai': typeof ApiAiRoute
+  '/api/drive-chat': typeof ApiDriveChatRoute
   '/api/latex': typeof ApiLatexRoute
   '/api/marble': typeof ApiMarbleRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/mcp' | '/api/ai' | '/api/latex' | '/api/marble'
+  fullPaths:
+    '/' | '/mcp' | '/api/ai' | '/api/drive-chat' | '/api/latex' | '/api/marble'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/mcp' | '/api/ai' | '/api/latex' | '/api/marble'
-  id: '__root__' | '/' | '/mcp' | '/api/ai' | '/api/latex' | '/api/marble'
+  to:
+    '/' | '/mcp' | '/api/ai' | '/api/drive-chat' | '/api/latex' | '/api/marble'
+  id:
+    | '__root__'
+    | '/'
+    | '/mcp'
+    | '/api/ai'
+    | '/api/drive-chat'
+    | '/api/latex'
+    | '/api/marble'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   McpRoute: typeof McpRoute
   ApiAiRoute: typeof ApiAiRoute
+  ApiDriveChatRoute: typeof ApiDriveChatRoute
   ApiLatexRoute: typeof ApiLatexRoute
   ApiMarbleRoute: typeof ApiMarbleRoute
 }
@@ -102,6 +121,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiAiRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/drive-chat': {
+      id: '/api/drive-chat'
+      path: '/api/drive-chat'
+      fullPath: '/api/drive-chat'
+      preLoaderRoute: typeof ApiDriveChatRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/api/latex': {
       id: '/api/latex'
       path: '/api/latex'
@@ -123,6 +149,7 @@ const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   McpRoute: McpRoute,
   ApiAiRoute: ApiAiRoute,
+  ApiDriveChatRoute: ApiDriveChatRoute,
   ApiLatexRoute: ApiLatexRoute,
   ApiMarbleRoute: ApiMarbleRoute,
 }

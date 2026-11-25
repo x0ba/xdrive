@@ -6,6 +6,7 @@ import {
   Folder,
   FolderPlus,
   HardDrive,
+  MessageSquare,
   Plus,
   Star,
   X,
@@ -169,7 +170,9 @@ export interface OpenDocumentTab {
 export interface BrowserTabStripProps {
   openTabs: OpenDocumentTab[]
   activeTabId: 'home' | string
+  activeNav?: PrimaryNavId
   onSelectTab?: (tabId: 'home' | string) => void
+  onSelectChat?: () => void
   onCloseTab?: (tabId: string) => void
   onNewTab?: () => void
   canGoBack?: boolean
@@ -188,7 +191,9 @@ export interface BrowserTabStripProps {
 export function BrowserTabStrip({
   openTabs,
   activeTabId,
+  activeNav = 'drive',
   onSelectTab,
+  onSelectChat,
   onCloseTab,
   onNewTab,
   canGoBack = true,
@@ -231,7 +236,7 @@ export function BrowserTabStrip({
           type="button"
           onClick={() => onSelectTab?.('home')}
           className={`inline-flex h-7 shrink-0 items-center gap-1.5 rounded px-2.5 text-[12px] font-medium transition-colors ${
-            activeTabId === 'home'
+            activeTabId === 'home' && activeNav !== 'chat'
               ? 'bg-[var(--xd-canvas)] text-[var(--xd-ink)] shadow-2xs'
               : 'text-[var(--xd-ink-secondary)] hover:bg-[var(--xd-surface-hover)] hover:text-[var(--xd-ink)]'
           }`}
@@ -239,6 +244,27 @@ export function BrowserTabStrip({
           <HardDrive className="h-3.5 w-3.5 text-[var(--xd-ink-muted)]" />
           <span>Drive</span>
         </button>
+
+        {onSelectChat && (
+          <button
+            type="button"
+            onClick={onSelectChat}
+            className={`inline-flex h-7 shrink-0 items-center gap-1.5 rounded px-2.5 text-[12px] font-medium transition-colors ${
+              activeTabId === 'home' && activeNav === 'chat'
+                ? 'bg-[var(--xd-canvas)] text-[var(--xd-ink)] shadow-2xs'
+                : 'text-[var(--xd-ink-secondary)] hover:bg-[var(--xd-surface-hover)] hover:text-[var(--xd-ink)]'
+            }`}
+          >
+            <MessageSquare
+              className={`h-3.5 w-3.5 ${
+                activeTabId === 'home' && activeNav === 'chat'
+                  ? 'text-[var(--xd-accent)]'
+                  : 'text-[var(--xd-ink-muted)]'
+              }`}
+            />
+            <span>Chat</span>
+          </button>
+        )}
 
         <span className="mx-0.5 h-3.5 w-px bg-[var(--xd-border)]" />
 
@@ -357,6 +383,7 @@ export function BrowserTabStrip({
 
 export type PrimaryNavId =
   | 'drive'
+  | 'chat'
   | 'agent-studio'
   | 'templates'
   | 'shared'
@@ -606,6 +633,29 @@ export function SidebarRail({
         className="mt-2 space-y-0.5"
         aria-label="Primary Workspace Navigation"
       >
+        <button
+          type="button"
+          onClick={() => onSelectNav?.('chat')}
+          className={`flex w-full items-center justify-between gap-2 rounded px-2 py-1.5 text-left text-[12.5px] transition-colors ${
+            activeNav === 'chat' && !activeAppId
+              ? 'bg-[var(--xd-surface-active)] font-medium text-[var(--xd-ink)]'
+              : 'text-[var(--xd-ink-secondary)] hover:bg-[var(--xd-surface-hover)] hover:text-[var(--xd-ink)]'
+          }`}
+        >
+          <span className="flex min-w-0 items-center gap-2">
+            <span
+              className={
+                activeNav === 'chat' && !activeAppId
+                  ? 'text-[var(--xd-accent)]'
+                  : 'text-[var(--xd-ink-muted)]'
+              }
+            >
+              <MessageSquare className="h-3.5 w-3.5" />
+            </span>
+            <span className="truncate">Chat</span>
+          </span>
+        </button>
+
         <div>
           <div
             onDragOver={(e) => handleDragOver(e, 'root')}
