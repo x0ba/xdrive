@@ -152,28 +152,39 @@ export function buildDriveSnapshot(params: {
   }
 }
 
-function normalizeReasoningEfforts(
+export function normalizeReasoningEfforts(
   rawEfforts?: string[],
   supportsReasoning = true,
 ): ReasoningEffort[] {
   if (!supportsReasoning) return ['off']
   if (!rawEfforts || rawEfforts.length === 0) return ALL_EFFORTS
-  const mapped: ReasoningEffort[] = ['off']
+  const seen = new Set<ReasoningEffort>()
   for (const effort of rawEfforts) {
-    const clean = effort.toLowerCase()
+    const clean = effort.trim().toLowerCase()
     if (
-      (clean === 'low' ||
-        clean === 'medium' ||
-        clean === 'high' ||
-        clean === 'max') &&
-      !mapped.includes(clean)
+      clean === 'off' ||
+      clean === 'none' ||
+      clean === 'minimal' ||
+      clean === 'disabled'
     ) {
-      mapped.push(clean)
-    } else if (clean === 'xhigh' && !mapped.includes('max')) {
-      mapped.push('max')
+      seen.add('off')
+    } else if (
+      clean === 'low' ||
+      clean === 'medium' ||
+      clean === 'high' ||
+      clean === 'max'
+    ) {
+      seen.add(clean)
+    } else if (
+      clean === 'xhigh' ||
+      clean === 'extra_high' ||
+      clean === 'extra-high'
+    ) {
+      seen.add('max')
     }
   }
-  return mapped.length > 1 ? mapped : ALL_EFFORTS
+  const ordered = ALL_EFFORTS.filter((effort) => seen.has(effort))
+  return ordered.length > 0 ? ordered : ALL_EFFORTS
 }
 
 export function buildDriveChatModels(params: {

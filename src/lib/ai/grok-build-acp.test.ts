@@ -1,7 +1,11 @@
 import { describe, expect, it } from 'vitest'
 import { INITIAL_AI_SUBSCRIPTIONS } from '#/lib/marble/subscriptions-seed'
-import { buildDriveChatModels } from './drive-chat-client'
 import {
+  buildDriveChatModels,
+  normalizeReasoningEfforts,
+} from './drive-chat-client'
+import {
+  GrokBuildAcpManager,
   extractGrokBuildModelState,
   resolveGrokBuildModelId,
   selectGrokBuildAuthMethod,
@@ -234,13 +238,159 @@ describe('Grok Build client subscription and Drive Chat model mapping', () => {
     const grok47 = chatModels.find((m) => m.id === 'grok-build/grok-4.7')
     const grok45 = chatModels.find((m) => m.id === 'grok-build/grok-4.5')
     expect(grok47?.connected).toBe(true)
-    expect(grok47?.reasoningEfforts).toEqual([
-      'off',
-      'max',
-      'high',
-      'medium',
+    expect(grok47?.reasoningEfforts).toEqual(['low', 'medium', 'high', 'max'])
+    expect(grok45?.reasoningEfforts).toEqual(['low', 'medium', 'high'])
+  })
+
+  it('only includes "off" in normalizeReasoningEfforts when supported by the model', () => {
+    expect(
+      normalizeReasoningEfforts(['xhigh', 'high', 'medium', 'low']),
+    ).toEqual(['low', 'medium', 'high', 'max'])
+    expect(normalizeReasoningEfforts(['high', 'medium', 'low'])).toEqual([
       'low',
+      'medium',
+      'high',
     ])
-    expect(grok45?.reasoningEfforts).toEqual(['off', 'high', 'medium', 'low'])
+    expect(normalizeReasoningEfforts(['none', 'low', 'high'])).toEqual([
+      'off',
+      'low',
+      'high',
+    ])
+    expect(normalizeReasoningEfforts(['off', 'medium', 'max'])).toEqual([
+      'off',
+      'medium',
+      'max',
+    ])
+    expect(normalizeReasoningEfforts(['low', 'high'], false)).toEqual(['off'])
+  })
+})
+
+describe('GrokBuildAcpManager non-disruptive refresh', () => {
+  it('completes an in-flight prompt when getStatus(true) refreshes on a new connection', async () => {
+    const fakeAcpScript = `
+      const readline = require('node:readline');
+      const rl = readline.createInterface({ input: process.stdin });
+      const send = (msg) => process.stdout.write(JSON.stringify(msg) + '\\n');
+      let seq = 0;
+      rl.on('line', (line) => {
+        if (!line.trim()) return;
+        const req = JSON.parse(line);
+        if (req.method === 'initialize') {
+          send({
+            jsonrpc: '2.0',
+            id: req.id,
+            result: {
+              protocolVersion: 1,
+              agentCapabilities: { promptCapabilities: { image: true } },
+              authMethods: [{ id: 'cached_token', name: 'cached_token' }],
+              _meta: {
+                agentVersion: 'pid-' + process.pid,
+                grokShell: true,
+                modelState: {
+                  currentModelId: 'grok-4.7',
+                  availableModels: [{ modelId: 'grok-4.7', name: 'Grok 4.7' }],
+                },
+              },
+            },
+          });
+        } else if (req.method === 'authenticate') {
+          send({
+            jsonrpc: '2.0',
+            id: req.id,
+            result: { _meta: { subscription_tier: 'SuperGrok' } },
+          });
+        } else if (req.method === 'session/new') {
+          send({
+            jsonrpc: '2.0',
+            id: req.id,
+            result: {
+              sessionId: 'sess-' + (++seq) + '-' + process.pid,
+              models: {
+                currentModelId: 'grok-4.7',
+                availableModels: [{ modelId: 'grok-4.7', name: 'Grok 4.7' }],
+              },
+              configOptions: [],
+            },
+          });
+        } else if (req.method === 'session/prompt') {
+          const sid = req.params.sessionId;
+          send({
+            jsonrpc: '2.0',
+            method: 'session/update',
+            params: {
+              sessionId: sid,
+              update: {
+                sessionUpdate: 'agent_message_chunk',
+                content: { type: 'text', text: 'part1:' + process.pid + ':' },
+              },
+            },
+          });
+          setTimeout(() => {
+            send({
+              jsonrpc: '2.0',
+              method: 'session/update',
+              params: {
+                sessionId: sid,
+                update: {
+                  sessionUpdate: 'agent_message_chunk',
+                  content: { type: 'text', text: 'part2' },
+                },
+              },
+            });
+            send({
+              jsonrpc: '2.0',
+              id: req.id,
+              result: { stopReason: 'end_turn' },
+            });
+          }, 220);
+        } else if (req.method === 'session/close') {
+          send({ jsonrpc: '2.0', id: req.id, result: {} });
+        }
+      });
+    `
+
+    const manager = new GrokBuildAcpManager({
+      resolveBinary: async () => ({
+        source: 'custom',
+        command: process.execPath,
+        args: ['-e', fakeAcpScript],
+        displayPath: 'fake-grok-acp',
+      }),
+    })
+
+    try {
+      let resolveFirstDelta!: () => void
+      const firstDeltaSeen = new Promise<void>((resolve) => {
+        resolveFirstDelta = resolve
+      })
+
+      const inFlightPrompt = manager.runPrompt({
+        prompt: 'hello',
+        onTextDelta: () => resolveFirstDelta(),
+      })
+
+      // Wait until prompt #1 is actively streaming on Process #1.
+      await firstDeltaSeen
+
+      // Trigger a force refresh (Settings -> Refresh) while prompt #1 is in-flight.
+      const refreshedStatus = await manager.getStatus(true)
+      expect(refreshedStatus.authenticated).toBe(true)
+      expect(refreshedStatus.agentVersion).toMatch(/^pid-\d+$/)
+
+      // In-flight prompt must finish uninterrupted on its original process.
+      const firstResult = await inFlightPrompt
+      expect(firstResult.stopReason).toBe('end_turn')
+      expect(firstResult.text).toMatch(/^part1:\d+:part2$/)
+      expect(firstResult.agentVersion).not.toBe(refreshedStatus.agentVersion)
+
+      // Subsequent prompts route to the refreshed process.
+      const secondResult = await manager.runPrompt({ prompt: 'follow-up' })
+      expect(secondResult.agentVersion).toBe(refreshedStatus.agentVersion)
+      expect(secondResult.text).toContain(
+        refreshedStatus.agentVersion!.replace('pid-', ''),
+      )
+    } finally {
+      await manager.shutdown()
+    }
   })
 })

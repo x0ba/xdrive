@@ -390,22 +390,32 @@ function extractSubscriptionTier(authResponse: unknown): string | null {
   return null
 }
 
-class GrokBuildAcpManager {
+export class GrokBuildAcpManager {
   private readonly runtime: AcpProcessRuntime<GrokBuildBinarySource>
-  private authenticatedConn: ClientConnection | null = null
-  private activeAuthMethod: Exclude<GrokBuildAuthSource, 'none'> | null = null
+  private readonly resolveBinaryFn: () => Promise<ResolvedGrokBuildBinary | null>
+  private readonly authByConn = new WeakMap<
+    ClientConnection,
+    {
+      authSource: Exclude<GrokBuildAuthSource, 'none'>
+      tier: string | null
+    }
+  >()
   private cachedTier: string | null = null
   private cachedModels: GrokBuildModelOption[] = []
   private cachedCurrentModelId: string | null = null
   private cachedModelConfigId: string | null = null
   private cachedConfigOptions: AcpConfigOption[] = []
 
-  constructor() {
+  constructor(options?: {
+    resolveBinary?: () => Promise<ResolvedGrokBuildBinary | null>
+    workspaceDir?: () => string
+  }) {
+    this.resolveBinaryFn = options?.resolveBinary ?? resolveGrokBuildBinary
     this.runtime = new AcpProcessRuntime<GrokBuildBinarySource>({
       providerLabel: 'Grok Build',
       defaultAgentName: 'Grok Build ACP',
-      workspaceDir: scratchWorkspaceDir,
-      resolveBinary: resolveGrokBuildBinary,
+      workspaceDir: options?.workspaceDir ?? scratchWorkspaceDir,
+      resolveBinary: this.resolveBinaryFn,
       missingBinaryMessage: () => {
         const custom =
           process.env.XDRIVE_GROK_BIN?.trim() ||
@@ -424,8 +434,7 @@ class GrokBuildAcpManager {
   }
 
   async shutdown(): Promise<void> {
-    this.authenticatedConn = null
-    this.activeAuthMethod = null
+    this.cachedTier = null
     await this.runtime.shutdown()
   }
 
@@ -438,11 +447,12 @@ class GrokBuildAcpManager {
     tier: string | null
     error?: string
   }> {
-    if (this.authenticatedConn === connection && this.activeAuthMethod) {
+    const existing = this.authByConn.get(connection)
+    if (existing) {
       return {
         authenticated: true,
-        authSource: this.activeAuthMethod,
-        tier: this.cachedTier,
+        authSource: existing.authSource,
+        tier: existing.tier,
       }
     }
 
@@ -451,8 +461,7 @@ class GrokBuildAcpManager {
     const chosenMethod = selectGrokBuildAuthMethod(authMethods, hasEnvXaiApiKey)
 
     if (!chosenMethod) {
-      this.authenticatedConn = null
-      this.activeAuthMethod = null
+      this.authByConn.delete(connection)
       this.cachedTier = null
       return {
         authenticated: false,
@@ -474,8 +483,7 @@ class GrokBuildAcpManager {
         },
       )
       const tier = extractSubscriptionTier(authResponse)
-      this.authenticatedConn = connection
-      this.activeAuthMethod = chosenMethod
+      this.authByConn.set(connection, { authSource: chosenMethod, tier })
       this.cachedTier = tier
       return {
         authenticated: true,
@@ -483,8 +491,7 @@ class GrokBuildAcpManager {
         tier,
       }
     } catch (error) {
-      this.authenticatedConn = null
-      this.activeAuthMethod = null
+      this.authByConn.delete(connection)
       this.cachedTier = null
       return {
         authenticated: false,
@@ -541,39 +548,112 @@ class GrokBuildAcpManager {
 
   async getStatus(forceRefresh = false): Promise<GrokBuildRuntimeStatus> {
     if (forceRefresh) {
-      await this.shutdown()
+      // Retire the shared connection non-disruptively so any in-flight chat or
+      // Marble prompts finish on their existing process while this refresh
+      // initializes a fresh CLI process to pick up `grok login` / model changes.
+      this.runtime.retireConnection()
     }
 
-    const binary = await resolveGrokBuildBinary()
-    if (!binary) {
-      return {
-        ok: true,
-        binaryAvailable: false,
-        binarySource: 'none',
-        authenticated: false,
-        activeAuthMethod: null,
-        authSource: 'none',
-        authMethods: [],
-        tier: null,
-        models: DEFAULT_GROK_BUILD_MODELS,
-        currentModelId: DEFAULT_GROK_BUILD_MODELS[0].id,
-        configOptions: [],
-        supportsImagePrompt: true,
-        compliance: GROK_BUILD_ACP_COMPLIANCE,
-      }
-    }
-
-    let connState: Awaited<
-      ReturnType<AcpProcessRuntime<GrokBuildBinarySource>['ensureConnected']>
-    >
     try {
-      connState = await this.runtime.ensureConnected()
+      return await this.runtime.withConnection(async (state) => {
+        const { connection, init, binary } = state
+        const initState = extractGrokBuildModelState(init)
+
+        const authResult = await this.ensureAuthenticated(connection, init)
+        if (!authResult.authenticated) {
+          this.cachedModels = initState.models
+          this.cachedCurrentModelId = initState.currentModelId
+          this.cachedConfigOptions = []
+          return this.buildStatus(
+            init,
+            binary,
+            false,
+            'none',
+            initState.models,
+            initState.currentModelId,
+            initState.grokShell,
+            initState.agentVersion,
+            authResult.error ??
+              'Grok CLI was found, but no active sign-in was detected. Run `grok login` in your terminal (or set `XAI_API_KEY` in `.env.local`), then click Refresh.',
+          )
+        }
+
+        try {
+          const { discovery } = await this.runtime.probeSessionOn(state, 15_000)
+          const merged = extractGrokBuildModelState(init, discovery)
+          this.cachedModels = merged.models
+          this.cachedCurrentModelId = merged.currentModelId
+          this.cachedModelConfigId = discovery.modelConfigId
+          this.cachedConfigOptions = discovery.configOptions
+          return this.buildStatus(
+            init,
+            binary,
+            true,
+            authResult.authSource,
+            merged.models,
+            merged.currentModelId,
+            merged.grokShell,
+            merged.agentVersion,
+          )
+        } catch (error) {
+          if (isAcpAuthRequiredError(error)) {
+            this.authByConn.delete(connection)
+            this.cachedConfigOptions = []
+            return this.buildStatus(
+              init,
+              binary,
+              false,
+              'none',
+              initState.models,
+              initState.currentModelId,
+              initState.grokShell,
+              initState.agentVersion,
+              'Grok Build CLI requires sign-in. Run `grok login` in your terminal and click Refresh.',
+            )
+          }
+          // If initialize already succeeded and authenticated, still surface models from modelState.
+          this.cachedModels = initState.models
+          this.cachedCurrentModelId = initState.currentModelId
+          return this.buildStatus(
+            init,
+            binary,
+            true,
+            authResult.authSource,
+            initState.models,
+            initState.currentModelId,
+            initState.grokShell,
+            initState.agentVersion,
+            error instanceof Error ? error.message : String(error),
+          )
+        }
+      })
     } catch (error) {
+      if (
+        error instanceof GrokBuildAcpError &&
+        error.code === 'BINARY_MISSING'
+      ) {
+        return {
+          ok: true,
+          binaryAvailable: false,
+          binarySource: 'none',
+          authenticated: false,
+          activeAuthMethod: null,
+          authSource: 'none',
+          authMethods: [],
+          tier: null,
+          models: DEFAULT_GROK_BUILD_MODELS,
+          currentModelId: DEFAULT_GROK_BUILD_MODELS[0].id,
+          configOptions: [],
+          supportsImagePrompt: true,
+          compliance: GROK_BUILD_ACP_COMPLIANCE,
+        }
+      }
+      const binary = await this.resolveBinaryFn().catch(() => null)
       return {
         ok: true,
-        binaryAvailable: true,
-        binarySource: binary.source,
-        binaryPath: binary.displayPath,
+        binaryAvailable: Boolean(binary),
+        binarySource: binary?.source ?? 'none',
+        binaryPath: binary?.displayPath,
         authenticated: false,
         activeAuthMethod: null,
         authSource: 'none',
@@ -590,109 +670,39 @@ class GrokBuildAcpManager {
             : 'Grok Build ACP runtime unavailable.',
       }
     }
-
-    const { connection, init } = connState
-    const initState = extractGrokBuildModelState(init)
-
-    const authResult = await this.ensureAuthenticated(connection, init)
-    if (!authResult.authenticated) {
-      this.cachedModels = initState.models
-      this.cachedCurrentModelId = initState.currentModelId
-      this.cachedConfigOptions = []
-      return this.buildStatus(
-        init,
-        binary,
-        false,
-        'none',
-        initState.models,
-        initState.currentModelId,
-        initState.grokShell,
-        initState.agentVersion,
-        authResult.error ??
-          'Grok CLI was found, but no active sign-in was detected. Run `grok login` in your terminal (or set `XAI_API_KEY` in `.env.local`), then click Refresh.',
-      )
-    }
-
-    try {
-      const { discovery } = await this.runtime.probeSession(15_000)
-      const merged = extractGrokBuildModelState(init, discovery)
-      this.cachedModels = merged.models
-      this.cachedCurrentModelId = merged.currentModelId
-      this.cachedModelConfigId = discovery.modelConfigId
-      this.cachedConfigOptions = discovery.configOptions
-      return this.buildStatus(
-        init,
-        binary,
-        true,
-        authResult.authSource,
-        merged.models,
-        merged.currentModelId,
-        merged.grokShell,
-        merged.agentVersion,
-      )
-    } catch (error) {
-      if (isAcpAuthRequiredError(error)) {
-        this.authenticatedConn = null
-        this.activeAuthMethod = null
-        this.cachedConfigOptions = []
-        return this.buildStatus(
-          init,
-          binary,
-          false,
-          'none',
-          initState.models,
-          initState.currentModelId,
-          initState.grokShell,
-          initState.agentVersion,
-          'Grok Build CLI requires sign-in. Run `grok login` in your terminal and click Refresh.',
-        )
-      }
-      // If initialize already succeeded and authenticated, still surface models from modelState.
-      this.cachedModels = initState.models
-      this.cachedCurrentModelId = initState.currentModelId
-      return this.buildStatus(
-        init,
-        binary,
-        true,
-        authResult.authSource,
-        initState.models,
-        initState.currentModelId,
-        initState.grokShell,
-        initState.agentVersion,
-        error instanceof Error ? error.message : String(error),
-      )
-    }
   }
 
   async runPrompt(input: GrokBuildPromptInput): Promise<GrokBuildPromptOutput> {
-    const { connection, init } = await this.runtime.ensureConnected()
-    const authResult = await this.ensureAuthenticated(connection, init)
-    if (!authResult.authenticated) {
-      throw new GrokBuildAcpError(
-        'AUTH_REQUIRED',
-        authResult.error ??
-          'Grok Build CLI is not signed in. Run `grok login` in your terminal (or set `XAI_API_KEY` in `.env.local`), then click Refresh in Models & Providers.',
-        401,
-      )
-    }
-
-    const initState = extractGrokBuildModelState(init)
-    if (this.cachedModels.length === 0 && initState.models.length > 0) {
-      this.cachedModels = initState.models
-      this.cachedCurrentModelId = initState.currentModelId
-    }
+    let sessionInit: InitializeResponse | null = null
 
     return await this.runtime.runPrompt(input, {
       defaultModelId:
-        this.cachedCurrentModelId ??
-        initState.currentModelId ??
-        DEFAULT_GROK_BUILD_MODELS[0].id,
+        this.cachedCurrentModelId ?? DEFAULT_GROK_BUILD_MODELS[0].id,
       cachedModelConfigId: this.cachedModelConfigId,
+      beforeSession: async ({ connection, init }) => {
+        sessionInit = init
+        const authResult = await this.ensureAuthenticated(connection, init)
+        if (!authResult.authenticated) {
+          throw new GrokBuildAcpError(
+            'AUTH_REQUIRED',
+            authResult.error ??
+              'Grok Build CLI is not signed in. Run `grok login` in your terminal (or set `XAI_API_KEY` in `.env.local`), then click Refresh in Models & Providers.',
+            401,
+          )
+        }
+        const initState = extractGrokBuildModelState(init)
+        if (this.cachedModels.length === 0 && initState.models.length > 0) {
+          this.cachedModels = initState.models
+          this.cachedCurrentModelId = initState.currentModelId
+        }
+      },
       onDiscovery: (discovered) => {
-        const merged = extractGrokBuildModelState(init, discovered)
-        if (merged.models.length > 0) {
-          this.cachedModels = merged.models
-          this.cachedCurrentModelId = merged.currentModelId
+        if (sessionInit) {
+          const merged = extractGrokBuildModelState(sessionInit, discovered)
+          if (merged.models.length > 0) {
+            this.cachedModels = merged.models
+            this.cachedCurrentModelId = merged.currentModelId
+          }
         }
         this.cachedModelConfigId = discovered.modelConfigId
         this.cachedConfigOptions = discovered.configOptions
