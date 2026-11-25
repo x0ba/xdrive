@@ -1,6 +1,30 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { CSSProperties } from 'react'
+import { useCanGoBack, useRouter } from '@tanstack/react-router'
 import { Search, X } from 'lucide-react'
+import { WorkspaceLink } from '#/components/routing/WorkspaceLink'
+import {
+  TrashedDocumentView,
+  WorkspaceNotFoundView,
+} from '#/components/workspace/WorkspaceRouteFallbacks'
+import {
+  appendQueryParams,
+  buildPublicDocShareUrl,
+  chatThreadHref,
+  docCanonicalSlug,
+  docHref,
+  folderCanonicalSlug,
+  folderHref,
+  folderIdHref,
+  modalToNewAppMode,
+  navHref,
+  newAppModeToModal,
+  parseSelectedNodeIds,
+  serializeSelectedNodeIds,
+  settingsProviderHref,
+  useWorkspaceRoute,
+} from '#/lib/routing'
+import type { AiSidebarTab, CombinedWorkspaceSearch } from '#/lib/routing'
 import {
   BrowserTabStrip,
   DocumentBreadcrumbHeader,
@@ -709,6 +733,22 @@ export function XDriveWorkspace({
   initialSelectedIds,
   syncWithServer = false,
 }: XDriveWorkspaceProps) {
+  const workspaceRoute = useWorkspaceRoute()
+  const router = useRouter()
+  const routerCanGoBack = useCanGoBack()
+  const isRouted = Boolean(workspaceRoute?.routed)
+  const routeMatch = workspaceRoute?.match
+  const routeSearch: CombinedWorkspaceSearch = workspaceRoute?.search ?? {}
+  const [routerCanGoForward, setRouterCanGoForward] = useState(false)
+  const maxHistoryIndexRef = useRef<number>(
+    router.history.location.state.__TSR_index,
+  )
+  const [chatsLoaded, setChatsLoaded] = useState(!syncWithServer)
+  const [localAiSidebarTab, setLocalAiSidebarTab] =
+    useState<AiSidebarTab>('chat')
+  const [localSettingsProviderId, setLocalSettingsProviderId] =
+    useState<AIProviderId>('antigravity')
+
   const initialTrashedSet = useMemo(
     () => new Set(initialTrashedDocIds ?? []),
     [initialTrashedDocIds],
@@ -718,11 +758,12 @@ export function XDriveWorkspace({
     [initialDocs],
   )
   const [theme, setTheme] = useState(initialTheme)
-  const [nav, setNav] = useState<PrimaryNavId>(initialNav)
-  const [activeTabId, setActiveTabId] = useState<'home' | string>(() =>
-    initialActiveTabId !== 'home' && initialTrashedSet.has(initialActiveTabId)
-      ? 'home'
-      : initialActiveTabId,
+  const [localNav, setLocalNav] = useState<PrimaryNavId>(initialNav)
+  const [localActiveTabId, setLocalActiveTabId] = useState<'home' | string>(
+    () =>
+      initialActiveTabId !== 'home' && initialTrashedSet.has(initialActiveTabId)
+        ? 'home'
+        : initialActiveTabId,
   )
   const [openTabIds, setOpenTabIds] = useState<string[]>(() =>
     resolveOpenIds(
@@ -756,15 +797,16 @@ export function XDriveWorkspace({
   const [folders, setFolders] = useState<DriveFolder[]>(
     () => initialDrive.folders,
   )
-  const [currentFolderId, setCurrentFolderId] = useState<string | null>(null)
+  const [localCurrentFolderId, setLocalCurrentFolderId] = useState<
+    string | null
+  >(null)
   const [folderModal, setFolderModal] = useState<FolderModalState | null>(null)
   const [moveDocId, setMoveDocId] = useState<string | null>(null)
   const [permanentDeleteTarget, setPermanentDeleteTarget] =
     useState<PermanentDeleteTarget | null>(null)
   const [trashUndo, setTrashUndo] = useState<TrashUndoBanner | null>(null)
-  const [newAppModalMode, setNewAppModalMode] = useState<NewAppMode | null>(
-    null,
-  )
+  const [localNewAppModalMode, setLocalNewAppModalMode] =
+    useState<NewAppMode | null>(null)
   const [docs, setDocs] = useState<MarbleDocumentFile[]>(
     () => initialDrive.docs,
   )
@@ -775,8 +817,9 @@ export function XDriveWorkspace({
     cursor: 0,
     places: [{ tabId: initialActiveTabId, nav: initialNav }],
   })
-  const [aiSidebarOpen, setAiSidebarOpen] = useState(initialAiSidebarOpen)
-  const [simulatedRole, setSimulatedRole] =
+  const [localAiSidebarOpen, setLocalAiSidebarOpen] =
+    useState(initialAiSidebarOpen)
+  const [localSimulatedRole, setLocalSimulatedRole] =
     useState<SimulatedRole>(initialSimulatedRole)
   const [modes, setModes] = useState<Record<string, CanvasInteractionMode>>(
     () => {
@@ -815,15 +858,15 @@ export function XDriveWorkspace({
     threadId: string
     label: string
   } | null>(null)
-  const [sortBy, setSortBy] = useState<SortOption>('updated')
-  const [viewMode, setViewMode] = useState<DriveViewMode>('preview')
+  const [localSortBy, setLocalSortBy] = useState<SortOption>('updated')
+  const [localViewMode, setLocalViewMode] = useState<DriveViewMode>('preview')
   const [effectiveTrashRetentionDays, setEffectiveTrashRetentionDays] =
     useState(trashRetentionDays)
   const [favoriteModelIds, setFavoriteModelIds] = useState<
     string[] | undefined
   >(undefined)
-  const [searchQuery, setSearchQuery] = useState('')
-  const [shareId, setShareId] = useState<string | null>(null)
+  const [localSearchQuery, setLocalSearchQuery] = useState('')
+  const [localShareId, setLocalShareId] = useState<string | null>(null)
   const [namer, setNamer] = useState<NamerState | null>(null)
   const [paletteOpen, setPaletteOpen] = useState(false)
   const [paletteQuery, setPaletteQuery] = useState('')
@@ -836,16 +879,68 @@ export function XDriveWorkspace({
   const [chatThreads, setChatThreads] = useState<DriveChatThread[]>(() => [
     createBlankChatThread('antigravity/default', 'high', 'review'),
   ])
-  const [activeChatThreadId, setActiveChatThreadId] = useState<string>(
-    () => chatThreads[0]?.id ?? '',
-  )
+  const [localActiveChatThreadId, setLocalActiveChatThreadId] =
+    useState<string>(() => chatThreads[0]?.id ?? '')
   const [chatStreamingThreadId, setChatStreamingThreadId] = useState<
     string | null
   >(null)
   const [driveLoading, setDriveLoading] = useState(syncWithServer)
 
-  const activeTabRef = useRef(activeTabId)
-  activeTabRef.current = activeTabId
+  const nav: PrimaryNavId = useMemo(() => {
+    if (!isRouted || !routeMatch) return localNav
+    switch (routeMatch.kind) {
+      case 'drive':
+      case 'folder':
+        return 'drive'
+      case 'starred':
+        return 'starred'
+      case 'shared':
+        return 'shared'
+      case 'trash':
+        return 'trash'
+      case 'templates':
+        return 'templates'
+      case 'chat':
+        return 'chat'
+      case 'settings':
+        return 'subscriptions'
+      case 'doc':
+      case 'not-found':
+        return localNav
+    }
+  }, [isRouted, routeMatch, localNav])
+
+  const currentFolderId: string | null =
+    isRouted && routeMatch
+      ? routeMatch.kind === 'folder'
+        ? routeMatch.folderId
+        : routeMatch.kind === 'drive'
+          ? null
+          : localCurrentFolderId
+      : localCurrentFolderId
+
+  const aiSidebarOpen = isRouted ? Boolean(routeSearch.ai) : localAiSidebarOpen
+  const aiSidebarTab: AiSidebarTab = isRouted
+    ? (routeSearch.ai ?? 'chat')
+    : localAiSidebarTab
+  const newAppModalMode: NewAppMode | null = isRouted
+    ? modalToNewAppMode(routeSearch.modal)
+    : localNewAppModalMode
+  const sortBy: SortOption = isRouted
+    ? (routeSearch.sort ?? localSortBy)
+    : localSortBy
+  const viewMode: DriveViewMode = isRouted
+    ? (routeSearch.view ?? localViewMode)
+    : localViewMode
+  const searchQuery: string = isRouted
+    ? (routeSearch.q ?? '')
+    : localSearchQuery
+  const activeSettingsProviderId: AIProviderId =
+    isRouted && routeMatch?.kind === 'settings'
+      ? routeMatch.providerId
+      : localSettingsProviderId
+
+  const activeTabRef = useRef<'home' | string>(localActiveTabId)
   const libraryRef = useRef<MarbleDocumentFile[]>([])
   const allDocsRef = useRef<MarbleDocumentFile[]>([])
   const foldersRef = useRef<DriveFolder[]>([])
@@ -854,8 +949,7 @@ export function XDriveWorkspace({
   const chatUndoMapRef = useRef(new Map<string, () => void>())
   const chatThreadsRef = useRef<DriveChatThread[]>(chatThreads)
   chatThreadsRef.current = chatThreads
-  const activeChatThreadIdRef = useRef<string>(activeChatThreadId)
-  activeChatThreadIdRef.current = activeChatThreadId
+  const activeChatThreadIdRef = useRef<string>(localActiveChatThreadId)
   const docThreadsRef = useRef<Partial<Record<string, AIMessage[]>>>(threads)
   docThreadsRef.current = threads
   const chatSyncQueueRef = useRef<Promise<unknown>>(Promise.resolve())
@@ -1005,7 +1099,11 @@ export function XDriveWorkspace({
         }
       }
 
-      if (cancelled || !serverThreads) return
+      if (cancelled) return
+      if (!serverThreads) {
+        setChatsLoaded(true)
+        return
+      }
 
       if (serverThreads.length > 0) {
         for (const item of serverThreads) {
@@ -1016,7 +1114,14 @@ export function XDriveWorkspace({
         const unsyncedLocal = current.filter(
           (item) => !serverIds.has(item.id) && isMeaningfulChatThread(item),
         )
-        const merged = [...unsyncedLocal, ...serverThreads]
+        const blankLocal = current.filter(
+          (item) => !serverIds.has(item.id) && !isMeaningfulChatThread(item),
+        )
+        const merged = [
+          ...(blankLocal.length > 0 ? [blankLocal[0]] : []),
+          ...unsyncedLocal,
+          ...serverThreads,
+        ]
         chatThreadsRef.current = merged
         setChatThreads(merged)
 
@@ -1024,10 +1129,12 @@ export function XDriveWorkspace({
           (item) => item.id === activeChatThreadIdRef.current,
         )
         if (!currentActive || !isMeaningfulChatThread(currentActive)) {
-          activeChatThreadIdRef.current = merged[0].id
-          setActiveChatThreadId(merged[0].id)
+          const fallbackId = serverThreads[0]?.id ?? merged[0].id
+          activeChatThreadIdRef.current = fallbackId
+          setLocalActiveChatThreadId(fallbackId)
         }
       }
+      setChatsLoaded(true)
     }
 
     async function hydrateDocChatsFromServer() {
@@ -1098,10 +1205,10 @@ export function XDriveWorkspace({
           setRoles(data.settings.roleAssignments)
         }
         if (data.settings.viewMode) {
-          setViewMode(data.settings.viewMode)
+          setLocalViewMode(data.settings.viewMode)
         }
         if (data.settings.sortBy) {
-          setSortBy(data.settings.sortBy)
+          setLocalSortBy(data.settings.sortBy)
         }
         if (Array.isArray(data.settings.favoriteModelIds)) {
           setFavoriteModelIds(data.settings.favoriteModelIds)
@@ -1151,11 +1258,117 @@ export function XDriveWorkspace({
 
   const findDoc = (id: string | null | undefined) =>
     library.find((doc) => doc.id === id) ?? null
-  const activeDoc = activeTabId === 'home' ? null : findDoc(activeTabId)
+  const findDocByIdOrSlug = (key: string | null | undefined) => {
+    if (!key) return null
+    return (
+      library.find((doc) => doc.id === key) ??
+      library.find((doc) => doc.slug === key) ??
+      null
+    )
+  }
+  const findTrashedDocByIdOrSlug = (key: string | null | undefined) => {
+    if (!key) return null
+    return (
+      trashedDocs.find((doc) => doc.id === key) ??
+      trashedDocs.find((doc) => doc.slug === key) ??
+      null
+    )
+  }
+
+  const routedDoc =
+    isRouted && routeMatch?.kind === 'doc'
+      ? findDocByIdOrSlug(routeMatch.docId)
+      : null
+  const trashedRouteDoc =
+    isRouted && routeMatch?.kind === 'doc' && !routedDoc
+      ? findTrashedDocByIdOrSlug(routeMatch.docId)
+      : null
+  const missingDocId =
+    isRouted &&
+    routeMatch?.kind === 'doc' &&
+    !routedDoc &&
+    !trashedRouteDoc &&
+    !driveLoading
+      ? routeMatch.docId
+      : null
+
+  const routedFolder =
+    isRouted && routeMatch?.kind === 'folder'
+      ? (folders.find((folder) => folder.id === routeMatch.folderId) ?? null)
+      : null
+  const missingFolderId =
+    isRouted && routeMatch?.kind === 'folder' && !routedFolder && !driveLoading
+      ? routeMatch.folderId
+      : null
+
+  const activeDoc = isRouted
+    ? routedDoc
+    : localActiveTabId === 'home'
+      ? null
+      : findDoc(localActiveTabId)
+  const activeTabId: 'home' | string = activeDoc ? activeDoc.id : 'home'
+  activeTabRef.current = activeTabId
+
+  const blankChatThread = useMemo(
+    () => chatThreads.find((t) => !isMeaningfulChatThread(t)) ?? null,
+    [chatThreads],
+  )
+  const matchedChatThread =
+    isRouted && routeMatch?.kind === 'chat' && routeMatch.threadId
+      ? (chatThreads.find((t) => t.id === routeMatch.threadId) ?? null)
+      : null
+  const missingChatThreadId =
+    isRouted &&
+    routeMatch?.kind === 'chat' &&
+    Boolean(routeMatch.threadId) &&
+    !matchedChatThread &&
+    chatsLoaded
+      ? routeMatch.threadId
+      : null
+  const activeChatThreadId: string = isRouted
+    ? routeMatch?.kind === 'chat'
+      ? routeMatch.threadId
+        ? (matchedChatThread?.id ?? routeMatch.threadId)
+        : (blankChatThread?.id ?? localActiveChatThreadId)
+      : localActiveChatThreadId
+    : localActiveChatThreadId
+  activeChatThreadIdRef.current = activeChatThreadId
+
+  const shareId: string | null = isRouted
+    ? routeSearch.modal === 'share'
+      ? (routeSearch.shareDoc ?? activeDoc?.id ?? null)
+      : null
+    : localShareId
+
+  const simulatedRole: SimulatedRole =
+    isRouted && routeMatch?.kind === 'doc'
+      ? (routeSearch.role ?? 'owner')
+      : localSimulatedRole
+
   const mode: CanvasInteractionMode = activeDoc
-    ? (modes[activeDoc.id] ?? 'direct')
+    ? isRouted
+      ? (routeSearch.mode ?? 'direct')
+      : (modes[activeDoc.id] ?? 'direct')
     : 'direct'
-  const selected = activeDoc ? (selection[activeDoc.id] ?? []) : []
+
+  const urlNodeIds = useMemo(
+    () => (isRouted ? parseSelectedNodeIds(routeSearch.node) : []),
+    [isRouted, routeSearch.node],
+  )
+  const selected = useMemo(() => {
+    if (!activeDoc) return []
+    const localSelected = selection[activeDoc.id] ?? []
+    if (!isRouted) return localSelected
+    if (urlNodeIds.length === 0) return []
+    const localIds = localSelected.map((el) => el.id)
+    if (
+      localIds.length === urlNodeIds.length &&
+      localIds.every((id, idx) => id === urlNodeIds[idx])
+    ) {
+      return localSelected
+    }
+    return elementsFromSource(activeDoc.source, urlNodeIds)
+  }, [activeDoc, selection, isRouted, urlNodeIds])
   const selectedIds = selected.map((element) => element.id)
   const docSketches = activeDoc ? (sketches[activeDoc.id] ?? []) : []
   const docStrokes = activeDoc ? (strokes[activeDoc.id] ?? []) : []
@@ -1164,6 +1377,252 @@ export function XDriveWorkspace({
   const thread = activeDoc ? (threads[activeDoc.id] ?? []) : (driveThread ?? [])
   const previewOps =
     activeDoc && livePreview?.docId === activeDoc.id ? livePreview.ops : null
+
+  const cleanRouteSearch = (
+    raw: Record<string, unknown>,
+  ): Record<string, string> => {
+    const cleaned: Record<string, string> = {}
+    for (const [key, value] of Object.entries(raw)) {
+      if (typeof value === 'string' && value.trim().length > 0) {
+        cleaned[key] = value
+      }
+    }
+    return cleaned
+  }
+
+  const latestLocationRef = useRef<{
+    pathname: string
+    search: CombinedWorkspaceSearch
+  }>({
+    pathname: workspaceRoute?.pathname ?? '/drive',
+    search: routeSearch,
+  })
+  latestLocationRef.current = {
+    pathname: workspaceRoute?.pathname ?? '/drive',
+    search: routeSearch,
+  }
+
+  useEffect(() => {
+    if (!isRouted) return
+    const initialIndex = router.history.location.state.__TSR_index
+    if (initialIndex > maxHistoryIndexRef.current) {
+      maxHistoryIndexRef.current = initialIndex
+    }
+    setRouterCanGoForward(maxHistoryIndexRef.current > initialIndex)
+
+    return router.history.subscribe(({ location, action }) => {
+      const idx = location.state.__TSR_index
+      if (action.type === 'PUSH') {
+        maxHistoryIndexRef.current = idx
+      } else if (idx > maxHistoryIndexRef.current) {
+        maxHistoryIndexRef.current = idx
+      }
+      setRouterCanGoForward(maxHistoryIndexRef.current > idx)
+    })
+  }, [isRouted, router])
+
+  function updateRouteSearch(
+    updater: (prev: CombinedWorkspaceSearch) => CombinedWorkspaceSearch,
+    options?: { replace?: boolean },
+  ) {
+    if (!isRouted) return
+    const current = latestLocationRef.current
+    const prevCleaned = cleanRouteSearch(
+      current.search as Record<string, unknown>,
+    )
+    const nextCleaned = cleanRouteSearch(
+      updater(current.search) as Record<string, unknown>,
+    )
+    const prevHref = appendQueryParams(current.pathname, prevCleaned)
+    const nextHref = appendQueryParams(current.pathname, nextCleaned)
+    if (nextHref === prevHref) return
+    latestLocationRef.current = {
+      pathname: current.pathname,
+      search: nextCleaned,
+    }
+    void router.navigate({
+      href: nextHref,
+      replace: options?.replace ?? false,
+    })
+  }
+
+  function buildCurrentHrefWithSearch(
+    patch: Partial<Record<keyof CombinedWorkspaceSearch, string | undefined>>,
+  ): string {
+    const pathname = workspaceRoute?.pathname ?? '/drive'
+    const merged: Record<string, string | undefined> = {
+      ...(routeSearch as Record<string, string | undefined>),
+      ...patch,
+    }
+    return appendQueryParams(pathname, merged)
+  }
+
+  function setAiSidebarOpen(next: boolean | ((prev: boolean) => boolean)) {
+    const resolved = typeof next === 'function' ? next(aiSidebarOpen) : next
+    if (!isRouted) {
+      setLocalAiSidebarOpen(resolved)
+      return
+    }
+    updateRouteSearch((prev) => ({
+      ...prev,
+      ai: resolved ? (prev.ai ?? 'chat') : undefined,
+    }))
+  }
+
+  function setAiSidebarTab(next: AiSidebarTab) {
+    if (!isRouted) {
+      setLocalAiSidebarTab(next)
+      return
+    }
+    updateRouteSearch((prev) => ({ ...prev, ai: next }))
+  }
+
+  function setNewAppModalMode(next: NewAppMode | null) {
+    if (!isRouted) {
+      setLocalNewAppModalMode(next)
+      return
+    }
+    updateRouteSearch((prev) => ({
+      ...prev,
+      modal: next ? newAppModeToModal(next) : undefined,
+      shareDoc: next ? undefined : prev.shareDoc,
+    }))
+  }
+
+  function setShareId(
+    next: string | null | ((prev: string | null) => string | null),
+  ) {
+    const resolved = typeof next === 'function' ? next(shareId) : next
+    if (!isRouted) {
+      setLocalShareId(resolved)
+      return
+    }
+    updateRouteSearch((prev) => ({
+      ...prev,
+      modal: resolved
+        ? 'share'
+        : prev.modal === 'share'
+          ? undefined
+          : prev.modal,
+      shareDoc:
+        resolved && (!activeDoc || resolved !== activeDoc.id)
+          ? resolved
+          : undefined,
+    }))
+  }
+
+  function setSimulatedRole(next: SimulatedRole) {
+    if (!isRouted) {
+      setLocalSimulatedRole(next)
+      return
+    }
+    setLocalSimulatedRole(next)
+    if (routeMatch?.kind === 'doc') {
+      updateRouteSearch(
+        (prev) => ({
+          ...prev,
+          role: next === 'owner' ? undefined : next,
+        }),
+        { replace: true },
+      )
+    }
+  }
+
+  function setSearchQuery(next: string) {
+    setLocalSearchQuery(next)
+    if (!isRouted) return
+    updateRouteSearch(
+      (prev) => ({
+        ...prev,
+        q: next.trim() ? next : undefined,
+      }),
+      { replace: true },
+    )
+  }
+
+  // Canonicalize folder & document slugs, track open tabs, and keep document.title fresh
+  useEffect(() => {
+    if (!isRouted || !routeMatch) return
+    if (routeMatch.kind === 'folder' && routedFolder) {
+      setLocalCurrentFolderId(routedFolder.id)
+      const canonical = folderCanonicalSlug(routedFolder)
+      if (routeMatch.slug !== canonical) {
+        void router.navigate({
+          href: appendQueryParams(
+            folderHref(routedFolder),
+            cleanRouteSearch(routeSearch as Record<string, unknown>),
+          ),
+          replace: true,
+        })
+      }
+      if (typeof document !== 'undefined') {
+        document.title = `${routedFolder.name} · My Drive · xDrive`
+      }
+      return
+    }
+    if (routeMatch.kind === 'drive') {
+      setLocalCurrentFolderId(null)
+      if (typeof document !== 'undefined') {
+        document.title = 'My Drive · xDrive'
+      }
+      return
+    }
+    if (routeMatch.kind === 'doc' && routedDoc) {
+      setOpenTabIds((prev) =>
+        prev.includes(routedDoc.id) ? prev : [...prev, routedDoc.id],
+      )
+      const canonical = docCanonicalSlug(routedDoc)
+      if (routeMatch.docId !== routedDoc.id || routeMatch.slug !== canonical) {
+        void router.navigate({
+          href: appendQueryParams(
+            docHref(routedDoc),
+            cleanRouteSearch(routeSearch as Record<string, unknown>),
+          ),
+          replace: true,
+        })
+      }
+      if (typeof document !== 'undefined') {
+        document.title = `${routedDoc.title} · xDrive`
+      }
+      return
+    }
+    if (routeMatch.kind === 'chat') {
+      if (routeMatch.threadId) {
+        setLocalActiveChatThreadId(routeMatch.threadId)
+        if (matchedChatThread && typeof document !== 'undefined') {
+          document.title = `${matchedChatThread.title} · Drive Chat · xDrive`
+        }
+      } else {
+        // Ensure a blank draft thread exists for `/chat`
+        if (!blankChatThread) {
+          const blank = createBlankChatThread(
+            modelId,
+            chatReasoningEffort,
+            chatMode,
+          )
+          updateChatThreads((prev) => [blank, ...prev])
+          setLocalActiveChatThreadId(blank.id)
+        } else {
+          setLocalActiveChatThreadId(blankChatThread.id)
+        }
+        if (typeof document !== 'undefined') {
+          document.title = 'Drive Chat · xDrive'
+        }
+      }
+    }
+  }, [
+    isRouted,
+    routeMatch,
+    routedFolder,
+    routedDoc,
+    matchedChatThread,
+    blankChatThread,
+    router,
+    routeSearch,
+    modelId,
+    chatReasoningEffort,
+    chatMode,
+  ])
 
   const previewSource = useMemo(() => {
     if (!activeDoc || !previewOps?.length) return null
@@ -1268,6 +1727,7 @@ export function XDriveWorkspace({
     .filter((doc): doc is MarbleDocumentFile => Boolean(doc))
     .map((doc) => ({
       id: doc.id,
+      slug: doc.slug,
       title: doc.title,
       fileName: doc.fileName,
       category: doc.category,
@@ -1279,6 +1739,7 @@ export function XDriveWorkspace({
     .filter((doc) => doc.pinned)
     .map((doc) => ({
       id: doc.id,
+      slug: doc.slug,
       title: doc.title,
       fileName: doc.fileName,
       category: doc.category,
@@ -1487,9 +1948,33 @@ export function XDriveWorkspace({
     )
   }
 
-  function visit(tabId: 'home' | string, nextNav: PrimaryNavId) {
-    setActiveTabId(tabId)
-    setNav(nextNav)
+  function navigateWithGlobalSearch(
+    pathname: string,
+    extraSearch?: Record<string, string | undefined>,
+    options?: { replace?: boolean },
+  ) {
+    const currentAi = latestLocationRef.current.search.ai
+    const nextSearch = cleanRouteSearch({
+      ...(currentAi ? { ai: currentAi } : {}),
+      ...extraSearch,
+    })
+    latestLocationRef.current = {
+      pathname,
+      search: nextSearch,
+    }
+    void router.navigate({
+      href: appendQueryParams(pathname, nextSearch),
+      replace: options?.replace ?? false,
+    })
+  }
+
+  function visit(
+    tabId: 'home' | string,
+    nextNav: PrimaryNavId,
+    options?: { role?: SharePermissionLevel; replace?: boolean },
+  ) {
+    setLocalActiveTabId(tabId)
+    setLocalNav(nextNav)
     setTrail((prev) => {
       const trimmed = prev.places.slice(0, prev.cursor + 1)
       const last = trimmed.at(-1)
@@ -1497,35 +1982,123 @@ export function XDriveWorkspace({
       const places = [...trimmed, { tabId, nav: nextNav }]
       return { cursor: places.length - 1, places }
     })
+    if (!isRouted) return
+    if (tabId !== 'home') {
+      const targetDoc =
+        allDocsRef.current.find((doc) => doc.id === tabId) ?? findDoc(tabId)
+      const targetPath = targetDoc
+        ? docHref(targetDoc)
+        : `/d/${encodeURIComponent(tabId)}`
+      navigateWithGlobalSearch(
+        targetPath,
+        options?.role ? { role: options.role } : undefined,
+        { replace: options?.replace },
+      )
+      return
+    }
+    if (nextNav === 'drive' && currentFolderId) {
+      navigateWithGlobalSearch(
+        folderIdHref(currentFolderId, foldersRef.current),
+        undefined,
+        { replace: options?.replace },
+      )
+      return
+    }
+    if (nextNav === 'chat') {
+      const activeThread = chatThreadsRef.current.find(
+        (t) => t.id === activeChatThreadIdRef.current,
+      )
+      const targetChatPath =
+        activeThread && isMeaningfulChatThread(activeThread)
+          ? chatThreadHref(activeThread.id)
+          : '/chat'
+      navigateWithGlobalSearch(targetChatPath, undefined, {
+        replace: options?.replace,
+      })
+      return
+    }
+    navigateWithGlobalSearch(navHref(nextNav), undefined, {
+      replace: options?.replace,
+    })
   }
 
   function go(delta: -1 | 1) {
+    if (isRouted) {
+      if (delta === -1) {
+        router.history.back()
+      } else {
+        router.history.forward()
+      }
+      return
+    }
     const cursor = trail.cursor + delta
     const place = trail.places.at(cursor)
     if (!place) return
     setTrail({ ...trail, cursor })
-    setActiveTabId(place.tabId)
-    setNav(place.nav)
+    setLocalActiveTabId(place.tabId)
+    setLocalNav(place.nav)
   }
 
-  function openDocument(id: string) {
+  function openDocument(
+    id: string,
+    options?: { role?: SharePermissionLevel; doc?: MarbleDocumentFile },
+  ) {
     setOpenTabIds((prev) => (prev.includes(id) ? prev : [...prev, id]))
-    visit(id, nav)
+    if (options?.role) {
+      setLocalSimulatedRole(options.role)
+    }
+    if (isRouted) {
+      const targetDoc =
+        options?.doc ??
+        allDocsRef.current.find((doc) => doc.id === id) ??
+        findDoc(id)
+      const targetPath = targetDoc
+        ? docHref(targetDoc)
+        : `/d/${encodeURIComponent(id)}`
+      navigateWithGlobalSearch(
+        targetPath,
+        options?.role ? { role: options.role } : undefined,
+      )
+      return
+    }
+    visit(id, nav, { role: options?.role })
   }
 
   function closeTab(id: string) {
     setOpenTabIds((prev) => prev.filter((tabId) => tabId !== id))
     if (activeTabRef.current !== id) return
     const remaining = openTabIds.filter((tabId) => tabId !== id)
-    visit(remaining[remaining.length - 1] ?? 'home', nav)
+    const fallbackId = remaining[remaining.length - 1]
+    if (fallbackId) {
+      visit(fallbackId, nav)
+    } else if (isRouted) {
+      navigateWithGlobalSearch('/drive')
+    } else {
+      visit('home', nav)
+    }
   }
 
   function setMode(id: string, next: CanvasInteractionMode) {
     setModes((prev) => ({ ...prev, [id]: next }))
+    if (isRouted && activeTabRef.current === id) {
+      updateRouteSearch((prev) => ({
+        ...prev,
+        mode: next === 'direct' ? undefined : next,
+      }))
+    }
   }
 
   function setDocSelection(id: string, elements: SelectedMarbleElement[]) {
     setSelection((prev) => ({ ...prev, [id]: elements }))
+    if (isRouted && activeTabRef.current === id) {
+      updateRouteSearch(
+        (prev) => ({
+          ...prev,
+          node: serializeSelectedNodeIds(elements.map((el) => el.id)),
+        }),
+        { replace: true },
+      )
+    }
   }
 
   function enqueueDriveMutation<T>(task: () => Promise<T>): Promise<T> {
@@ -1586,13 +2159,31 @@ export function XDriveWorkspace({
   }
 
   function handleSelectSort(nextSort: SortOption) {
-    setSortBy(nextSort)
+    setLocalSortBy(nextSort)
     persistDriveSettings({ sortBy: nextSort })
+    if (isRouted) {
+      updateRouteSearch(
+        (prev) => ({
+          ...prev,
+          sort: nextSort,
+        }),
+        { replace: true },
+      )
+    }
   }
 
   function handleChangeViewMode(nextViewMode: DriveViewMode) {
-    setViewMode(nextViewMode)
+    setLocalViewMode(nextViewMode)
     persistDriveSettings({ viewMode: nextViewMode })
+    if (isRouted) {
+      updateRouteSearch(
+        (prev) => ({
+          ...prev,
+          view: nextViewMode,
+        }),
+        { replace: true },
+      )
+    }
   }
 
   function handleFavoriteModelIdsChange(nextIds: string[]) {
@@ -1746,12 +2337,29 @@ export function XDriveWorkspace({
     persist(id, meta.slug, prior, [op], applied.source, nextDoc)
   }
 
+  function selectNodeAndOpenAi(id: string, element: SelectedMarbleElement) {
+    setSelection((prev) => ({ ...prev, [id]: [element] }))
+    if (!isRouted) {
+      setLocalAiSidebarOpen(true)
+      return
+    }
+    if (activeTabRef.current === id) {
+      updateRouteSearch((prev) => ({
+        ...prev,
+        node: serializeSelectedNodeIds([element.id]),
+        ai: prev.ai ?? 'chat',
+      }))
+    }
+  }
+
   selectRef.current = (element) => {
     const id = activeTabRef.current
     if (!id || id === 'home') return
-    setDocSelection(id, [element])
-    setAiSidebarOpen(true)
+    selectNodeAndOpenAi(id, element)
   }
+
+  const setModeRef = useRef(setMode)
+  setModeRef.current = setMode
 
   useEffect(() => {
     function onMessage(event: MessageEvent) {
@@ -1794,7 +2402,7 @@ export function XDriveWorkspace({
       const modeKey = modeFromShortcut(event.key)
       if (!modeKey) return
       event.preventDefault()
-      setModes((prev) => ({ ...prev, [id]: modeKey }))
+      setModeRef.current(id, modeKey)
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
@@ -2011,11 +2619,9 @@ export function XDriveWorkspace({
           folder: targetFolder ? targetFolder.name : 'My Drive',
           intentHistory: [committedProposal],
         }
+        allDocsRef.current = [created, ...allDocsRef.current]
         setDocs((prev) => [created, ...prev])
-        setOpenTabIds((prev) =>
-          prev.includes(created.id) ? prev : [...prev, created.id],
-        )
-        visit(created.id, 'drive')
+        openDocument(created.id, { doc: created })
         const assistant: AIMessage = {
           id: messageId('assistant'),
           role: 'assistant',
@@ -2171,9 +2777,9 @@ export function XDriveWorkspace({
       folderId: targetFolder ? targetFolder.id : null,
       folder: targetFolder ? targetFolder.name : 'My Drive',
     }
+    allDocsRef.current = [placed, ...allDocsRef.current]
     setDocs((prev) => [placed, ...prev])
-    setOpenTabIds((prev) => [...prev, placed.id])
-    visit(placed.id, 'drive')
+    openDocument(placed.id, { doc: placed })
     persist(placed.id, placed.slug, placed.source, [], placed.source, placed)
     setAgentStatus(`Created ${placed.fileName} from ${input.template.title}`)
   }
@@ -2331,15 +2937,19 @@ export function XDriveWorkspace({
       folderId: targetFolder ? targetFolder.id : null,
       folder: targetFolder ? targetFolder.name : 'My Drive',
     }
+    allDocsRef.current = [placed, ...allDocsRef.current]
     setDocs((prev) => [placed, ...prev])
-    setOpenTabIds((prev) => [...prev, placed.id])
     setNamer(null)
-    visit(placed.id, 'drive')
+    openDocument(placed.id, { doc: placed })
     persist(placed.id, placed.slug, placed.source, [], placed.source, placed)
   }
 
   function navigateToFolder(folderId: string | null) {
-    setCurrentFolderId(folderId)
+    setLocalCurrentFolderId(folderId)
+    if (isRouted) {
+      navigateWithGlobalSearch(folderIdHref(folderId, foldersRef.current))
+      return
+    }
     visit('home', 'drive')
   }
 
@@ -2423,7 +3033,14 @@ export function XDriveWorkspace({
       ),
     )
     if (currentFolderId && removed.has(currentFolderId)) {
-      setCurrentFolderId(folder.parentId)
+      setLocalCurrentFolderId(folder.parentId)
+      if (isRouted) {
+        navigateWithGlobalSearch(
+          folderIdHref(folder.parentId, nextFolders),
+          undefined,
+          { replace: true },
+        )
+      }
     }
     void syncDriveApi(
       { action: 'delete_folder', folderPath },
@@ -3355,7 +3972,15 @@ export function XDriveWorkspace({
 
   function handleSelectChatThread(threadId: string) {
     activeChatThreadIdRef.current = threadId
-    setActiveChatThreadId(threadId)
+    setLocalActiveChatThreadId(threadId)
+    if (isRouted) {
+      const target = chatThreadsRef.current.find((item) => item.id === threadId)
+      const href =
+        target && !isMeaningfulChatThread(target)
+          ? '/chat'
+          : chatThreadHref(threadId)
+      navigateWithGlobalSearch(href)
+    }
     if (!syncWithServer || chatStreamingThreadId === threadId) return
     void chatSyncQueueRef.current
       .then(() => fetchDriveChatThread(threadId))
@@ -3374,10 +3999,24 @@ export function XDriveWorkspace({
   }
 
   function handleNewChatThread() {
+    const existingBlank = chatThreadsRef.current.find(
+      (item) => !isMeaningfulChatThread(item),
+    )
+    if (existingBlank) {
+      activeChatThreadIdRef.current = existingBlank.id
+      setLocalActiveChatThreadId(existingBlank.id)
+      if (isRouted) {
+        navigateWithGlobalSearch('/chat')
+      }
+      return
+    }
     const next = createBlankChatThread(modelId, chatReasoningEffort, chatMode)
     updateChatThreads((prev) => [next, ...prev])
     activeChatThreadIdRef.current = next.id
-    setActiveChatThreadId(next.id)
+    setLocalActiveChatThreadId(next.id)
+    if (isRouted) {
+      navigateWithGlobalSearch('/chat')
+    }
   }
 
   function handleStopDriveChat() {
@@ -3662,6 +4301,15 @@ export function XDriveWorkspace({
       ),
     )
     scheduleChatThreadSave(currentThread.id)
+    if (
+      isRouted &&
+      routeMatch?.kind === 'chat' &&
+      routeMatch.threadId !== currentThread.id
+    ) {
+      navigateWithGlobalSearch(chatThreadHref(currentThread.id), undefined, {
+        replace: true,
+      })
+    }
 
     void runDriveChatTurn({
       threadId: currentThread.id,
@@ -3943,6 +4591,56 @@ export function XDriveWorkspace({
       />
     )
 
+  const currentDriveHref = currentFolderId
+    ? folderIdHref(currentFolderId, folders)
+    : '/drive'
+  const currentChatHref =
+    activeChatThreadId &&
+    chatThreads.some(
+      (t) => t.id === activeChatThreadId && isMeaningfulChatThread(t),
+    )
+      ? chatThreadHref(activeChatThreadId)
+      : '/chat'
+  const aiToggleHref = buildCurrentHrefWithSearch({
+    ai: aiSidebarOpen ? undefined : aiSidebarTab,
+  })
+  const newAgentHref = buildCurrentHrefWithSearch({
+    modal: 'new-agent',
+    shareDoc: undefined,
+  })
+  const newTemplateHref = buildCurrentHrefWithSearch({
+    modal: 'new-template',
+    shareDoc: undefined,
+  })
+  const evergreenHrefs = useMemo(() => {
+    const map: Record<string, string> = {}
+    for (const ref of evergreenRefs) {
+      const target = library.find((item) => item.slug === ref.slug)
+      map[ref.slug] = target ? docHref(target) : `/d/${ref.slug}`
+    }
+    return map
+  }, [evergreenRefs, library])
+  const docModeHrefs = useMemo(() => {
+    if (!activeDoc) return undefined
+    return {
+      direct: buildCurrentHrefWithSearch({ mode: undefined }),
+      select: buildCurrentHrefWithSearch({ mode: 'select' }),
+      sketch: buildCurrentHrefWithSearch({ mode: 'sketch' }),
+      source: buildCurrentHrefWithSearch({ mode: 'source' }),
+    }
+  }, [activeDoc, workspaceRoute?.pathname, routeSearch])
+  const aiTabHrefs = useMemo(
+    () => ({
+      chat: buildCurrentHrefWithSearch({ ai: 'chat' }),
+      ops: buildCurrentHrefWithSearch({ ai: 'ops' }),
+      history: buildCurrentHrefWithSearch({ ai: 'history' }),
+    }),
+    [workspaceRoute?.pathname, routeSearch],
+  )
+  const activeDocShareHref = activeDoc
+    ? buildCurrentHrefWithSearch({ modal: 'share', shareDoc: undefined })
+    : undefined
+
   return (
     <div
       data-component="xdrive-workspace"
@@ -3956,12 +4654,18 @@ export function XDriveWorkspace({
         openTabs={openTabs}
         activeTabId={activeDoc ? activeDoc.id : 'home'}
         activeNav={nav}
+        driveHref={currentDriveHref}
+        chatHref={currentChatHref}
+        newTabHref="/drive"
+        aiToggleHref={aiToggleHref}
         onSelectTab={(tabId) => visit(tabId, tabId === 'home' ? 'drive' : nav)}
         onSelectChat={() => visit('home', 'chat')}
         onCloseTab={closeTab}
-        onNewTab={() => visit('home', 'drive')}
-        canGoBack={trail.cursor > 0}
-        canGoForward={trail.cursor < trail.places.length - 1}
+        onNewTab={() => navigateToFolder(null)}
+        canGoBack={isRouted ? routerCanGoBack : trail.cursor > 0}
+        canGoForward={
+          isRouted ? routerCanGoForward : trail.cursor < trail.places.length - 1
+        }
         onBack={() => go(-1)}
         onForward={() => go(1)}
         simulatedRole={simulatedRole}
@@ -3977,11 +4681,14 @@ export function XDriveWorkspace({
       <div className="flex min-h-0 flex-1">
         <SidebarRail
           activeNav={nav}
+          chatHref={currentChatHref}
           onSelectNav={(next) => visit('home', next)}
           onOpenCommandPalette={() => setPaletteOpen(true)}
           topAction={
             <NewAppButton
               templates={templates}
+              aiAgentHref={newAgentHref}
+              templatesHref={newTemplateHref}
               onOpenAIAgent={() => setNewAppModalMode('agent')}
               onOpenTemplates={() => setNewAppModalMode('templates')}
               onQuickCreateTemplate={(tpl) =>
@@ -4028,7 +4735,56 @@ export function XDriveWorkspace({
           onDeleteApp={(appId) => moveDocumentToTrash(appId)}
         />
         <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-          {activeDoc ? (
+          {isRouted && routeMatch?.kind === 'not-found' ? (
+            <WorkspaceNotFoundView
+              kind={routeMatch.section === 'settings' ? 'settings' : 'route'}
+              targetId={routeMatch.path}
+              onGoDrive={() => navigateToFolder(null)}
+              onGoSettings={() => visit('home', 'subscriptions')}
+            />
+          ) : trashedRouteDoc ? (
+            <TrashedDocumentView
+              doc={trashedRouteDoc}
+              folderLabel={getFolderPathLabel(
+                folders,
+                trashedRouteDoc.folderId,
+                trashedRouteDoc.folder,
+              )}
+              retentionDays={effectiveTrashRetentionDays}
+              onRestoreAndOpen={() => {
+                restoreDocumentFromTrash(trashedRouteDoc.id)
+                openDocument(trashedRouteDoc.id, {
+                  doc: { ...trashedRouteDoc, trashedAt: null },
+                })
+              }}
+              onGoTrash={() => visit('home', 'trash')}
+              onGoDrive={() => navigateToFolder(null)}
+            />
+          ) : missingDocId ? (
+            <WorkspaceNotFoundView
+              kind="doc"
+              targetId={missingDocId}
+              onGoDrive={() => navigateToFolder(null)}
+              onGoTrash={() => visit('home', 'trash')}
+            />
+          ) : missingFolderId ? (
+            <WorkspaceNotFoundView
+              kind="folder"
+              targetId={missingFolderId}
+              onGoDrive={() => navigateToFolder(null)}
+            />
+          ) : missingChatThreadId ? (
+            <WorkspaceNotFoundView
+              kind="chat"
+              targetId={missingChatThreadId}
+              onGoDrive={() => navigateToFolder(null)}
+              onGoChat={handleNewChatThread}
+            />
+          ) : isRouted && routeMatch?.kind === 'doc' && !activeDoc ? (
+            <div className="flex flex-1 items-center justify-center p-6 text-[13px] text-[var(--xd-ink-muted)]">
+              Loading document…
+            </div>
+          ) : activeDoc ? (
             <div className="flex min-h-0 flex-1 flex-col">
               <DocumentBreadcrumbHeader
                 folder={getFolderPathLabel(
@@ -4036,6 +4792,7 @@ export function XDriveWorkspace({
                   activeDoc.folderId,
                   activeDoc.folder,
                 )}
+                folderHref={folderIdHref(activeDoc.folderId ?? null, folders)}
                 onClickFolder={() =>
                   navigateToFolder(activeDoc.folderId ?? null)
                 }
@@ -4043,6 +4800,7 @@ export function XDriveWorkspace({
                 fileName={activeDoc.fileName}
                 syncState={activeDoc.syncState}
                 interactionMode={mode}
+                modeHrefs={docModeHrefs}
                 onChangeInteractionMode={(next) => setMode(activeDoc.id, next)}
                 onDuplicate={() =>
                   setNamer({
@@ -4050,6 +4808,7 @@ export function XDriveWorkspace({
                     title: `${activeDoc.title} copy`,
                   })
                 }
+                shareHref={activeDocShareHref}
                 onOpenShare={() => setShareId(activeDoc.id)}
                 onMoveToTrash={
                   !activeDoc.isTemplate
@@ -4072,8 +4831,7 @@ export function XDriveWorkspace({
                       source={activeDoc.source}
                       selectedId={selectedIds[0] ?? null}
                       onSelectNode={(element) => {
-                        setDocSelection(activeDoc.id, [element])
-                        setAiSidebarOpen(true)
+                        selectNodeAndOpenAi(activeDoc.id, element)
                       }}
                       onApplySource={(nextSource, ops) => {
                         const prior = activeDoc.source
@@ -4195,7 +4953,15 @@ export function XDriveWorkspace({
                   })
                   if (activeChatThreadIdRef.current === threadId) {
                     activeChatThreadIdRef.current = next[0].id
-                    setActiveChatThreadId(next[0].id)
+                    setLocalActiveChatThreadId(next[0].id)
+                    if (isRouted) {
+                      const nextHref = isMeaningfulChatThread(next[0])
+                        ? chatThreadHref(next[0].id)
+                        : '/chat'
+                      navigateWithGlobalSearch(nextHref, undefined, {
+                        replace: true,
+                      })
+                    }
                   }
                   queueChatThreadDelete(threadId)
                 }}
@@ -4253,6 +5019,47 @@ export function XDriveWorkspace({
                 onOpenDocument={openDocument}
                 onOpenFolder={(folderId) => navigateToFolder(folderId)}
                 onOpenProviders={() => visit('home', 'subscriptions')}
+                historyOpen={isRouted ? routeSearch.history !== '0' : undefined}
+                onHistoryOpenChange={
+                  isRouted
+                    ? (open) =>
+                        updateRouteSearch(
+                          (prev) => ({
+                            ...prev,
+                            history: open ? undefined : '0',
+                          }),
+                          { replace: true },
+                        )
+                    : undefined
+                }
+                threadSearch={isRouted ? (routeSearch.q ?? '') : undefined}
+                onThreadSearchChange={
+                  isRouted
+                    ? (q) =>
+                        updateRouteSearch(
+                          (prev) => ({
+                            ...prev,
+                            q: q.trim() ? q : undefined,
+                          }),
+                          { replace: true },
+                        )
+                    : undefined
+                }
+                initialScopeFolderId={
+                  isRouted ? (routeSearch.scope ?? null) : undefined
+                }
+                onScopeFolderChange={
+                  isRouted
+                    ? (folderId) =>
+                        updateRouteSearch(
+                          (prev) => ({
+                            ...prev,
+                            scope: folderId ?? undefined,
+                          }),
+                          { replace: true },
+                        )
+                    : undefined
+                }
               />
             </div>
           ) : (
@@ -4336,20 +5143,20 @@ export function XDriveWorkspace({
                               : 'Create a file with AI, start from a template, or organize with a folder.'}
                           </p>
                           <div className="mt-4 flex flex-wrap items-center justify-center gap-2">
-                            <button
-                              type="button"
-                              onClick={() => setNewAppModalMode('agent')}
+                            <WorkspaceLink
+                              href={newAgentHref}
+                              onNavigate={() => setNewAppModalMode('agent')}
                               className="rounded bg-[var(--xd-accent)] px-3 py-1.5 text-[12px] font-medium text-white transition-colors hover:bg-[var(--xd-accent-hover)]"
                             >
                               New with AI
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => setNewAppModalMode('templates')}
+                            </WorkspaceLink>
+                            <WorkspaceLink
+                              href={newTemplateHref}
+                              onNavigate={() => setNewAppModalMode('templates')}
                               className="rounded border border-[var(--xd-border-strong)] bg-[var(--xd-canvas)] px-3 py-1.5 text-[12px] font-medium text-[var(--xd-ink)] transition-colors hover:bg-[var(--xd-surface-hover)]"
                             >
                               From template
-                            </button>
+                            </WorkspaceLink>
                             <button
                               type="button"
                               onClick={() =>
@@ -4697,13 +5504,13 @@ export function XDriveWorkspace({
                           className="flex flex-wrap items-center justify-between gap-3 bg-[var(--xd-canvas)] px-4 py-3"
                         >
                           <div className="min-w-0">
-                            <button
-                              type="button"
-                              onClick={() => openDocument(doc.id)}
-                              className="truncate text-left text-[13.5px] font-medium hover:text-[var(--xd-accent)]"
+                            <WorkspaceLink
+                              href={docHref(doc)}
+                              onNavigate={() => openDocument(doc.id)}
+                              className="block truncate text-left text-[13.5px] font-medium hover:text-[var(--xd-accent)]"
                             >
                               {doc.title}
-                            </button>
+                            </WorkspaceLink>
                             <div className="mt-0.5 flex items-center gap-2 text-[11px] text-[var(--xd-ink-muted)]">
                               <span className="xd-mono">{doc.fileName}</span>
                               <span>·</span>
@@ -4718,25 +5525,33 @@ export function XDriveWorkspace({
 
                           <div className="flex flex-wrap items-center gap-1">
                             {SIM_ROLES.map((role) => (
-                              <button
+                              <WorkspaceLink
                                 key={role}
-                                type="button"
-                                onClick={() => {
-                                  setSimulatedRole(role)
-                                  openDocument(doc.id)
+                                href={docHref(doc, {
+                                  role: role === 'owner' ? undefined : role,
+                                })}
+                                onNavigate={() => {
+                                  if (role !== 'owner') {
+                                    openDocument(doc.id, { role })
+                                  } else {
+                                    openDocument(doc.id)
+                                  }
                                 }}
                                 className="rounded border border-[var(--xd-border)] px-2 py-0.5 text-[11px] text-[var(--xd-ink-secondary)] hover:text-[var(--xd-ink)]"
                               >
                                 {ROLE_LABEL[role]}
-                              </button>
+                              </WorkspaceLink>
                             ))}
-                            <button
-                              type="button"
-                              onClick={() => setShareId(doc.id)}
+                            <WorkspaceLink
+                              href={buildCurrentHrefWithSearch({
+                                modal: 'share',
+                                shareDoc: doc.id,
+                              })}
+                              onNavigate={() => setShareId(doc.id)}
                               className="ml-1 rounded border border-[var(--xd-border)] bg-[var(--xd-elevated)] px-2.5 py-0.5 text-[11.5px] font-medium"
                             >
                               Share
-                            </button>
+                            </WorkspaceLink>
                           </div>
                         </li>
                       ))}
@@ -4749,6 +5564,15 @@ export function XDriveWorkspace({
                 <div className="mx-auto w-full max-w-4xl px-6 py-6">
                   <SubscriptionModal
                     variant="page"
+                    activeProviderId={activeSettingsProviderId}
+                    onSelectProvider={(providerId) => {
+                      setLocalSettingsProviderId(providerId)
+                      if (isRouted) {
+                        navigateWithGlobalSearch(
+                          settingsProviderHref(providerId),
+                        )
+                      }
+                    }}
                     subscriptions={subscriptions}
                     roleAssignments={roles}
                     favoriteModelIds={favoriteModelIds}
@@ -4785,6 +5609,10 @@ export function XDriveWorkspace({
           <CursorAISidebar
             key={sidebarKey}
             fileName={activeDoc?.fileName ?? 'xdrive.mrbl'}
+            activeTab={aiSidebarTab}
+            onTabChange={setAiSidebarTab}
+            tabHrefs={aiTabHrefs}
+            evergreenHrefs={evergreenHrefs}
             messages={thread}
             checkpoints={activeDoc?.checkpoints ?? []}
             proposals={
@@ -4863,6 +5691,8 @@ export function XDriveWorkspace({
       <NewAppModal
         open={newAppModalMode !== null}
         initialMode={newAppModalMode ?? 'agent'}
+        onModeChange={(nextMode) => setNewAppModalMode(nextMode)}
+        modeHrefs={{ agent: newAgentHref, templates: newTemplateHref }}
         templates={templates}
         folders={folders}
         initialFolderId={currentFolderId}
@@ -4948,16 +5778,16 @@ export function XDriveWorkspace({
           >
             Undo
           </button>
-          <button
-            type="button"
-            onClick={() => {
+          <WorkspaceLink
+            href="/trash"
+            onNavigate={() => {
               setTrashUndo(null)
               visit('home', 'trash')
             }}
             className="text-[var(--xd-ink-secondary)] transition-colors hover:text-[var(--xd-ink)]"
           >
             View trash
-          </button>
+          </WorkspaceLink>
           <button
             type="button"
             onClick={() => setTrashUndo(null)}
@@ -4976,7 +5806,10 @@ export function XDriveWorkspace({
           }}
           fileName={shareDoc.fileName}
           title={shareDoc.title}
-          config={shareDoc.share}
+          config={{
+            ...shareDoc.share,
+            publicLinkUrl: buildPublicDocShareUrl(shareDoc),
+          }}
           simulatedPermission={
             simulatedRole === 'owner' ? undefined : simulatedRole
           }
@@ -4996,7 +5829,7 @@ export function XDriveWorkspace({
           }}
           onSimulatePermission={(level) => {
             setSimulatedRole(level)
-            openDocument(shareDoc.id)
+            openDocument(shareDoc.id, { role: level })
           }}
         />
       )}

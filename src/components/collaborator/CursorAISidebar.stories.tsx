@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import type { Meta, StoryObj } from '@storybook/tanstack-react'
+import { expect, within } from 'storybook/test'
 import { CursorAISidebar } from './CursorAISidebar'
 import type { MarbleIntentRequest } from './FloatingPromptBar'
 import {
@@ -130,6 +131,11 @@ export const Default: Story = {
       </div>
     ),
   ],
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    const opsTab = canvas.getByRole('tab', { name: 'Diff' })
+    await expect(opsTab).toHaveAttribute('href', '?ai=ops')
+  },
 }
 
 /**

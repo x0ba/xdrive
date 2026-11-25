@@ -22,6 +22,8 @@ import {
   getCategoryLabel,
   formatBytes,
 } from './NavigationShell'
+import { WorkspaceLink } from '#/components/routing/WorkspaceLink'
+import { docHref } from '#/lib/routing'
 import { ModelPicker } from '#/components/model-picker'
 import type { ModelPickerInputOption } from '#/components/model-picker'
 
@@ -208,10 +210,7 @@ export function MarbleAppCard({
   const isEditorial = doc.category === 'latex' || doc.category === 'document'
 
   return (
-    <article
-      onClick={() => onOpen?.(doc)}
-      className="group flex cursor-pointer flex-col justify-between rounded-md border border-[var(--xd-border)] bg-[var(--xd-canvas)] p-4 transition-colors hover:border-[var(--xd-border-strong)]"
-    >
+    <article className="group relative flex cursor-pointer flex-col justify-between rounded-md border border-[var(--xd-border)] bg-[var(--xd-canvas)] p-4 transition-colors hover:border-[var(--xd-border-strong)]">
       <div>
         <div className="flex items-center justify-between gap-2 text-[11.5px] text-[var(--xd-ink-muted)]">
           <div className="flex min-w-0 items-center gap-1.5">
@@ -227,7 +226,7 @@ export function MarbleAppCard({
           </div>
 
           <div
-            className="flex shrink-0 items-center gap-0.5"
+            className="relative z-10 flex shrink-0 items-center gap-0.5"
             onClick={(e) => e.stopPropagation()}
           >
             {onTogglePin && (
@@ -272,7 +271,13 @@ export function MarbleAppCard({
               : 'text-[14.5px] leading-snug tracking-tight'
           }`}
         >
-          {doc.title}
+          <WorkspaceLink
+            href={docHref(doc)}
+            onNavigate={onOpen ? () => onOpen(doc) : undefined}
+            className="after:absolute after:inset-0"
+          >
+            {doc.title}
+          </WorkspaceLink>
         </h3>
 
         <p className="mt-1 line-clamp-2 text-[12.5px] leading-relaxed text-[var(--xd-ink-secondary)]">
@@ -284,7 +289,7 @@ export function MarbleAppCard({
         <span className="xd-tabular">{doc.updatedAt}</span>
 
         <div
-          className="flex items-center gap-1 opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100"
+          className="relative z-10 flex items-center gap-1 opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100"
           onClick={(e) => e.stopPropagation()}
         >
           <button
@@ -376,13 +381,17 @@ export function TemplateGalleryCard({
 
       <div className="mt-4 flex items-center justify-end gap-1.5 pt-2">
         {onPreviewTemplate && (
-          <button
-            type="button"
-            onClick={() => onPreviewTemplate(template)}
+          <WorkspaceLink
+            href={docHref({
+              id: template.id,
+              slug: template.fileName,
+              title: template.title,
+            })}
+            onNavigate={() => onPreviewTemplate(template)}
             className="inline-flex h-7 items-center rounded border border-[var(--xd-border)] px-2.5 text-[11.5px] font-medium text-[var(--xd-ink-secondary)] transition-colors hover:bg-[var(--xd-surface-hover)] hover:text-[var(--xd-ink)]"
           >
             Preview
-          </button>
+          </WorkspaceLink>
         )}
         <button
           type="button"

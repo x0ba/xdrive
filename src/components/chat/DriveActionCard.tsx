@@ -18,6 +18,8 @@ import {
   X,
 } from 'lucide-react'
 import type { DriveChatAction } from '#/lib/ai/drive-chat-types'
+import { WorkspaceLink } from '#/components/routing/WorkspaceLink'
+import { docIdHref, folderIdHref } from '#/lib/routing'
 import { cn } from '#/lib/utils'
 
 export interface DriveActionCardProps {
@@ -255,29 +257,29 @@ export function DriveActionCard({
           )}
 
           {docId && onOpenDocument && action.status !== 'discarded' && (
-            <button
-              type="button"
-              onClick={() => onOpenDocument(docId)}
+            <WorkspaceLink
+              href={docIdHref(docId)}
+              onNavigate={() => onOpenDocument(docId)}
               title="Open document in tab"
               className="inline-flex h-6 items-center gap-1 rounded-md px-2 text-[11.5px] text-[var(--xd-ink-secondary)] transition-colors hover:bg-[var(--xd-surface-hover)] hover:text-[var(--xd-ink)]"
             >
               <ExternalLink className="size-3" />
               <span>Open</span>
-            </button>
+            </WorkspaceLink>
           )}
 
           {!docId &&
             folderTarget &&
             onOpenFolder &&
             action.status === 'applied' && (
-              <button
-                type="button"
-                onClick={() => onOpenFolder(folderTarget.folderId)}
+              <WorkspaceLink
+                href={folderIdHref(folderTarget.folderId)}
+                onNavigate={() => onOpenFolder(folderTarget.folderId)}
                 className="inline-flex h-6 items-center gap-1 rounded-md px-2 text-[11.5px] text-[var(--xd-ink-secondary)] transition-colors hover:bg-[var(--xd-surface-hover)] hover:text-[var(--xd-ink)]"
               >
                 <ExternalLink className="size-3" />
                 <span>Folder</span>
-              </button>
+              </WorkspaceLink>
             )}
         </div>
       </div>

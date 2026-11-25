@@ -42,6 +42,8 @@ import {
 } from 'lucide-react'
 import { AppContextMenu } from '#/components/apps/shared'
 import type { ContextMenuItem } from '#/components/apps/shared'
+import { WorkspaceLink } from '#/components/routing/WorkspaceLink'
+import { docHref, folderHref, navHref } from '#/lib/routing'
 import type {
   DriveFolder,
   DriveFolderColor,
@@ -168,6 +170,7 @@ export function getPermissionMeta(permission: SharePermissionLevel): {
 
 export interface OpenDocumentTab {
   id: string
+  slug?: string
   title: string
   fileName: string
   category: MarbleAppCategory
@@ -179,6 +182,10 @@ export interface BrowserTabStripProps {
   openTabs: OpenDocumentTab[]
   activeTabId: 'home' | string
   activeNav?: PrimaryNavId
+  driveHref?: string
+  chatHref?: string
+  newTabHref?: string
+  aiToggleHref?: string
   onSelectTab?: (tabId: 'home' | string) => void
   onSelectChat?: () => void
   onCloseTab?: (tabId: string) => void
@@ -200,6 +207,10 @@ export function BrowserTabStrip({
   openTabs,
   activeTabId,
   activeNav = 'drive',
+  driveHref = '/drive',
+  chatHref = '/chat',
+  newTabHref = '/drive',
+  aiToggleHref,
   onSelectTab,
   onSelectChat,
   onCloseTab,
@@ -240,9 +251,9 @@ export function BrowserTabStrip({
           </button>
         </div>
 
-        <button
-          type="button"
-          onClick={() => onSelectTab?.('home')}
+        <WorkspaceLink
+          href={driveHref}
+          onNavigate={onSelectTab ? () => onSelectTab('home') : undefined}
           className={`inline-flex h-7 shrink-0 items-center gap-1.5 rounded px-2.5 text-[12px] font-medium transition-colors ${
             activeTabId === 'home' && activeNav !== 'chat'
               ? 'bg-[var(--xd-canvas)] text-[var(--xd-ink)] shadow-2xs'
@@ -251,12 +262,12 @@ export function BrowserTabStrip({
         >
           <HardDrive className="h-3.5 w-3.5 text-[var(--xd-ink-muted)]" />
           <span>Drive</span>
-        </button>
+        </WorkspaceLink>
 
         {onSelectChat && (
-          <button
-            type="button"
-            onClick={onSelectChat}
+          <WorkspaceLink
+            href={chatHref}
+            onNavigate={onSelectChat}
             className={`inline-flex h-7 shrink-0 items-center gap-1.5 rounded px-2.5 text-[12px] font-medium transition-colors ${
               activeTabId === 'home' && activeNav === 'chat'
                 ? 'bg-[var(--xd-canvas)] text-[var(--xd-ink)] shadow-2xs'
@@ -271,7 +282,7 @@ export function BrowserTabStrip({
               }`}
             />
             <span>Chat</span>
-          </button>
+          </WorkspaceLink>
         )}
 
         <span className="mx-0.5 h-3.5 w-px bg-[var(--xd-border)]" />
@@ -279,31 +290,42 @@ export function BrowserTabStrip({
         <div className="flex min-w-0 items-center gap-0.5 overflow-x-auto">
           {openTabs.map((tab) => {
             const isActive = activeTabId === tab.id
+            const tabHref = docHref({
+              id: tab.id,
+              slug: tab.slug ?? tab.fileName,
+              title: tab.title,
+            })
             return (
               <div
                 key={tab.id}
-                role="tab"
-                aria-selected={isActive}
-                onClick={() => onSelectTab?.(tab.id)}
-                className={`group inline-flex h-7 max-w-[210px] shrink-0 cursor-pointer items-center gap-1.5 rounded px-2.5 text-[12px] transition-colors ${
+                className={`group inline-flex h-7 max-w-[210px] shrink-0 items-center rounded text-[12px] transition-colors ${
                   isActive
                     ? 'bg-[var(--xd-canvas)] font-medium text-[var(--xd-ink)] shadow-2xs'
                     : 'text-[var(--xd-ink-secondary)] hover:bg-[var(--xd-surface-hover)] hover:text-[var(--xd-ink)]'
                 }`}
               >
-                <span
-                  className={
-                    isActive
-                      ? 'text-[var(--xd-accent)]'
-                      : 'text-[var(--xd-ink-muted)]'
+                <WorkspaceLink
+                  href={tabHref}
+                  onNavigate={
+                    onSelectTab ? () => onSelectTab(tab.id) : undefined
                   }
+                  aria-current={isActive ? 'page' : undefined}
+                  className="flex h-full min-w-0 flex-1 items-center gap-1.5 pl-2.5 pr-1"
                 >
-                  {getCategoryIcon(tab.category, 'h-3.5 w-3.5')}
-                </span>
+                  <span
+                    className={
+                      isActive
+                        ? 'text-[var(--xd-accent)]'
+                        : 'text-[var(--xd-ink-muted)]'
+                    }
+                  >
+                    {getCategoryIcon(tab.category, 'h-3.5 w-3.5')}
+                  </span>
 
-                <span className="truncate" title={tab.fileName}>
-                  {tab.title}
-                </span>
+                  <span className="truncate" title={tab.fileName}>
+                    {tab.title}
+                  </span>
+                </WorkspaceLink>
 
                 <button
                   type="button"
@@ -312,7 +334,7 @@ export function BrowserTabStrip({
                     onCloseTab?.(tab.id)
                   }}
                   aria-label={`Close ${tab.title}`}
-                  className="ml-0.5 inline-flex h-4 w-4 shrink-0 items-center justify-center rounded text-[var(--xd-ink-muted)] opacity-0 transition-opacity hover:bg-[var(--xd-surface-active)] hover:text-[var(--xd-ink)] group-hover:opacity-100 focus:opacity-100"
+                  className="mr-1 inline-flex h-4 w-4 shrink-0 items-center justify-center rounded text-[var(--xd-ink-muted)] opacity-0 transition-opacity hover:bg-[var(--xd-surface-active)] hover:text-[var(--xd-ink)] group-hover:opacity-100 focus:opacity-100"
                 >
                   <X className="h-3 w-3" />
                 </button>
@@ -320,14 +342,14 @@ export function BrowserTabStrip({
             )
           })}
 
-          <button
-            type="button"
-            onClick={onNewTab}
+          <WorkspaceLink
+            href={newTabHref}
+            onNavigate={onNewTab}
             aria-label="New app"
             className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded text-[var(--xd-ink-muted)] transition-colors hover:bg-[var(--xd-surface-hover)] hover:text-[var(--xd-ink)]"
           >
             <Plus className="h-3.5 w-3.5" />
-          </button>
+          </WorkspaceLink>
         </div>
       </div>
 
@@ -363,23 +385,43 @@ export function BrowserTabStrip({
           )}
         </button>
 
-        <button
-          type="button"
-          onClick={onToggleAiSidebar}
-          className={`inline-flex h-7 items-center gap-1.5 rounded px-2 text-[12px] font-medium transition-colors ${
-            aiSidebarOpen
-              ? 'bg-[var(--xd-accent-soft)] text-[var(--xd-accent)]'
-              : 'text-[var(--xd-ink-secondary)] hover:bg-[var(--xd-surface-hover)] hover:text-[var(--xd-ink)]'
-          }`}
-        >
-          <Sparkles className="h-3.5 w-3.5" />
-          <span>AI</span>
-          {pendingProposalsCount > 0 && (
-            <span className="xd-tabular inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-[var(--xd-sketch)] px-1 text-[10px] font-semibold text-black">
-              {pendingProposalsCount}
-            </span>
-          )}
-        </button>
+        {aiToggleHref ? (
+          <WorkspaceLink
+            href={aiToggleHref}
+            onNavigate={onToggleAiSidebar}
+            className={`inline-flex h-7 items-center gap-1.5 rounded px-2 text-[12px] font-medium transition-colors ${
+              aiSidebarOpen
+                ? 'bg-[var(--xd-accent-soft)] text-[var(--xd-accent)]'
+                : 'text-[var(--xd-ink-secondary)] hover:bg-[var(--xd-surface-hover)] hover:text-[var(--xd-ink)]'
+            }`}
+          >
+            <Sparkles className="h-3.5 w-3.5" />
+            <span>AI</span>
+            {pendingProposalsCount > 0 && (
+              <span className="xd-tabular inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-[var(--xd-sketch)] px-1 text-[10px] font-semibold text-black">
+                {pendingProposalsCount}
+              </span>
+            )}
+          </WorkspaceLink>
+        ) : (
+          <button
+            type="button"
+            onClick={onToggleAiSidebar}
+            className={`inline-flex h-7 items-center gap-1.5 rounded px-2 text-[12px] font-medium transition-colors ${
+              aiSidebarOpen
+                ? 'bg-[var(--xd-accent-soft)] text-[var(--xd-accent)]'
+                : 'text-[var(--xd-ink-secondary)] hover:bg-[var(--xd-surface-hover)] hover:text-[var(--xd-ink)]'
+            }`}
+          >
+            <Sparkles className="h-3.5 w-3.5" />
+            <span>AI</span>
+            {pendingProposalsCount > 0 && (
+              <span className="xd-tabular inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-[var(--xd-sketch)] px-1 text-[10px] font-semibold text-black">
+                {pendingProposalsCount}
+              </span>
+            )}
+          </button>
+        )}
       </div>
     </div>
   )
@@ -415,12 +457,14 @@ export interface SidebarRailProps {
   onDropDocOnTrash?: (docId: string) => void
   pinnedApps?: Array<{
     id: string
+    slug?: string
     title: string
     fileName: string
     category: MarbleAppCategory
     nodeCount: number
     starred?: boolean
   }>
+  chatHref?: string
   recentApps?: Array<{
     id: string
     title: string
@@ -458,6 +502,7 @@ export function SidebarRail({
   trashCount = 0,
   onDropDocOnTrash,
   pinnedApps = [],
+  chatHref = '/chat',
   activeAppId,
   onSelectApp,
   onMoveApp,
@@ -720,19 +765,27 @@ export function SidebarRail({
               <span className="h-4 w-4 shrink-0" />
             )}
 
-            <button
-              type="button"
-              onClick={() => {
-                onSelectNav?.('drive')
-                onSelectFolder?.(folder.id)
-              }}
+            <WorkspaceLink
+              href={folderHref(folder)}
+              onNavigate={
+                onSelectFolder || onSelectNav
+                  ? () => {
+                      if (onSelectFolder) {
+                        onSelectFolder(folder.id)
+                      } else {
+                        onSelectNav?.('drive')
+                      }
+                    }
+                  : undefined
+              }
+              aria-current={isSelected ? 'page' : undefined}
               className="flex min-w-0 flex-1 items-center gap-1.5 text-left"
             >
               <Folder
                 className={`h-3.5 w-3.5 shrink-0 ${sidebarFolderColorClass(folder.color)}`}
               />
               <span className="truncate">{folder.name}</span>
-            </button>
+            </WorkspaceLink>
           </div>
           {hasChildren && isExpanded && renderFolderTree(folder.id, depth + 1)}
         </div>
@@ -806,9 +859,12 @@ export function SidebarRail({
         className="mt-2 space-y-0.5"
         aria-label="Primary Workspace Navigation"
       >
-        <button
-          type="button"
-          onClick={() => onSelectNav?.('chat')}
+        <WorkspaceLink
+          href={chatHref}
+          onNavigate={onSelectNav ? () => onSelectNav('chat') : undefined}
+          aria-current={
+            activeNav === 'chat' && !activeAppId ? 'page' : undefined
+          }
           className={`flex w-full items-center justify-between gap-2 rounded px-2 py-1.5 text-left text-[12.5px] transition-colors ${
             activeNav === 'chat' && !activeAppId
               ? 'bg-[var(--xd-surface-active)] font-medium text-[var(--xd-ink)]'
@@ -827,7 +883,7 @@ export function SidebarRail({
             </span>
             <span className="truncate">Chat</span>
           </span>
-        </button>
+        </WorkspaceLink>
 
         <div>
           <div
@@ -838,8 +894,8 @@ export function SidebarRail({
                   label: 'Open My Drive',
                   icon: <HardDrive className="h-3.5 w-3.5" />,
                   onSelect: () => {
-                    onSelectNav?.('drive')
-                    onSelectFolder?.(null)
+                    if (onSelectFolder) onSelectFolder(null)
+                    else onSelectNav?.('drive')
                   },
                 },
                 ...(onCreateFolder
@@ -865,12 +921,20 @@ export function SidebarRail({
                   : 'text-[var(--xd-ink-secondary)] hover:bg-[var(--xd-surface-hover)] hover:text-[var(--xd-ink)]'
             }`}
           >
-            <button
-              type="button"
-              onClick={() => {
-                onSelectNav?.('drive')
-                onSelectFolder?.(null)
-              }}
+            <WorkspaceLink
+              href="/drive"
+              onNavigate={
+                onSelectFolder || onSelectNav
+                  ? () => {
+                      if (onSelectFolder) {
+                        onSelectFolder(null)
+                      } else {
+                        onSelectNav?.('drive')
+                      }
+                    }
+                  : undefined
+              }
+              aria-current={isMyDriveRootActive ? 'page' : undefined}
               className="flex min-w-0 flex-1 items-center gap-2 text-left"
             >
               <span
@@ -883,7 +947,7 @@ export function SidebarRail({
                 <HardDrive className="h-3.5 w-3.5" />
               </span>
               <span className="truncate">My Drive</span>
-            </button>
+            </WorkspaceLink>
 
             {onCreateFolder && (
               <button
@@ -930,10 +994,11 @@ export function SidebarRail({
           const isTrash = item.id === 'trash'
           const isTrashDropTarget = isTrash && dropTargetId === 'trash'
           return (
-            <button
+            <WorkspaceLink
               key={item.id}
-              type="button"
-              onClick={() => onSelectNav?.(item.id)}
+              href={navHref(item.id)}
+              onNavigate={onSelectNav ? () => onSelectNav(item.id) : undefined}
+              aria-current={active ? 'page' : undefined}
               onDragOver={
                 isTrash ? (e) => handleDragOver(e, 'trash') : undefined
               }
@@ -966,7 +1031,7 @@ export function SidebarRail({
                   {trashCount}
                 </span>
               )}
-            </button>
+            </WorkspaceLink>
           )
         })}
       </nav>
@@ -980,10 +1045,17 @@ export function SidebarRail({
             {pinnedApps.map((app) => {
               const isSelected = activeAppId === app.id
               return (
-                <button
+                <WorkspaceLink
                   key={app.id}
-                  type="button"
-                  onClick={() => onSelectApp?.(app.id)}
+                  href={docHref({
+                    id: app.id,
+                    slug: app.slug ?? app.fileName,
+                    title: app.title,
+                  })}
+                  onNavigate={
+                    onSelectApp ? () => onSelectApp(app.id) : undefined
+                  }
+                  aria-current={isSelected ? 'page' : undefined}
                   onContextMenu={(e) =>
                     openContextMenu(
                       e,
@@ -1001,7 +1073,7 @@ export function SidebarRail({
                     {getCategoryIcon(app.category, 'h-3.5 w-3.5')}
                   </span>
                   <span className="truncate">{app.title}</span>
-                </button>
+                </WorkspaceLink>
               )
             })}
           </div>
@@ -1026,6 +1098,7 @@ export function SidebarRail({
 
 export interface DocumentBreadcrumbHeaderProps {
   folder: string
+  folderHref?: string
   onClickFolder?: () => void
   category: MarbleAppCategory
   fileName: string
@@ -1033,8 +1106,10 @@ export interface DocumentBreadcrumbHeaderProps {
   byteSize?: number
   syncState: MarbleDocumentFile['syncState']
   interactionMode: CanvasInteractionMode
+  modeHrefs?: Partial<Record<CanvasInteractionMode, string>>
   onChangeInteractionMode?: (mode: CanvasInteractionMode) => void
   onDuplicate?: () => void
+  shareHref?: string
   onOpenShare?: () => void
   onMoveToTrash?: () => void
   sharePermission: SharePermissionLevel
@@ -1043,12 +1118,15 @@ export interface DocumentBreadcrumbHeaderProps {
 
 export function DocumentBreadcrumbHeader({
   folder,
+  folderHref: folderHrefProp,
   onClickFolder,
   fileName,
   syncState,
   interactionMode,
+  modeHrefs,
   onChangeInteractionMode,
   onDuplicate,
+  shareHref,
   onOpenShare,
   onMoveToTrash,
   isPublicLinkEnabled = true,
@@ -1092,14 +1170,14 @@ export function DocumentBreadcrumbHeader({
           aria-label="Document Breadcrumb"
           className="flex items-center gap-1.5 truncate"
         >
-          {onClickFolder ? (
-            <button
-              type="button"
-              onClick={onClickFolder}
+          {onClickFolder || folderHrefProp ? (
+            <WorkspaceLink
+              href={folderHrefProp ?? '/drive'}
+              onNavigate={onClickFolder}
               className="truncate text-[var(--xd-ink-muted)] transition-colors hover:text-[var(--xd-ink)]"
             >
               {folder}
-            </button>
+            </WorkspaceLink>
           ) : (
             <span className="truncate text-[var(--xd-ink-muted)]">
               {folder}
@@ -1121,17 +1199,38 @@ export function DocumentBreadcrumbHeader({
         >
           {modeOptions.map((mode) => {
             const active = interactionMode === mode.id
+            const modeHref = modeHrefs?.[mode.id]
+            const modeClass = `inline-flex h-6 items-center gap-1 rounded-xs px-2 text-[11.5px] font-medium transition-colors ${
+              active
+                ? 'bg-[var(--xd-canvas)] text-[var(--xd-ink)] shadow-2xs'
+                : 'text-[var(--xd-ink-secondary)] hover:text-[var(--xd-ink)]'
+            }`
+            if (modeHref) {
+              return (
+                <WorkspaceLink
+                  key={mode.id}
+                  href={modeHref}
+                  onNavigate={
+                    onChangeInteractionMode
+                      ? () => onChangeInteractionMode(mode.id)
+                      : undefined
+                  }
+                  title={`${mode.label} (${mode.shortcut})`}
+                  aria-current={active ? 'true' : undefined}
+                  className={modeClass}
+                >
+                  {mode.icon}
+                  <span>{mode.label}</span>
+                </WorkspaceLink>
+              )
+            }
             return (
               <button
                 key={mode.id}
                 type="button"
                 onClick={() => onChangeInteractionMode?.(mode.id)}
                 title={`${mode.label} (${mode.shortcut})`}
-                className={`inline-flex h-6 items-center gap-1 rounded-xs px-2 text-[11.5px] font-medium transition-colors ${
-                  active
-                    ? 'bg-[var(--xd-canvas)] text-[var(--xd-ink)] shadow-2xs'
-                    : 'text-[var(--xd-ink-secondary)] hover:text-[var(--xd-ink)]'
-                }`}
+                className={modeClass}
               >
                 {mode.icon}
                 <span>{mode.label}</span>
@@ -1150,18 +1249,33 @@ export function DocumentBreadcrumbHeader({
           <span>Duplicate</span>
         </button>
 
-        <button
-          type="button"
-          onClick={onOpenShare}
-          className="inline-flex h-7 items-center gap-1 rounded border border-[var(--xd-border)] px-2 text-[11.5px] font-medium text-[var(--xd-ink)] transition-colors hover:bg-[var(--xd-surface-hover)]"
-        >
-          {isPublicLinkEnabled ? (
-            <Globe className="h-3 w-3 text-[var(--xd-accent)]" />
-          ) : (
-            <Lock className="h-3 w-3 text-[var(--xd-ink-muted)]" />
-          )}
-          <span>Share</span>
-        </button>
+        {shareHref ? (
+          <WorkspaceLink
+            href={shareHref}
+            onNavigate={onOpenShare}
+            className="inline-flex h-7 items-center gap-1 rounded border border-[var(--xd-border)] px-2 text-[11.5px] font-medium text-[var(--xd-ink)] transition-colors hover:bg-[var(--xd-surface-hover)]"
+          >
+            {isPublicLinkEnabled ? (
+              <Globe className="h-3 w-3 text-[var(--xd-accent)]" />
+            ) : (
+              <Lock className="h-3 w-3 text-[var(--xd-ink-muted)]" />
+            )}
+            <span>Share</span>
+          </WorkspaceLink>
+        ) : (
+          <button
+            type="button"
+            onClick={onOpenShare}
+            className="inline-flex h-7 items-center gap-1 rounded border border-[var(--xd-border)] px-2 text-[11.5px] font-medium text-[var(--xd-ink)] transition-colors hover:bg-[var(--xd-surface-hover)]"
+          >
+            {isPublicLinkEnabled ? (
+              <Globe className="h-3 w-3 text-[var(--xd-accent)]" />
+            ) : (
+              <Lock className="h-3 w-3 text-[var(--xd-ink-muted)]" />
+            )}
+            <span>Share</span>
+          </button>
+        )}
 
         {onMoveToTrash && (
           <button

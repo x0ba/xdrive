@@ -14,7 +14,9 @@ import {
 } from 'lucide-react'
 import { Streamdown } from 'streamdown'
 import { getCategoryIcon } from '#/components/design-system/NavigationShell'
-import type { MarbleDocumentFile } from '#/lib/types'
+import { WorkspaceLink } from '#/components/routing/WorkspaceLink'
+import { docHref, docIdHref, folderIdHref } from '#/lib/routing'
+import type { DriveFolder, MarbleDocumentFile } from '#/lib/types'
 import { REASONING_EFFORT_META } from '#/lib/ai/drive-chat-types'
 import type { DriveChatMessage } from '#/lib/ai/drive-chat-types'
 import { DriveActionCard } from './DriveActionCard'
@@ -23,6 +25,7 @@ import { cn } from '#/lib/utils'
 export interface ChatMessageItemProps {
   message: DriveChatMessage
   docsById: Map<string, MarbleDocumentFile>
+  folders?: DriveFolder[]
   onOpenDocument?: (docId: string) => void
   onOpenFolder?: (folderId: string | null) => void
   onApplyAction?: (messageId: string, actionId: string) => void
@@ -53,6 +56,7 @@ function formatClock(iso: string): string {
 export function ChatMessageItem({
   message,
   docsById,
+  folders = [],
   onOpenDocument,
   onOpenFolder,
   onApplyAction,
@@ -87,28 +91,34 @@ export function ChatMessageItem({
       >
         {message.contextRefs && message.contextRefs.length > 0 && (
           <div className="flex max-w-[85%] flex-wrap justify-end gap-1">
-            {message.contextRefs.map((ref) => (
-              <button
-                key={`${ref.kind}:${ref.id}`}
-                type="button"
-                onClick={() => {
-                  if (ref.kind === 'doc') onOpenDocument?.(ref.id)
-                  else onOpenFolder?.(ref.id)
-                }}
-                className="inline-flex items-center gap-1.5 rounded-lg bg-[var(--xd-elevated)] px-2 py-0.5 text-[11.5px] text-[var(--xd-ink-secondary)] transition-colors hover:bg-[var(--xd-surface-hover)] hover:text-[var(--xd-ink)]"
-              >
-                {ref.kind === 'folder' ? (
-                  <Folder className="size-3 text-[var(--xd-ink-muted)]" />
-                ) : (
-                  <span className="text-[var(--xd-ink-muted)]">
-                    {getCategoryIcon(ref.category, 'size-3')}
+            {message.contextRefs.map((ref) => {
+              const targetHref =
+                ref.kind === 'doc'
+                  ? docIdHref(ref.id, Array.from(docsById.values()))
+                  : folderIdHref(ref.id, folders)
+              return (
+                <WorkspaceLink
+                  key={`${ref.kind}:${ref.id}`}
+                  href={targetHref}
+                  onNavigate={() => {
+                    if (ref.kind === 'doc') onOpenDocument?.(ref.id)
+                    else onOpenFolder?.(ref.id)
+                  }}
+                  className="inline-flex items-center gap-1.5 rounded-lg bg-[var(--xd-elevated)] px-2 py-0.5 text-[11.5px] text-[var(--xd-ink-secondary)] transition-colors hover:bg-[var(--xd-surface-hover)] hover:text-[var(--xd-ink)]"
+                >
+                  {ref.kind === 'folder' ? (
+                    <Folder className="size-3 text-[var(--xd-ink-muted)]" />
+                  ) : (
+                    <span className="text-[var(--xd-ink-muted)]">
+                      {getCategoryIcon(ref.category, 'size-3')}
+                    </span>
+                  )}
+                  <span className="max-w-[180px] truncate">
+                    {ref.kind === 'folder' ? ref.name : ref.title}
                   </span>
-                )}
-                <span className="max-w-[180px] truncate">
-                  {ref.kind === 'folder' ? ref.name : ref.title}
-                </span>
-              </button>
-            ))}
+                </WorkspaceLink>
+              )
+            })}
           </div>
         )}
 
@@ -146,14 +156,14 @@ export function ChatMessageItem({
           <p className="leading-relaxed">{message.content}</p>
         </div>
         {onOpenProviders && (
-          <button
-            type="button"
-            onClick={onOpenProviders}
+          <WorkspaceLink
+            href="/settings/models"
+            onNavigate={onOpenProviders}
             className="inline-flex h-7 shrink-0 items-center gap-1.5 rounded-lg border border-[var(--xd-danger)]/40 bg-[var(--xd-canvas)] px-2.5 text-[11.5px] font-medium text-[var(--xd-ink)] hover:bg-[var(--xd-surface-hover)]"
           >
             <KeyRound className="size-3" />
             <span>Models</span>
-          </button>
+          </WorkspaceLink>
         )}
       </div>
     )
@@ -245,18 +255,24 @@ export function ChatMessageItem({
               {sourcesOpen && (
                 <div className="ms-7 my-1.5 flex flex-wrap gap-1.5">
                   {referencedDocs.map((doc) => (
-                    <button
+                    <WorkspaceLink
                       key={doc.id}
-                      type="button"
-                      onClick={() => onOpenDocument?.(doc.id)}
+                      href={docHref(doc)}
+                      onNavigate={
+                        onOpenDocument
+                          ? () => onOpenDocument(doc.id)
+                          : undefined
+                      }
                       title={`Open ${doc.fileName}`}
                       className="inline-flex items-center gap-1.5 rounded-lg border border-[var(--xd-border)] bg-[var(--xd-rail)] px-2 py-0.5 text-[11.5px] text-[var(--xd-ink-secondary)] transition-colors hover:border-[var(--xd-border-strong)] hover:text-[var(--xd-ink)]"
                     >
                       <span className="text-[var(--xd-ink-muted)]">
                         {getCategoryIcon(doc.category, 'size-3')}
                       </span>
-                      <span className="max-w-[200px] truncate">{doc.title}</span>
-                    </button>
+                      <span className="max-w-[200px] truncate">
+                        {doc.title}
+                      </span>
+                    </WorkspaceLink>
                   ))}
                 </div>
               )}
@@ -360,14 +376,14 @@ export function ChatMessageItem({
             <span>{message.error}</span>
           </div>
           {onOpenProviders && (
-            <button
-              type="button"
-              onClick={onOpenProviders}
+            <WorkspaceLink
+              href="/settings/models"
+              onNavigate={onOpenProviders}
               className="inline-flex h-6 shrink-0 items-center gap-1 rounded-md border border-[var(--xd-danger)]/35 bg-[var(--xd-canvas)] px-2 text-[11px] font-medium text-[var(--xd-ink)] hover:bg-[var(--xd-surface-hover)]"
             >
               <KeyRound className="size-3" />
               <span>Providers</span>
-            </button>
+            </WorkspaceLink>
           )}
         </div>
       )}

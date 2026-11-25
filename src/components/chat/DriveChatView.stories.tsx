@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import type { Meta, StoryObj } from '@storybook/tanstack-react'
+import { expect, within } from 'storybook/test'
 import type {
   DriveChatAction,
   DriveChatMode,
@@ -179,7 +180,9 @@ function InteractiveDriveChat({
         onApplyAction={(msgId, actId) =>
           updateActionStatus(msgId, actId, 'applied')
         }
-        onApplyAllActions={(msgId) => updateActionStatus(msgId, 'all', 'applied')}
+        onApplyAllActions={(msgId) =>
+          updateActionStatus(msgId, 'all', 'applied')
+        }
         onDiscardAction={(msgId, actId) =>
           updateActionStatus(msgId, actId, 'discarded')
         }
@@ -226,6 +229,16 @@ export const ActiveConversation: Story = {
       initialActiveId={CHAT_DEMO_THREADS[0].id}
     />
   ),
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    const firstThreadLink = canvas.getByRole('link', {
+      name: new RegExp(CHAT_DEMO_THREADS[0].title, 'i'),
+    })
+    await expect(firstThreadLink).toHaveAttribute(
+      'href',
+      `/chat/${CHAT_DEMO_THREADS[0].id}`,
+    )
+  },
 }
 
 /**

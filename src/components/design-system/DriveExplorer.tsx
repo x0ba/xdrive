@@ -26,6 +26,8 @@ import type {
 } from '#/lib/types'
 import { AppContextMenu } from '#/components/apps/shared'
 import type { ContextMenuItem } from '#/components/apps/shared'
+import { WorkspaceLink } from '#/components/routing/WorkspaceLink'
+import { docHref, folderHref, isModifiedClick } from '#/lib/routing'
 import {
   formatBytes,
   getCategoryIcon,
@@ -445,9 +447,12 @@ export function DriveBreadcrumbBar({
         aria-label="Drive folder path"
         className="flex min-w-0 flex-wrap items-center gap-1"
       >
-        <button
-          type="button"
-          onClick={() => onNavigateFolder?.(null)}
+        <WorkspaceLink
+          href="/drive"
+          onNavigate={
+            onNavigateFolder ? () => onNavigateFolder(null) : undefined
+          }
+          aria-current={ancestors.length === 0 ? 'page' : undefined}
           onDragOver={(e) => handleDragOver(e, 'root')}
           onDragLeave={() => setDropTargetId(null)}
           onDrop={(e) => handleDrop(e, null)}
@@ -463,16 +468,21 @@ export function DriveBreadcrumbBar({
         >
           <HardDrive className="h-4 w-4 text-[var(--xd-ink-muted)]" />
           <span>{rootLabel}</span>
-        </button>
+        </WorkspaceLink>
 
         {ancestors.map((folder, index) => {
           const isCurrent = index === ancestors.length - 1
           return (
             <React.Fragment key={folder.id}>
               <ChevronRight className="h-3.5 w-3.5 shrink-0 text-[var(--xd-ink-subtle)]" />
-              <button
-                type="button"
-                onClick={() => onNavigateFolder?.(folder.id)}
+              <WorkspaceLink
+                href={folderHref(folder)}
+                onNavigate={
+                  onNavigateFolder
+                    ? () => onNavigateFolder(folder.id)
+                    : undefined
+                }
+                aria-current={isCurrent ? 'page' : undefined}
                 onDragOver={(e) => handleDragOver(e, folder.id)}
                 onDragLeave={() => setDropTargetId(null)}
                 onDrop={(e) => handleDrop(e, folder.id)}
@@ -490,7 +500,7 @@ export function DriveBreadcrumbBar({
                   className={`h-3.5 w-3.5 shrink-0 ${getFolderIconClass(folder.color)}`}
                 />
                 <span className="truncate">{folder.name}</span>
-              </button>
+              </WorkspaceLink>
             </React.Fragment>
           )
         })}
@@ -583,19 +593,10 @@ export function DriveFolderCard({
   return (
     <>
       <div
-        role="button"
-        tabIndex={0}
-        onClick={() => onOpen?.(folder)}
         onContextMenu={(event) => {
           event.preventDefault()
           event.stopPropagation()
           setContextMenu({ open: true, x: event.clientX, y: event.clientY })
-        }}
-        onKeyDown={(event) => {
-          if (event.key === 'Enter' || event.key === ' ') {
-            event.preventDefault()
-            onOpen?.(folder)
-          }
         }}
         onDragOver={(event) => {
           if (!onDropDoc) return
@@ -610,7 +611,7 @@ export function DriveFolderCard({
           const docId = readDraggedDocId(event)
           if (docId && onDropDoc) onDropDoc(docId, folder.id)
         }}
-        className={`group flex h-11 cursor-pointer items-center justify-between gap-2 rounded-md border px-3 text-left transition-colors ${
+        className={`group relative flex h-11 cursor-pointer items-center justify-between gap-2 rounded-md border px-3 text-left transition-colors ${
           dragOver
             ? 'border-[var(--xd-accent)] bg-[var(--xd-accent-soft)]'
             : selected
@@ -618,16 +619,20 @@ export function DriveFolderCard({
               : 'border-[var(--xd-border)] bg-[var(--xd-rail)] hover:border-[var(--xd-border-strong)] hover:bg-[var(--xd-elevated)]'
         }`}
       >
-        <div className="flex min-w-0 items-center gap-2.5">
+        <WorkspaceLink
+          href={folderHref(folder)}
+          onNavigate={onOpen ? () => onOpen(folder) : undefined}
+          className="flex min-w-0 flex-1 items-center gap-2.5 after:absolute after:inset-0"
+        >
           <Folder
             className={`h-4 w-4 shrink-0 fill-current/15 ${getFolderIconClass(folder.color)}`}
           />
           <span className="truncate text-[13px] font-medium text-[var(--xd-ink)]">
             {folder.name}
           </span>
-        </div>
+        </WorkspaceLink>
 
-        <div className="flex shrink-0 items-center gap-1">
+        <div className="relative z-10 flex shrink-0 items-center gap-1">
           <span className="xd-tabular text-[11px] text-[var(--xd-ink-muted)]">
             {itemCount}
           </span>
@@ -1007,13 +1012,12 @@ export function DriveFilePreviewCard(props: DriveFileCardProps) {
       <article
         draggable
         onDragStart={(e) => setDraggedDoc(e, doc.id)}
-        onClick={() => onOpen?.(doc)}
         onContextMenu={(event) => {
           event.preventDefault()
           event.stopPropagation()
           setContextMenu({ open: true, x: event.clientX, y: event.clientY })
         }}
-        className="group flex cursor-pointer flex-col overflow-hidden rounded-lg border border-[var(--xd-border)] bg-[var(--xd-rail)] transition-colors hover:border-[var(--xd-border-strong)] hover:bg-[var(--xd-elevated)]"
+        className="group relative flex cursor-pointer flex-col overflow-hidden rounded-lg border border-[var(--xd-border)] bg-[var(--xd-rail)] transition-colors hover:border-[var(--xd-border-strong)] hover:bg-[var(--xd-elevated)]"
       >
         {/* Top Google Drive File Card Header */}
         <div className="flex items-center justify-between gap-2 px-3 py-2">
@@ -1021,13 +1025,19 @@ export function DriveFilePreviewCard(props: DriveFileCardProps) {
             <span className="shrink-0 text-[var(--xd-accent)]">
               {getCategoryIcon(doc.category, 'h-3.5 w-3.5')}
             </span>
-            <h3 className="truncate text-[12.5px] font-medium text-[var(--xd-ink)]">
-              {doc.title}
+            <h3 className="min-w-0 truncate text-[12.5px] font-medium text-[var(--xd-ink)]">
+              <WorkspaceLink
+                href={docHref(doc)}
+                onNavigate={onOpen ? () => onOpen(doc) : undefined}
+                className="block truncate after:absolute after:inset-0"
+              >
+                {doc.title}
+              </WorkspaceLink>
             </h3>
           </div>
 
           <div
-            className="flex shrink-0 items-center gap-0.5"
+            className="relative z-10 flex shrink-0 items-center gap-0.5"
             onClick={(e) => e.stopPropagation()}
           >
             {onToggleStar && (
@@ -1103,7 +1113,6 @@ export function DriveFileIconTile(props: DriveFileCardProps) {
       <article
         draggable
         onDragStart={(e) => setDraggedDoc(e, doc.id)}
-        onClick={() => onOpen?.(doc)}
         onContextMenu={(event) => {
           event.preventDefault()
           event.stopPropagation()
@@ -1111,7 +1120,7 @@ export function DriveFileIconTile(props: DriveFileCardProps) {
         }}
         className="group relative flex cursor-pointer flex-col items-center rounded-lg border border-transparent px-3 py-3.5 text-center transition-colors hover:border-[var(--xd-border)] hover:bg-[var(--xd-rail)]"
       >
-        <div className="absolute right-1.5 top-1.5 flex items-center gap-0.5">
+        <div className="absolute right-1.5 top-1.5 z-10 flex items-center gap-0.5">
           {doc.starred && onToggleStar && (
             <button
               type="button"
@@ -1144,7 +1153,13 @@ export function DriveFileIconTile(props: DriveFileCardProps) {
         </div>
 
         <h3 className="mt-2.5 line-clamp-2 w-full text-[12px] font-medium leading-snug text-[var(--xd-ink)]">
-          {doc.title}
+          <WorkspaceLink
+            href={docHref(doc)}
+            onNavigate={onOpen ? () => onOpen(doc) : undefined}
+            className="after:absolute after:inset-0"
+          >
+            {doc.title}
+          </WorkspaceLink>
         </h3>
         <span className="mt-0.5 text-[10.5px] text-[var(--xd-ink-muted)]">
           {getCategoryLabel(doc.category)}
@@ -1280,10 +1295,18 @@ export function DriveFileListTable({
                 : []),
             ]
 
+            const href = folderHref(folder)
             return (
               <tr
                 key={folder.id}
-                onClick={() => onOpenFolder?.(folder)}
+                onClick={(event) => {
+                  if ((event.target as HTMLElement).closest('a')) return
+                  if (isModifiedClick(event)) {
+                    window.open(href, '_blank', 'noopener,noreferrer')
+                    return
+                  }
+                  onOpenFolder?.(folder)
+                }}
                 onContextMenu={(event) => {
                   event.preventDefault()
                   event.stopPropagation()
@@ -1316,14 +1339,20 @@ export function DriveFileListTable({
                 }`}
               >
                 <td className="px-3 py-2.5">
-                  <div className="flex items-center gap-2.5">
+                  <WorkspaceLink
+                    href={href}
+                    onNavigate={
+                      onOpenFolder ? () => onOpenFolder(folder) : undefined
+                    }
+                    className="flex items-center gap-2.5"
+                  >
                     <Folder
                       className={`h-4 w-4 shrink-0 fill-current/15 ${getFolderIconClass(folder.color)}`}
                     />
                     <span className="font-medium text-[var(--xd-ink)]">
                       {folder.name}
                     </span>
-                  </div>
+                  </WorkspaceLink>
                 </td>
                 <td className="hidden px-3 py-2.5 text-[var(--xd-ink-muted)] sm:table-cell">
                   Folder
@@ -1367,12 +1396,20 @@ export function DriveFileListTable({
               onDelete: onDeleteDoc,
             })
 
+            const href = docHref(doc)
             return (
               <tr
                 key={doc.id}
                 draggable
                 onDragStart={(e) => setDraggedDoc(e, doc.id)}
-                onClick={() => onOpenDoc?.(doc)}
+                onClick={(event) => {
+                  if ((event.target as HTMLElement).closest('a')) return
+                  if (isModifiedClick(event)) {
+                    window.open(href, '_blank', 'noopener,noreferrer')
+                    return
+                  }
+                  onOpenDoc?.(doc)
+                }}
                 onContextMenu={(event) => {
                   event.preventDefault()
                   event.stopPropagation()
@@ -1387,7 +1424,11 @@ export function DriveFileListTable({
                 className="group cursor-pointer transition-colors hover:bg-[var(--xd-surface-hover)]/50"
               >
                 <td className="px-3 py-2.5">
-                  <div className="flex items-center gap-2.5">
+                  <WorkspaceLink
+                    href={href}
+                    onNavigate={onOpenDoc ? () => onOpenDoc(doc) : undefined}
+                    className="flex items-center gap-2.5"
+                  >
                     <span className="shrink-0 text-[var(--xd-accent)]">
                       {getCategoryIcon(doc.category, 'h-4 w-4')}
                     </span>
@@ -1406,7 +1447,7 @@ export function DriveFileListTable({
                         {doc.fileName}
                       </div>
                     </div>
-                  </div>
+                  </WorkspaceLink>
                 </td>
                 <td className="hidden px-3 py-2.5 sm:table-cell">
                   <span className="inline-flex items-center gap-1 rounded border border-[var(--xd-border)] bg-[var(--xd-rail)] px-1.5 py-0.5 text-[11px] text-[var(--xd-ink-secondary)]">
@@ -1512,12 +1553,11 @@ export function DriveFolderDialog({
   if (!open) return null
 
   const trimmedName = name.trim()
-  const invalidNameReason =
-    trimmedName.startsWith('.')
-      ? 'Folder names cannot start with ".".'
-      : trimmedName.includes('/') || trimmedName.includes('\\')
-        ? 'Folder names cannot contain "/" or "\\".'
-        : null
+  const invalidNameReason = trimmedName.startsWith('.')
+    ? 'Folder names cannot start with ".".'
+    : trimmedName.includes('/') || trimmedName.includes('\\')
+      ? 'Folder names cannot contain "/" or "\\".'
+      : null
 
   return (
     <div

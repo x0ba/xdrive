@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import type { Meta, StoryObj } from '@storybook/tanstack-react'
+import { expect, within } from 'storybook/test'
 import {
   BrowserTabStrip,
   DocumentBreadcrumbHeader,
@@ -188,7 +189,20 @@ type Story = StoryObj<typeof meta>
  *
  * @summary Workspace browser tab strip
  */
-export const TabStrip: Story = {}
+export const TabStrip: Story = {
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    const driveLink = canvas.getByRole('link', { name: /Drive/i })
+    await expect(driveLink).toHaveAttribute('href', '/drive')
+    const docLink = canvas.getByRole('link', {
+      name: /Fault-Tolerant Floquet Surface Codes/i,
+    })
+    await expect(docLink).toHaveAttribute(
+      'href',
+      '/d/doc-qec/quantum-error-correction',
+    )
+  },
+}
 
 /**
  * Interactive left sidebar rail with nested Drive folder tree, pinned apps, and `+ New` button slot.
@@ -197,6 +211,27 @@ export const TabStrip: Story = {}
  */
 export const LeftNavigationRail: Story = {
   render: () => <LeftNavigationRailDemo />,
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    await expect(
+      canvas.getByRole('link', { name: 'My Drive' }),
+    ).toHaveAttribute('href', '/drive')
+    await expect(canvas.getByRole('link', { name: 'Chat' })).toHaveAttribute(
+      'href',
+      '/chat',
+    )
+    await expect(canvas.getByRole('link', { name: 'Papers' })).toHaveAttribute(
+      'href',
+      '/f/folder-papers/papers',
+    )
+    await expect(canvas.getByRole('link', { name: 'Models' })).toHaveAttribute(
+      'href',
+      '/settings/models',
+    )
+    await expect(
+      canvas.getByRole('link', { name: 'Floquet Surface Codes' }),
+    ).toHaveAttribute('href', '/d/doc-qec/quantum-error-correction')
+  },
 }
 
 /**

@@ -13,6 +13,8 @@ import {
   Trash2,
 } from 'lucide-react'
 import { getFolderPathLabel } from '#/components/design-system/DriveExplorer'
+import { WorkspaceLink } from '#/components/routing/WorkspaceLink'
+import { chatThreadHref } from '#/lib/routing'
 import type { DriveFolder, MarbleDocumentFile } from '#/lib/types'
 import type {
   DriveChatMode,
@@ -61,6 +63,12 @@ export interface DriveChatViewProps {
   onOpenFolder?: (folderId: string | null) => void
   onOpenProviders?: () => void
   defaultHistoryOpen?: boolean
+  historyOpen?: boolean
+  onHistoryOpenChange?: (open: boolean) => void
+  threadSearch?: string
+  onThreadSearchChange?: (query: string) => void
+  initialScopeFolderId?: string | null
+  onScopeFolderChange?: (folderId: string | null) => void
   className?: string
 }
 
@@ -169,17 +177,80 @@ export function DriveChatView({
   onOpenFolder,
   onOpenProviders,
   defaultHistoryOpen = true,
+  historyOpen: historyOpenProp,
+  onHistoryOpenChange,
+  threadSearch: threadSearchProp,
+  onThreadSearchChange,
+  initialScopeFolderId,
+  onScopeFolderChange,
   className,
 }: DriveChatViewProps) {
-  const [historyOpen, setHistoryOpen] = useState(defaultHistoryOpen)
-  const [searchVisible, setSearchVisible] = useState(false)
-  const [threadSearch, setThreadSearch] = useState('')
+  const [internalHistoryOpen, setInternalHistoryOpen] =
+    useState(defaultHistoryOpen)
+  const historyOpen = historyOpenProp ?? internalHistoryOpen
+  const setHistoryOpen = (next: boolean | ((prev: boolean) => boolean)) => {
+    const resolved = typeof next === 'function' ? next(historyOpen) : next
+    if (historyOpenProp === undefined) setInternalHistoryOpen(resolved)
+    onHistoryOpenChange?.(resolved)
+  }
+  const [searchVisible, setSearchVisible] = useState(
+    Boolean(threadSearchProp && threadSearchProp.trim().length > 0),
+  )
+  const [internalThreadSearch, setInternalThreadSearch] = useState(
+    threadSearchProp ?? '',
+  )
+  const threadSearch = threadSearchProp ?? internalThreadSearch
+  const setThreadSearch = (value: string) => {
+    if (threadSearchProp === undefined) setInternalThreadSearch(value)
+    onThreadSearchChange?.(value)
+  }
   const [draft, setDraft] = useState('')
-  const [contextRefs, setContextRefs] = useState<DriveContextRef[]>([])
+  const [contextRefs, setContextRefs] = useState<DriveContextRef[]>(() => {
+    if (!initialScopeFolderId) return []
+    const folder = folders.find((item) => item.id === initialScopeFolderId)
+    if (!folder) return []
+    return [
+      {
+        kind: 'folder',
+        id: folder.id,
+        name: getFolderPathLabel(folders, folder.id),
+      },
+    ]
+  })
   const [heroScopeOpen, setHeroScopeOpen] = useState(false)
   const [editingTitle, setEditingTitle] = useState(false)
   const [titleDraft, setTitleDraft] = useState('')
   const [showScrollBottom, setShowScrollBottom] = useState(false)
+
+  useEffect(() => {
+    if (initialScopeFolderId === undefined) return
+    setContextRefs((prev) => {
+      const nonFolderRefs = prev.filter((item) => item.kind !== 'folder')
+      const existingFolderRef = prev.find((item) => item.kind === 'folder')
+      if (!initialScopeFolderId) {
+        return existingFolderRef ? nonFolderRefs : prev
+      }
+      const folder = folders.find((item) => item.id === initialScopeFolderId)
+      if (!folder) {
+        return existingFolderRef ? nonFolderRefs : prev
+      }
+      const nextName = getFolderPathLabel(folders, folder.id)
+      if (
+        existingFolderRef?.id === folder.id &&
+        existingFolderRef.name === nextName
+      ) {
+        return prev
+      }
+      return [
+        ...nonFolderRefs,
+        {
+          kind: 'folder',
+          id: folder.id,
+          name: nextName,
+        },
+      ]
+    })
+  }, [initialScopeFolderId, folders])
 
   const scrollRef = useRef<HTMLDivElement>(null)
   const heroScopeRef = useRef<HTMLDivElement>(null)
@@ -287,17 +358,27 @@ export function DriveChatView({
   }
 
   function handleAddContextRef(ref: DriveContextRef) {
-    setContextRefs((prev) =>
-      prev.some((item) => item.kind === ref.kind && item.id === ref.id)
+    setContextRefs((prev) => {
+      if (ref.kind === 'folder') {
+        const withoutFolder = prev.filter((item) => item.kind !== 'folder')
+        return [...withoutFolder, ref]
+      }
+      return prev.some((item) => item.kind === ref.kind && item.id === ref.id)
         ? prev
-        : [...prev, ref],
-    )
+        : [...prev, ref]
+    })
+    if (ref.kind === 'folder') {
+      onScopeFolderChange?.(ref.id)
+    }
   }
 
   function handleRemoveContextRef(ref: DriveContextRef) {
     setContextRefs((prev) =>
       prev.filter((item) => !(item.kind === ref.kind && item.id === ref.id)),
     )
+    if (ref.kind === 'folder') {
+      onScopeFolderChange?.(null)
+    }
   }
 
   const pinnedFolderRef = contextRefs.find((ref) => ref.kind === 'folder')
@@ -339,10 +420,11 @@ export function DriveChatView({
               >
                 <Search className="size-3.5" />
               </button>
-              <button
-                type="button"
-                onClick={() => {
+              <WorkspaceLink
+                href="/chat"
+                onNavigate={() => {
                   setContextRefs([])
+                  onScopeFolderChange?.(null)
                   onNewThread()
                 }}
                 aria-label="New thread"
@@ -350,7 +432,7 @@ export function DriveChatView({
                 className="inline-flex size-7 items-center justify-center rounded-lg text-[var(--xd-ink-muted)] transition-colors hover:bg-[var(--xd-surface-hover)] hover:text-[var(--xd-ink)]"
               >
                 <SquarePen className="size-3.5" />
-              </button>
+              </WorkspaceLink>
             </div>
           </div>
 
@@ -392,9 +474,10 @@ export function DriveChatView({
                   )
                   return (
                     <li key={thread.id} className="group relative">
-                      <button
-                        type="button"
-                        onClick={() => onSelectThread(thread.id)}
+                      <WorkspaceLink
+                        href={chatThreadHref(thread.id)}
+                        onNavigate={() => onSelectThread(thread.id)}
+                        aria-current={selected ? 'page' : undefined}
                         className={cn(
                           'flex w-full items-center justify-between gap-2 rounded-lg px-2.5 py-1.5 text-left transition-colors',
                           selected
@@ -418,7 +501,7 @@ export function DriveChatView({
                         <span className="xd-tabular shrink-0 text-[11px] text-[var(--xd-ink-muted)] transition-opacity group-hover:opacity-0">
                           {formatThreadTime(thread.updatedAt)}
                         </span>
-                      </button>
+                      </WorkspaceLink>
 
                       {(onTogglePinThread || onDeleteThread) && (
                         <div className="pointer-events-none absolute inset-y-0 right-1.5 flex items-center gap-0.5 opacity-0 transition-opacity group-hover:pointer-events-auto group-hover:opacity-100 focus-within:pointer-events-auto focus-within:opacity-100">
@@ -477,10 +560,11 @@ export function DriveChatView({
             </button>
 
             {!historyOpen && (
-              <button
-                type="button"
-                onClick={() => {
+              <WorkspaceLink
+                href="/chat"
+                onNavigate={() => {
                   setContextRefs([])
+                  onScopeFolderChange?.(null)
                   onNewThread()
                 }}
                 aria-label="New thread"
@@ -488,7 +572,7 @@ export function DriveChatView({
                 className="inline-flex size-7 items-center justify-center rounded-lg text-[var(--xd-ink-muted)] transition-colors hover:bg-[var(--xd-surface-hover)] hover:text-[var(--xd-ink)]"
               >
                 <SquarePen className="size-4" />
-              </button>
+              </WorkspaceLink>
             )}
 
             {!isEmpty && (
@@ -546,14 +630,14 @@ export function DriveChatView({
 
           <div className="flex shrink-0 items-center gap-2">
             {!hasConnectedProvider && onOpenProviders && (
-              <button
-                type="button"
-                onClick={onOpenProviders}
+              <WorkspaceLink
+                href="/settings/models"
+                onNavigate={onOpenProviders}
                 className="inline-flex h-7 items-center gap-1.5 rounded-lg border border-[var(--xd-border-strong)] bg-[var(--xd-elevated)] px-2.5 text-[12px] font-medium text-[var(--xd-ink)] transition-colors hover:bg-[var(--xd-surface-hover)]"
               >
                 <KeyRound className="size-3.5 text-[var(--xd-ink-muted)]" />
                 <span>Connect provider</span>
-              </button>
+              </WorkspaceLink>
             )}
           </div>
         </header>
@@ -596,6 +680,7 @@ export function DriveChatView({
                             setContextRefs((prev) =>
                               prev.filter((item) => item.kind !== 'folder'),
                             )
+                            onScopeFolderChange?.(null)
                             setHeroScopeOpen(false)
                           }}
                           className={cn(
@@ -639,6 +724,7 @@ export function DriveChatView({
                                         name: pathLabel,
                                       },
                                     ])
+                                    onScopeFolderChange?.(folder.id)
                                     setHeroScopeOpen(false)
                                   }}
                                   className={cn(
@@ -713,6 +799,7 @@ export function DriveChatView({
                   key={message.id}
                   message={message}
                   docsById={docsById}
+                  folders={folders}
                   onOpenDocument={onOpenDocument}
                   onOpenFolder={onOpenFolder}
                   onApplyAction={onApplyAction}

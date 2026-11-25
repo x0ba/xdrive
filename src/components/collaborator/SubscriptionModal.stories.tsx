@@ -1,4 +1,5 @@
 import type { Meta, StoryObj } from '@storybook/tanstack-react'
+import { expect, within } from 'storybook/test'
 import { DEFAULT_OPENCODE_GO_MODELS } from '#/lib/ai/opencode-go-types'
 import { SubscriptionModal } from './SubscriptionModal'
 
@@ -120,4 +121,12 @@ export const ModelsAndProviders: Story = {
       </div>
     ),
   ],
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    const openCodeLink = canvas.getByRole('link', { name: /OpenCode Go/i })
+    await expect(openCodeLink).toHaveAttribute(
+      'href',
+      '/settings/models/opencode-go',
+    )
+  },
 }

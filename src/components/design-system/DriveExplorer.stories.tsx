@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react'
 import type { Meta, StoryObj } from '@storybook/tanstack-react'
+import { expect, within } from 'storybook/test'
 import {
   DriveBreadcrumbBar,
   DriveFileIconTile,
@@ -483,6 +484,17 @@ export const FolderStripAndBreadcrumbs: Story = {
           ))}
         </div>
       </div>
+    )
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    await expect(
+      canvas.getByRole('link', { name: 'My Drive' }),
+    ).toHaveAttribute('href', '/drive')
+    const folderLinks = canvas.getAllByRole('link', { name: /Papers/i })
+    await expect(folderLinks[0]).toHaveAttribute(
+      'href',
+      '/f/folder-papers/papers',
     )
   },
 }

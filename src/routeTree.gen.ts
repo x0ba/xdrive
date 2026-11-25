@@ -10,12 +10,29 @@
 
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as WorkspaceRouteImport } from './routes/_workspace'
+import { Route as WorkspaceSplatRouteImport } from './routes/_workspace/$'
+import { Route as WorkspaceDriveRouteImport } from './routes/_workspace/drive'
+import { Route as WorkspaceSharedRouteImport } from './routes/_workspace/shared'
+import { Route as WorkspaceStarredRouteImport } from './routes/_workspace/starred'
+import { Route as WorkspaceTemplatesRouteImport } from './routes/_workspace/templates'
+import { Route as WorkspaceTrashRouteImport } from './routes/_workspace/trash'
 import { Route as ApiAiRouteImport } from './routes/api.ai'
 import { Route as ApiDriveChatRouteImport } from './routes/api.drive-chat'
 import { Route as ApiLatexRouteImport } from './routes/api.latex'
 import { Route as ApiMarbleRouteImport } from './routes/api.marble'
+import { Route as WorkspaceChatIndexRouteImport } from './routes/_workspace/chat/index'
+import { Route as WorkspaceChatThreadIdRouteImport } from './routes/_workspace/chat/$threadId'
+import { Route as WorkspaceSettingsIndexRouteImport } from './routes/_workspace/settings/index'
+import { Route as WorkspaceSettingsSplatRouteImport } from './routes/_workspace/settings/$'
 import { Route as ApiAiHistoryRouteImport } from './routes/api.ai.history'
 import { Route as ApiDriveChatThreadsRouteImport } from './routes/api.drive-chat.threads'
+import { Route as WorkspaceDDocIdIndexRouteImport } from './routes/_workspace/d/$docId/index'
+import { Route as WorkspaceDDocIdSlugRouteImport } from './routes/_workspace/d/$docId/$slug'
+import { Route as WorkspaceFFolderIdIndexRouteImport } from './routes/_workspace/f/$folderId/index'
+import { Route as WorkspaceFFolderIdSlugRouteImport } from './routes/_workspace/f/$folderId/$slug'
+import { Route as WorkspaceSettingsModelsIndexRouteImport } from './routes/_workspace/settings/models/index'
+import { Route as WorkspaceSettingsModelsProviderIdRouteImport } from './routes/_workspace/settings/models/$providerId'
 import { Route as ApiAiHistoryDocIdRouteImport } from './routes/api.ai.history.$docId'
 import { Route as ApiDriveChatThreadsThreadIdRouteImport } from './routes/api.drive-chat.threads.$threadId'
 
@@ -23,6 +40,40 @@ const IndexRoute = IndexRouteImport.update({
   id: '/',
   path: '/',
   getParentRoute: () => rootRouteImport,
+} as any)
+const WorkspaceRoute = WorkspaceRouteImport.update({
+  id: '/_workspace',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const WorkspaceSplatRoute = WorkspaceSplatRouteImport.update({
+  id: '/$',
+  path: '/$',
+  getParentRoute: () => WorkspaceRoute,
+} as any)
+const WorkspaceDriveRoute = WorkspaceDriveRouteImport.update({
+  id: '/drive',
+  path: '/drive',
+  getParentRoute: () => WorkspaceRoute,
+} as any)
+const WorkspaceSharedRoute = WorkspaceSharedRouteImport.update({
+  id: '/shared',
+  path: '/shared',
+  getParentRoute: () => WorkspaceRoute,
+} as any)
+const WorkspaceStarredRoute = WorkspaceStarredRouteImport.update({
+  id: '/starred',
+  path: '/starred',
+  getParentRoute: () => WorkspaceRoute,
+} as any)
+const WorkspaceTemplatesRoute = WorkspaceTemplatesRouteImport.update({
+  id: '/templates',
+  path: '/templates',
+  getParentRoute: () => WorkspaceRoute,
+} as any)
+const WorkspaceTrashRoute = WorkspaceTrashRouteImport.update({
+  id: '/trash',
+  path: '/trash',
+  getParentRoute: () => WorkspaceRoute,
 } as any)
 const ApiAiRoute = ApiAiRouteImport.update({
   id: '/api/ai',
@@ -44,6 +95,26 @@ const ApiMarbleRoute = ApiMarbleRouteImport.update({
   path: '/api/marble',
   getParentRoute: () => rootRouteImport,
 } as any)
+const WorkspaceChatIndexRoute = WorkspaceChatIndexRouteImport.update({
+  id: '/chat/',
+  path: '/chat/',
+  getParentRoute: () => WorkspaceRoute,
+} as any)
+const WorkspaceChatThreadIdRoute = WorkspaceChatThreadIdRouteImport.update({
+  id: '/chat/$threadId',
+  path: '/chat/$threadId',
+  getParentRoute: () => WorkspaceRoute,
+} as any)
+const WorkspaceSettingsIndexRoute = WorkspaceSettingsIndexRouteImport.update({
+  id: '/settings/',
+  path: '/settings/',
+  getParentRoute: () => WorkspaceRoute,
+} as any)
+const WorkspaceSettingsSplatRoute = WorkspaceSettingsSplatRouteImport.update({
+  id: '/settings/$',
+  path: '/settings/$',
+  getParentRoute: () => WorkspaceRoute,
+} as any)
 const ApiAiHistoryRoute = ApiAiHistoryRouteImport.update({
   id: '/history',
   path: '/history',
@@ -54,6 +125,38 @@ const ApiDriveChatThreadsRoute = ApiDriveChatThreadsRouteImport.update({
   path: '/threads',
   getParentRoute: () => ApiDriveChatRoute,
 } as any)
+const WorkspaceDDocIdIndexRoute = WorkspaceDDocIdIndexRouteImport.update({
+  id: '/d/$docId/',
+  path: '/d/$docId/',
+  getParentRoute: () => WorkspaceRoute,
+} as any)
+const WorkspaceDDocIdSlugRoute = WorkspaceDDocIdSlugRouteImport.update({
+  id: '/d/$docId/$slug',
+  path: '/d/$docId/$slug',
+  getParentRoute: () => WorkspaceRoute,
+} as any)
+const WorkspaceFFolderIdIndexRoute = WorkspaceFFolderIdIndexRouteImport.update({
+  id: '/f/$folderId/',
+  path: '/f/$folderId/',
+  getParentRoute: () => WorkspaceRoute,
+} as any)
+const WorkspaceFFolderIdSlugRoute = WorkspaceFFolderIdSlugRouteImport.update({
+  id: '/f/$folderId/$slug',
+  path: '/f/$folderId/$slug',
+  getParentRoute: () => WorkspaceRoute,
+} as any)
+const WorkspaceSettingsModelsIndexRoute =
+  WorkspaceSettingsModelsIndexRouteImport.update({
+    id: '/settings/models/',
+    path: '/settings/models/',
+    getParentRoute: () => WorkspaceRoute,
+  } as any)
+const WorkspaceSettingsModelsProviderIdRoute =
+  WorkspaceSettingsModelsProviderIdRouteImport.update({
+    id: '/settings/models/$providerId',
+    path: '/settings/models/$providerId',
+    getParentRoute: () => WorkspaceRoute,
+  } as any)
 const ApiAiHistoryDocIdRoute = ApiAiHistoryDocIdRouteImport.update({
   id: '/$docId',
   path: '/$docId',
@@ -68,76 +171,175 @@ const ApiDriveChatThreadsThreadIdRoute =
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
+  '/$': typeof WorkspaceSplatRoute
+  '/drive': typeof WorkspaceDriveRoute
+  '/shared': typeof WorkspaceSharedRoute
+  '/starred': typeof WorkspaceStarredRoute
+  '/templates': typeof WorkspaceTemplatesRoute
+  '/trash': typeof WorkspaceTrashRoute
   '/api/ai': typeof ApiAiRouteWithChildren
   '/api/drive-chat': typeof ApiDriveChatRouteWithChildren
   '/api/latex': typeof ApiLatexRoute
   '/api/marble': typeof ApiMarbleRoute
+  '/chat/$threadId': typeof WorkspaceChatThreadIdRoute
+  '/settings/$': typeof WorkspaceSettingsSplatRoute
   '/api/ai/history': typeof ApiAiHistoryRouteWithChildren
   '/api/drive-chat/threads': typeof ApiDriveChatThreadsRouteWithChildren
+  '/chat/': typeof WorkspaceChatIndexRoute
+  '/settings/': typeof WorkspaceSettingsIndexRoute
+  '/d/$docId/$slug': typeof WorkspaceDDocIdSlugRoute
+  '/f/$folderId/$slug': typeof WorkspaceFFolderIdSlugRoute
+  '/settings/models/$providerId': typeof WorkspaceSettingsModelsProviderIdRoute
   '/api/ai/history/$docId': typeof ApiAiHistoryDocIdRoute
   '/api/drive-chat/threads/$threadId': typeof ApiDriveChatThreadsThreadIdRoute
+  '/d/$docId/': typeof WorkspaceDDocIdIndexRoute
+  '/f/$folderId/': typeof WorkspaceFFolderIdIndexRoute
+  '/settings/models/': typeof WorkspaceSettingsModelsIndexRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
+  '/$': typeof WorkspaceSplatRoute
+  '/drive': typeof WorkspaceDriveRoute
+  '/shared': typeof WorkspaceSharedRoute
+  '/starred': typeof WorkspaceStarredRoute
+  '/templates': typeof WorkspaceTemplatesRoute
+  '/trash': typeof WorkspaceTrashRoute
   '/api/ai': typeof ApiAiRouteWithChildren
   '/api/drive-chat': typeof ApiDriveChatRouteWithChildren
   '/api/latex': typeof ApiLatexRoute
   '/api/marble': typeof ApiMarbleRoute
+  '/chat/$threadId': typeof WorkspaceChatThreadIdRoute
+  '/settings/$': typeof WorkspaceSettingsSplatRoute
   '/api/ai/history': typeof ApiAiHistoryRouteWithChildren
   '/api/drive-chat/threads': typeof ApiDriveChatThreadsRouteWithChildren
+  '/chat': typeof WorkspaceChatIndexRoute
+  '/settings': typeof WorkspaceSettingsIndexRoute
+  '/d/$docId/$slug': typeof WorkspaceDDocIdSlugRoute
+  '/f/$folderId/$slug': typeof WorkspaceFFolderIdSlugRoute
+  '/settings/models/$providerId': typeof WorkspaceSettingsModelsProviderIdRoute
   '/api/ai/history/$docId': typeof ApiAiHistoryDocIdRoute
   '/api/drive-chat/threads/$threadId': typeof ApiDriveChatThreadsThreadIdRoute
+  '/d/$docId': typeof WorkspaceDDocIdIndexRoute
+  '/f/$folderId': typeof WorkspaceFFolderIdIndexRoute
+  '/settings/models': typeof WorkspaceSettingsModelsIndexRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
+  '/_workspace': typeof WorkspaceRouteWithChildren
+  '/_workspace/$': typeof WorkspaceSplatRoute
+  '/_workspace/drive': typeof WorkspaceDriveRoute
+  '/_workspace/shared': typeof WorkspaceSharedRoute
+  '/_workspace/starred': typeof WorkspaceStarredRoute
+  '/_workspace/templates': typeof WorkspaceTemplatesRoute
+  '/_workspace/trash': typeof WorkspaceTrashRoute
   '/api/ai': typeof ApiAiRouteWithChildren
   '/api/drive-chat': typeof ApiDriveChatRouteWithChildren
   '/api/latex': typeof ApiLatexRoute
   '/api/marble': typeof ApiMarbleRoute
+  '/_workspace/chat/$threadId': typeof WorkspaceChatThreadIdRoute
+  '/_workspace/settings/$': typeof WorkspaceSettingsSplatRoute
   '/api/ai/history': typeof ApiAiHistoryRouteWithChildren
   '/api/drive-chat/threads': typeof ApiDriveChatThreadsRouteWithChildren
+  '/_workspace/chat/': typeof WorkspaceChatIndexRoute
+  '/_workspace/settings/': typeof WorkspaceSettingsIndexRoute
+  '/_workspace/d/$docId/$slug': typeof WorkspaceDDocIdSlugRoute
+  '/_workspace/f/$folderId/$slug': typeof WorkspaceFFolderIdSlugRoute
+  '/_workspace/settings/models/$providerId': typeof WorkspaceSettingsModelsProviderIdRoute
   '/api/ai/history/$docId': typeof ApiAiHistoryDocIdRoute
   '/api/drive-chat/threads/$threadId': typeof ApiDriveChatThreadsThreadIdRoute
+  '/_workspace/d/$docId/': typeof WorkspaceDDocIdIndexRoute
+  '/_workspace/f/$folderId/': typeof WorkspaceFFolderIdIndexRoute
+  '/_workspace/settings/models/': typeof WorkspaceSettingsModelsIndexRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
     | '/'
+    | '/$'
+    | '/drive'
+    | '/shared'
+    | '/starred'
+    | '/templates'
+    | '/trash'
     | '/api/ai'
     | '/api/drive-chat'
     | '/api/latex'
     | '/api/marble'
+    | '/chat/$threadId'
+    | '/settings/$'
     | '/api/ai/history'
     | '/api/drive-chat/threads'
+    | '/chat/'
+    | '/settings/'
+    | '/d/$docId/$slug'
+    | '/f/$folderId/$slug'
+    | '/settings/models/$providerId'
     | '/api/ai/history/$docId'
     | '/api/drive-chat/threads/$threadId'
+    | '/d/$docId/'
+    | '/f/$folderId/'
+    | '/settings/models/'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
+    | '/$'
+    | '/drive'
+    | '/shared'
+    | '/starred'
+    | '/templates'
+    | '/trash'
     | '/api/ai'
     | '/api/drive-chat'
     | '/api/latex'
     | '/api/marble'
+    | '/chat/$threadId'
+    | '/settings/$'
     | '/api/ai/history'
     | '/api/drive-chat/threads'
+    | '/chat'
+    | '/settings'
+    | '/d/$docId/$slug'
+    | '/f/$folderId/$slug'
+    | '/settings/models/$providerId'
     | '/api/ai/history/$docId'
     | '/api/drive-chat/threads/$threadId'
+    | '/d/$docId'
+    | '/f/$folderId'
+    | '/settings/models'
   id:
     | '__root__'
     | '/'
+    | '/_workspace'
+    | '/_workspace/$'
+    | '/_workspace/drive'
+    | '/_workspace/shared'
+    | '/_workspace/starred'
+    | '/_workspace/templates'
+    | '/_workspace/trash'
     | '/api/ai'
     | '/api/drive-chat'
     | '/api/latex'
     | '/api/marble'
+    | '/_workspace/chat/$threadId'
+    | '/_workspace/settings/$'
     | '/api/ai/history'
     | '/api/drive-chat/threads'
+    | '/_workspace/chat/'
+    | '/_workspace/settings/'
+    | '/_workspace/d/$docId/$slug'
+    | '/_workspace/f/$folderId/$slug'
+    | '/_workspace/settings/models/$providerId'
     | '/api/ai/history/$docId'
     | '/api/drive-chat/threads/$threadId'
+    | '/_workspace/d/$docId/'
+    | '/_workspace/f/$folderId/'
+    | '/_workspace/settings/models/'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
+  WorkspaceRoute: typeof WorkspaceRouteWithChildren
   ApiAiRoute: typeof ApiAiRouteWithChildren
   ApiDriveChatRoute: typeof ApiDriveChatRouteWithChildren
   ApiLatexRoute: typeof ApiLatexRoute
@@ -152,6 +354,55 @@ declare module '@tanstack/react-router' {
       fullPath: '/'
       preLoaderRoute: typeof IndexRouteImport
       parentRoute: typeof rootRouteImport
+    }
+    '/_workspace': {
+      id: '/_workspace'
+      path: ''
+      fullPath: '/'
+      preLoaderRoute: typeof WorkspaceRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/_workspace/$': {
+      id: '/_workspace/$'
+      path: '/$'
+      fullPath: '/$'
+      preLoaderRoute: typeof WorkspaceSplatRouteImport
+      parentRoute: typeof WorkspaceRoute
+    }
+    '/_workspace/drive': {
+      id: '/_workspace/drive'
+      path: '/drive'
+      fullPath: '/drive'
+      preLoaderRoute: typeof WorkspaceDriveRouteImport
+      parentRoute: typeof WorkspaceRoute
+    }
+    '/_workspace/shared': {
+      id: '/_workspace/shared'
+      path: '/shared'
+      fullPath: '/shared'
+      preLoaderRoute: typeof WorkspaceSharedRouteImport
+      parentRoute: typeof WorkspaceRoute
+    }
+    '/_workspace/starred': {
+      id: '/_workspace/starred'
+      path: '/starred'
+      fullPath: '/starred'
+      preLoaderRoute: typeof WorkspaceStarredRouteImport
+      parentRoute: typeof WorkspaceRoute
+    }
+    '/_workspace/templates': {
+      id: '/_workspace/templates'
+      path: '/templates'
+      fullPath: '/templates'
+      preLoaderRoute: typeof WorkspaceTemplatesRouteImport
+      parentRoute: typeof WorkspaceRoute
+    }
+    '/_workspace/trash': {
+      id: '/_workspace/trash'
+      path: '/trash'
+      fullPath: '/trash'
+      preLoaderRoute: typeof WorkspaceTrashRouteImport
+      parentRoute: typeof WorkspaceRoute
     }
     '/api/ai': {
       id: '/api/ai'
@@ -181,6 +432,34 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiMarbleRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/_workspace/chat/': {
+      id: '/_workspace/chat/'
+      path: '/chat'
+      fullPath: '/chat/'
+      preLoaderRoute: typeof WorkspaceChatIndexRouteImport
+      parentRoute: typeof WorkspaceRoute
+    }
+    '/_workspace/chat/$threadId': {
+      id: '/_workspace/chat/$threadId'
+      path: '/chat/$threadId'
+      fullPath: '/chat/$threadId'
+      preLoaderRoute: typeof WorkspaceChatThreadIdRouteImport
+      parentRoute: typeof WorkspaceRoute
+    }
+    '/_workspace/settings/': {
+      id: '/_workspace/settings/'
+      path: '/settings'
+      fullPath: '/settings/'
+      preLoaderRoute: typeof WorkspaceSettingsIndexRouteImport
+      parentRoute: typeof WorkspaceRoute
+    }
+    '/_workspace/settings/$': {
+      id: '/_workspace/settings/$'
+      path: '/settings/$'
+      fullPath: '/settings/$'
+      preLoaderRoute: typeof WorkspaceSettingsSplatRouteImport
+      parentRoute: typeof WorkspaceRoute
+    }
     '/api/ai/history': {
       id: '/api/ai/history'
       path: '/history'
@@ -194,6 +473,48 @@ declare module '@tanstack/react-router' {
       fullPath: '/api/drive-chat/threads'
       preLoaderRoute: typeof ApiDriveChatThreadsRouteImport
       parentRoute: typeof ApiDriveChatRoute
+    }
+    '/_workspace/d/$docId/': {
+      id: '/_workspace/d/$docId/'
+      path: '/d/$docId'
+      fullPath: '/d/$docId/'
+      preLoaderRoute: typeof WorkspaceDDocIdIndexRouteImport
+      parentRoute: typeof WorkspaceRoute
+    }
+    '/_workspace/d/$docId/$slug': {
+      id: '/_workspace/d/$docId/$slug'
+      path: '/d/$docId/$slug'
+      fullPath: '/d/$docId/$slug'
+      preLoaderRoute: typeof WorkspaceDDocIdSlugRouteImport
+      parentRoute: typeof WorkspaceRoute
+    }
+    '/_workspace/f/$folderId/': {
+      id: '/_workspace/f/$folderId/'
+      path: '/f/$folderId'
+      fullPath: '/f/$folderId/'
+      preLoaderRoute: typeof WorkspaceFFolderIdIndexRouteImport
+      parentRoute: typeof WorkspaceRoute
+    }
+    '/_workspace/f/$folderId/$slug': {
+      id: '/_workspace/f/$folderId/$slug'
+      path: '/f/$folderId/$slug'
+      fullPath: '/f/$folderId/$slug'
+      preLoaderRoute: typeof WorkspaceFFolderIdSlugRouteImport
+      parentRoute: typeof WorkspaceRoute
+    }
+    '/_workspace/settings/models/': {
+      id: '/_workspace/settings/models/'
+      path: '/settings/models'
+      fullPath: '/settings/models/'
+      preLoaderRoute: typeof WorkspaceSettingsModelsIndexRouteImport
+      parentRoute: typeof WorkspaceRoute
+    }
+    '/_workspace/settings/models/$providerId': {
+      id: '/_workspace/settings/models/$providerId'
+      path: '/settings/models/$providerId'
+      fullPath: '/settings/models/$providerId'
+      preLoaderRoute: typeof WorkspaceSettingsModelsProviderIdRouteImport
+      parentRoute: typeof WorkspaceRoute
     }
     '/api/ai/history/$docId': {
       id: '/api/ai/history/$docId'
@@ -211,6 +532,49 @@ declare module '@tanstack/react-router' {
     }
   }
 }
+
+interface WorkspaceRouteChildren {
+  WorkspaceSplatRoute: typeof WorkspaceSplatRoute
+  WorkspaceDriveRoute: typeof WorkspaceDriveRoute
+  WorkspaceSharedRoute: typeof WorkspaceSharedRoute
+  WorkspaceStarredRoute: typeof WorkspaceStarredRoute
+  WorkspaceTemplatesRoute: typeof WorkspaceTemplatesRoute
+  WorkspaceTrashRoute: typeof WorkspaceTrashRoute
+  WorkspaceChatThreadIdRoute: typeof WorkspaceChatThreadIdRoute
+  WorkspaceSettingsSplatRoute: typeof WorkspaceSettingsSplatRoute
+  WorkspaceChatIndexRoute: typeof WorkspaceChatIndexRoute
+  WorkspaceSettingsIndexRoute: typeof WorkspaceSettingsIndexRoute
+  WorkspaceDDocIdSlugRoute: typeof WorkspaceDDocIdSlugRoute
+  WorkspaceFFolderIdSlugRoute: typeof WorkspaceFFolderIdSlugRoute
+  WorkspaceSettingsModelsProviderIdRoute: typeof WorkspaceSettingsModelsProviderIdRoute
+  WorkspaceDDocIdIndexRoute: typeof WorkspaceDDocIdIndexRoute
+  WorkspaceFFolderIdIndexRoute: typeof WorkspaceFFolderIdIndexRoute
+  WorkspaceSettingsModelsIndexRoute: typeof WorkspaceSettingsModelsIndexRoute
+}
+
+const WorkspaceRouteChildren: WorkspaceRouteChildren = {
+  WorkspaceSplatRoute: WorkspaceSplatRoute,
+  WorkspaceDriveRoute: WorkspaceDriveRoute,
+  WorkspaceSharedRoute: WorkspaceSharedRoute,
+  WorkspaceStarredRoute: WorkspaceStarredRoute,
+  WorkspaceTemplatesRoute: WorkspaceTemplatesRoute,
+  WorkspaceTrashRoute: WorkspaceTrashRoute,
+  WorkspaceChatThreadIdRoute: WorkspaceChatThreadIdRoute,
+  WorkspaceSettingsSplatRoute: WorkspaceSettingsSplatRoute,
+  WorkspaceChatIndexRoute: WorkspaceChatIndexRoute,
+  WorkspaceSettingsIndexRoute: WorkspaceSettingsIndexRoute,
+  WorkspaceDDocIdSlugRoute: WorkspaceDDocIdSlugRoute,
+  WorkspaceFFolderIdSlugRoute: WorkspaceFFolderIdSlugRoute,
+  WorkspaceSettingsModelsProviderIdRoute:
+    WorkspaceSettingsModelsProviderIdRoute,
+  WorkspaceDDocIdIndexRoute: WorkspaceDDocIdIndexRoute,
+  WorkspaceFFolderIdIndexRoute: WorkspaceFFolderIdIndexRoute,
+  WorkspaceSettingsModelsIndexRoute: WorkspaceSettingsModelsIndexRoute,
+}
+
+const WorkspaceRouteWithChildren = WorkspaceRoute._addFileChildren(
+  WorkspaceRouteChildren,
+)
 
 interface ApiAiHistoryRouteChildren {
   ApiAiHistoryDocIdRoute: typeof ApiAiHistoryDocIdRoute
@@ -259,6 +623,7 @@ const ApiDriveChatRouteWithChildren = ApiDriveChatRoute._addFileChildren(
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
+  WorkspaceRoute: WorkspaceRouteWithChildren,
   ApiAiRoute: ApiAiRouteWithChildren,
   ApiDriveChatRoute: ApiDriveChatRouteWithChildren,
   ApiLatexRoute: ApiLatexRoute,
