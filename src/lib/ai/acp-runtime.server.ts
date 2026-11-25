@@ -89,12 +89,37 @@ export interface AcpSessionDiscovery {
   meta: Record<string, unknown> | undefined
 }
 
+export const DEFAULT_ACP_PROMPT_IDLE_TIMEOUT_MS = 90_000
+export const DEFAULT_ACP_PROMPT_MAX_DURATION_MS = 600_000
+
+export type PromptAbortReason = 'idle_timeout' | 'max_duration' | 'client_abort'
+
+export interface PromptTimeoutOptions {
+  idleTimeoutMs: number
+  maxDurationMs: number
+  clientSignal?: AbortSignal
+}
+
+export interface PromptTimeoutController {
+  readonly signal: AbortSignal
+  /** Reset the idle timeout window (call on every session/update chunk). */
+  touch: () => void
+  /** Reason the signal aborted, or null if still active / cleaned up cleanly. */
+  getAbortReason: () => PromptAbortReason | null
+  /** Elapsed milliseconds since this controller was created. */
+  getElapsedMs: () => number
+  /** Clear timers and remove external signal listeners. */
+  cleanup: () => void
+}
+
 export interface AcpPromptInput {
   prompt: string
   modelId?: string
   reasoningEffort?: 'off' | 'low' | 'medium' | 'high' | 'max'
   imageDataUrls?: string[]
   signal?: AbortSignal
+  idleTimeoutMs?: number
+  maxDurationMs?: number
   onTextDelta?: (delta: string) => void
   onThoughtDelta?: (delta: string) => void
 }
@@ -118,7 +143,8 @@ export interface AcpRuntimeOptions<TSource extends string> {
   authRequiredMessage: () => string
   initTimeoutMs?: number
   sessionTimeoutMs?: number
-  promptTimeoutMs?: number
+  promptIdleTimeoutMs?: number
+  promptMaxDurationMs?: number
   createError?: (
     code: AcpErrorCode,
     message: string,
@@ -274,6 +300,303 @@ export function isAcpAuthRequiredError(error: unknown): boolean {
       message,
     )
   )
+}
+
+export function formatTimeoutDuration(ms: number): string {
+  const safeMs = Math.max(1, Math.round(ms))
+  if (safeMs % 1000 === 0) {
+    return `${safeMs / 1000}s`
+  }
+  const seconds = safeMs / 1000
+  return `${seconds < 10 ? seconds.toFixed(1) : Math.round(seconds)}s`
+}
+
+function parsePositiveMs(value: unknown): number | null {
+  if (typeof value === 'number') {
+    return Number.isFinite(value) && value > 0 ? Math.floor(value) : null
+  }
+  if (typeof value === 'string' && value.trim()) {
+    const parsed = Number(value.trim())
+    return Number.isFinite(parsed) && parsed > 0 ? Math.floor(parsed) : null
+  }
+  return null
+}
+
+export function resolvePromptTimeoutConfig(params: {
+  inputIdleTimeoutMs?: number
+  inputMaxDurationMs?: number
+  optionIdleTimeoutMs?: number
+  optionMaxDurationMs?: number
+  env?: NodeJS.ProcessEnv
+}): { idleTimeoutMs: number; maxDurationMs: number } {
+  const env = params.env ?? process.env
+  const idleTimeoutMs =
+    parsePositiveMs(params.inputIdleTimeoutMs) ??
+    parsePositiveMs(env.XDRIVE_ACP_IDLE_TIMEOUT_MS) ??
+    parsePositiveMs(params.optionIdleTimeoutMs) ??
+    DEFAULT_ACP_PROMPT_IDLE_TIMEOUT_MS
+
+  const maxDurationMs =
+    parsePositiveMs(params.inputMaxDurationMs) ??
+    parsePositiveMs(env.XDRIVE_ACP_MAX_DURATION_MS) ??
+    parsePositiveMs(params.optionMaxDurationMs) ??
+    DEFAULT_ACP_PROMPT_MAX_DURATION_MS
+
+  return { idleTimeoutMs, maxDurationMs }
+}
+
+export function createAcpClientAbortError(reason?: unknown): Error {
+  if (isAcpClientAbortError(reason) && reason instanceof Error) {
+    return reason
+  }
+  const err = new Error('Request cancelled by client')
+  err.name = 'AbortError'
+  return err
+}
+
+export function isAcpClientAbortError(error: unknown): boolean {
+  if (!error || typeof error !== 'object') return false
+  const name = (error as { name?: unknown }).name
+  return name === 'AbortError'
+}
+
+export function isAcpTimeoutError(error: unknown): boolean {
+  if (!error || typeof error !== 'object') return false
+  const record = error as {
+    name?: unknown
+    code?: unknown
+    data?: unknown
+  }
+  if (record.name === 'TimeoutError') return true
+  if (
+    record.data &&
+    typeof record.data === 'object' &&
+    (record.data as { name?: unknown }).name === 'TimeoutError'
+  ) {
+    return true
+  }
+  return false
+}
+
+export function createPromptTimeoutController(
+  options: PromptTimeoutOptions,
+): PromptTimeoutController {
+  const startedAt = Date.now()
+  const controller = new AbortController()
+  let abortReason: PromptAbortReason | null = null
+  let cleanedUp = false
+  let idleTimer: ReturnType<typeof setTimeout> | null = null
+  let maxTimer: ReturnType<typeof setTimeout> | null = null
+
+  const clearTimers = () => {
+    if (idleTimer !== null) {
+      clearTimeout(idleTimer)
+      idleTimer = null
+    }
+    if (maxTimer !== null) {
+      clearTimeout(maxTimer)
+      maxTimer = null
+    }
+  }
+
+  const abortWith = (reason: PromptAbortReason, errorReason?: unknown) => {
+    if (abortReason !== null || cleanedUp) return
+    abortReason = reason
+    clearTimers()
+    controller.abort(
+      errorReason ??
+        (reason === 'client_abort'
+          ? createAcpClientAbortError()
+          : new DOMException(
+              reason === 'idle_timeout'
+                ? 'ACP prompt idle timeout'
+                : 'ACP prompt maximum duration exceeded',
+              'TimeoutError',
+            )),
+    )
+  }
+
+  const armIdleTimer = () => {
+    if (idleTimer !== null) {
+      clearTimeout(idleTimer)
+      idleTimer = null
+    }
+    if (
+      cleanedUp ||
+      abortReason !== null ||
+      !Number.isFinite(options.idleTimeoutMs) ||
+      options.idleTimeoutMs <= 0
+    ) {
+      return
+    }
+    idleTimer = setTimeout(() => {
+      abortWith(
+        'idle_timeout',
+        new DOMException('ACP prompt idle timeout', 'TimeoutError'),
+      )
+    }, options.idleTimeoutMs)
+  }
+
+  const onClientAbort = () => {
+    abortWith(
+      'client_abort',
+      createAcpClientAbortError(options.clientSignal?.reason),
+    )
+  }
+
+  if (options.clientSignal?.aborted) {
+    onClientAbort()
+  } else {
+    options.clientSignal?.addEventListener('abort', onClientAbort, {
+      once: true,
+    })
+    armIdleTimer()
+    if (Number.isFinite(options.maxDurationMs) && options.maxDurationMs > 0) {
+      maxTimer = setTimeout(() => {
+        abortWith(
+          'max_duration',
+          new DOMException(
+            'ACP prompt maximum duration exceeded',
+            'TimeoutError',
+          ),
+        )
+      }, options.maxDurationMs)
+    }
+  }
+
+  return {
+    signal: controller.signal,
+    touch: () => {
+      if (cleanedUp || abortReason !== null) return
+      armIdleTimer()
+    },
+    getAbortReason: () => abortReason,
+    getElapsedMs: () => Math.max(0, Date.now() - startedAt),
+    cleanup: () => {
+      if (cleanedUp) return
+      cleanedUp = true
+      clearTimers()
+      options.clientSignal?.removeEventListener('abort', onClientAbort)
+    },
+  }
+}
+
+export function mapAcpPromptError(params: {
+  error: unknown
+  providerLabel: string
+  abortReason: PromptAbortReason | null
+  clientAborted: boolean
+  idleTimeoutMs: number
+  maxDurationMs: number
+  authRequiredMessage: string
+  makeError: (code: AcpErrorCode, message: string, httpStatus?: number) => Error
+}): Error {
+  const {
+    error,
+    providerLabel,
+    abortReason,
+    clientAborted,
+    idleTimeoutMs,
+    maxDurationMs,
+    authRequiredMessage,
+    makeError,
+  } = params
+
+  if (
+    abortReason === 'client_abort' ||
+    (clientAborted && abortReason === null)
+  ) {
+    return createAcpClientAbortError(error)
+  }
+
+  if (abortReason === 'idle_timeout') {
+    return makeError(
+      'TIMEOUT',
+      `${providerLabel} timed out after ${formatTimeoutDuration(idleTimeoutMs)} with no response.`,
+      504,
+    )
+  }
+
+  if (abortReason === 'max_duration') {
+    return makeError(
+      'TIMEOUT',
+      `${providerLabel} timed out (exceeded ${formatTimeoutDuration(maxDurationMs)}).`,
+      504,
+    )
+  }
+
+  if (isAcpAuthRequiredError(error)) {
+    return makeError('AUTH_REQUIRED', authRequiredMessage, 401)
+  }
+
+  if (error instanceof AcpError) {
+    return error
+  }
+
+  if (isAcpTimeoutError(error)) {
+    return makeError(
+      'TIMEOUT',
+      `${providerLabel} timed out after ${formatTimeoutDuration(idleTimeoutMs)} with no response.`,
+      504,
+    )
+  }
+
+  if (isAcpClientAbortError(error)) {
+    return error instanceof Error ? error : createAcpClientAbortError(error)
+  }
+
+  return makeError(
+    'ACP_ERROR',
+    error instanceof Error
+      ? error.message
+      : `${providerLabel} ACP prompt failed.`,
+    502,
+  )
+}
+
+export function logAcpServerError(params: {
+  route: string
+  action?: string
+  providerId: string
+  modelId?: string
+  elapsedMs?: number
+  clientAborted?: boolean
+  error: unknown
+}): void {
+  if (params.clientAborted || isAcpClientAbortError(params.error)) {
+    return
+  }
+  const code =
+    params.error instanceof AcpError
+      ? params.error.code
+      : params.error &&
+          typeof params.error === 'object' &&
+          'code' in params.error &&
+          typeof (params.error as { code?: unknown }).code === 'string'
+        ? (params.error as { code: string }).code
+        : 'UNKNOWN_ERROR'
+  const httpStatus =
+    params.error instanceof AcpError
+      ? params.error.httpStatus
+      : params.error &&
+          typeof params.error === 'object' &&
+          'httpStatus' in params.error &&
+          typeof (params.error as { httpStatus?: unknown }).httpStatus ===
+            'number'
+        ? (params.error as { httpStatus: number }).httpStatus
+        : undefined
+  const message =
+    params.error instanceof Error ? params.error.message : String(params.error)
+
+  console.error(`[${params.route}] AI request failed`, {
+    ...(params.action ? { action: params.action } : {}),
+    providerId: params.providerId,
+    ...(params.modelId ? { modelId: params.modelId } : {}),
+    code,
+    ...(httpStatus !== undefined ? { httpStatus } : {}),
+    ...(params.elapsedMs !== undefined ? { elapsedMs: params.elapsedMs } : {}),
+    error: message,
+  })
 }
 
 export function parseDataUrlImage(
@@ -536,35 +859,42 @@ export class AcpProcessRuntime<TSource extends string = string> {
     await mkdir(cwd, { recursive: true })
 
     const sessionTimeoutMs = this.options.sessionTimeoutMs ?? 20_000
+    const sessionWatchdog = createPromptTimeoutController({
+      idleTimeoutMs: sessionTimeoutMs,
+      maxDurationMs: sessionTimeoutMs,
+      clientSignal: input.signal,
+    })
     let activeSession
     try {
       activeSession = await connection.agent
         .buildSession({ cwd, mcpServers: [] })
         .start({
-          cancellationSignal: input.signal
-            ? AbortSignal.any([
-                input.signal,
-                AbortSignal.timeout(sessionTimeoutMs),
-              ])
-            : AbortSignal.timeout(sessionTimeoutMs),
+          cancellationSignal: sessionWatchdog.signal,
           stopWaitingOnCancel: true,
         })
     } catch (error) {
-      if (isAcpAuthRequiredError(error)) {
-        throw this.makeError(
-          'AUTH_REQUIRED',
-          this.options.authRequiredMessage(),
-          401,
-        )
-      }
-      throw this.makeError(
-        'ACP_ERROR',
-        error instanceof Error
-          ? error.message
-          : `Failed to create ${this.options.providerLabel} ACP session.`,
-        502,
-      )
+      throw mapAcpPromptError({
+        error,
+        providerLabel: this.options.providerLabel,
+        abortReason: sessionWatchdog.getAbortReason(),
+        clientAborted: Boolean(input.signal?.aborted),
+        idleTimeoutMs: sessionTimeoutMs,
+        maxDurationMs: sessionTimeoutMs,
+        authRequiredMessage: this.options.authRequiredMessage(),
+        makeError: (code, message, httpStatus) =>
+          this.makeError(code, message, httpStatus),
+      })
+    } finally {
+      sessionWatchdog.cleanup()
     }
+
+    const { idleTimeoutMs, maxDurationMs } = resolvePromptTimeoutConfig({
+      inputIdleTimeoutMs: input.idleTimeoutMs,
+      inputMaxDurationMs: input.maxDurationMs,
+      optionIdleTimeoutMs: this.options.promptIdleTimeoutMs,
+      optionMaxDurationMs: this.options.promptMaxDurationMs,
+    })
+    let promptWatchdog: PromptTimeoutController | null = null
 
     try {
       const discovered = extractAcpSessionDiscovery(
@@ -674,14 +1004,14 @@ export class AcpProcessRuntime<TSource extends string = string> {
         }
       }
 
-      const promptTimeoutMs = this.options.promptTimeoutMs ?? 120_000
+      promptWatchdog = createPromptTimeoutController({
+        idleTimeoutMs,
+        maxDurationMs,
+        clientSignal: input.signal,
+      })
+
       const promptPromise = activeSession.prompt(blocks, {
-        cancellationSignal: input.signal
-          ? AbortSignal.any([
-              input.signal,
-              AbortSignal.timeout(promptTimeoutMs),
-            ])
-          : AbortSignal.timeout(promptTimeoutMs),
+        cancellationSignal: promptWatchdog.signal,
         stopWaitingOnCancel: true,
       })
       // Avoid unhandled rejection if the update loop exits early.
@@ -694,6 +1024,7 @@ export class AcpProcessRuntime<TSource extends string = string> {
 
       let msg = await activeSession.nextUpdate()
       while (msg.kind !== 'stop') {
+        promptWatchdog.touch()
         const update = msg.update
         if (
           update.sessionUpdate === 'agent_message_chunk' &&
@@ -714,6 +1045,21 @@ export class AcpProcessRuntime<TSource extends string = string> {
 
       await promptPromise
 
+      const postAbortReason = promptWatchdog.getAbortReason()
+      if (stopReason === 'cancelled' && postAbortReason !== null) {
+        throw mapAcpPromptError({
+          error: new Error('Request cancelled'),
+          providerLabel: this.options.providerLabel,
+          abortReason: postAbortReason,
+          clientAborted: Boolean(input.signal?.aborted),
+          idleTimeoutMs,
+          maxDurationMs,
+          authRequiredMessage: this.options.authRequiredMessage(),
+          makeError: (code, message, httpStatus) =>
+            this.makeError(code, message, httpStatus),
+        })
+      }
+
       if (currentThought.trim()) {
         thoughts.push(currentThought.trim())
       }
@@ -727,22 +1073,19 @@ export class AcpProcessRuntime<TSource extends string = string> {
         agentVersion: init.agentInfo?.version ?? 'unknown',
       }
     } catch (error) {
-      if (isAcpAuthRequiredError(error)) {
-        throw this.makeError(
-          'AUTH_REQUIRED',
-          this.options.authRequiredMessage(),
-          401,
-        )
-      }
-      if (error instanceof AcpError) throw error
-      throw this.makeError(
-        'ACP_ERROR',
-        error instanceof Error
-          ? error.message
-          : `${this.options.providerLabel} ACP prompt failed.`,
-        502,
-      )
+      throw mapAcpPromptError({
+        error,
+        providerLabel: this.options.providerLabel,
+        abortReason: promptWatchdog?.getAbortReason() ?? null,
+        clientAborted: Boolean(input.signal?.aborted),
+        idleTimeoutMs,
+        maxDurationMs,
+        authRequiredMessage: this.options.authRequiredMessage(),
+        makeError: (code, message, httpStatus) =>
+          this.makeError(code, message, httpStatus),
+      })
     } finally {
+      promptWatchdog?.cleanup()
       activeSession.dispose()
       void connection.agent
         .request('session/close', { sessionId: activeSession.sessionId })

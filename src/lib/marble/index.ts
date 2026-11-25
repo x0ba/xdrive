@@ -25,6 +25,7 @@ export {
 export { INITIAL_AI_SUBSCRIPTIONS } from './subscriptions-seed'
 
 export {
+  DEFAULT_COLLABORATE_CLIENT_TIMEOUT_MS,
   MarbleCollaborationError,
   detectMarbleAction,
   generateMarbleCollaboration,
@@ -32,8 +33,11 @@ export {
   sanitizeHtmlWithEvergreenRules,
   sanitizeTextWithDonts,
   synthesizeMarbleOps,
+  toMarbleCollaborationError,
 } from './ai-collaborator'
 export type {
+  CollaborationProgress,
+  CollaborationProgressPhase,
   CollaborationRequest,
   CollaborationResult,
   EvergreenDesignContext,

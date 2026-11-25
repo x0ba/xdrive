@@ -83,6 +83,8 @@ export interface OpenCodeUnifiedPromptInput {
   sessionId?: string
   imageDataUrls?: string[]
   signal?: AbortSignal
+  idleTimeoutMs?: number
+  maxDurationMs?: number
   onTextDelta?: (delta: string) => void
   onThoughtDelta?: (delta: string) => void
 }
@@ -537,7 +539,6 @@ class OpenCodeAcpManager {
       },
       authRequiredMessage: () =>
         'OpenCode CLI is not signed in to OpenCode Go. Run `opencode auth login` in your terminal, select OpenCode Go, and click Refresh in Models & Providers.',
-      promptTimeoutMs: 180_000,
       createError: (code, message, httpStatus) =>
         new OpenCodeAcpError(code, message, httpStatus),
     })
@@ -853,6 +854,8 @@ export async function runOpenCodePrompt(
       reasoningEffort: input.reasoningEffort,
       imageDataUrls: input.imageDataUrls,
       signal: input.signal,
+      idleTimeoutMs: input.idleTimeoutMs,
+      maxDurationMs: input.maxDurationMs,
       onTextDelta: input.onTextDelta,
       onThoughtDelta: input.onThoughtDelta,
     })

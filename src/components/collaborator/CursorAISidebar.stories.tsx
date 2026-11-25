@@ -184,6 +184,53 @@ export const EmptyChat: Story = {
 }
 
 /**
+ * Collaborator sidebar showing the live streaming reasoning/thinking progress state during long ACP runs.
+ *
+ * @summary AI collaborator sidebar in thinking progress state
+ */
+export const ThinkingProgress: Story = {
+  args: {
+    permission: 'edit_with_ai_shared',
+    messages: [
+      {
+        id: 'msg-user-thinking',
+        role: 'user',
+        content: 'Build an interactive orbital mechanics sandbox app.',
+        timestamp: '2026-11-22T14:10:00.000Z',
+      },
+    ],
+    proposals: [],
+    selectedElements: [],
+    isThinking: true,
+    thinkingPhase: 'thinking',
+    thinkingLabel: 'Thinking… · OpenCode ACP (glm-5.3)',
+    thinkingDetail:
+      'Designing the Keplerian integrator controls and verifying xDrive CSS tokens…',
+    thinkingElapsedMs: 42_000,
+  },
+  decorators: [
+    (Story) => (
+      <div className="flex h-[680px] justify-end bg-[var(--xd-canvas)]">
+        <Story />
+      </div>
+    ),
+  ],
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    await expect(
+      canvas.getByText(/Thinking… · OpenCode ACP \(glm-5\.3\)/i),
+    ).toBeVisible()
+    await expect(canvas.getByText('42s')).toBeVisible()
+    await expect(
+      canvas.getByText(/Designing the Keplerian integrator controls/i),
+    ).toBeVisible()
+    await expect(
+      canvas.getByRole('button', { name: 'Thinking…' }),
+    ).toBeDisabled()
+  },
+}
+
+/**
  * End-to-end interactive stage paired with the collaborator sidebar, live selection chips, and sketch routing.
  *
  * @summary Stage paired with live collaborator sidebar
