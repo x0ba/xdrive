@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import type { Meta, StoryObj } from '@storybook/tanstack-react'
-import { expect, within } from 'storybook/test'
+import { expect, userEvent, within } from 'storybook/test'
+import { CHAT_DEMO_MODELS } from '#/components/chat/demo-fixtures'
 import { seedDriveFolders } from './DriveExplorer'
 import { SidebarRail } from './NavigationShell'
 import type { PrimaryNavId } from './NavigationShell'
@@ -10,6 +11,11 @@ import {
   INITIAL_WORKSPACE_DOCS,
   PREDEFINED_MARBLE_TEMPLATES,
 } from '#/lib/marble'
+
+const INITIAL_FAVORITE_MODELS = [
+  'antigravity/gemini-4-neon',
+  'opencode-go/glm-5.3',
+]
 
 function TopLeftNewButtonMenuDemo() {
   const [activeNav, setActiveNav] = useState<PrimaryNavId>('drive')
@@ -46,6 +52,10 @@ function NewAppModalDemo({ initialMode }: { initialMode: NewAppMode }) {
   const { folders } = seedDriveFolders(INITIAL_WORKSPACE_DOCS)
   const [status, setStatus] = useState<string | null>(null)
   const [open, setOpen] = useState(true)
+  const [selectedModelId, setSelectedModelId] = useState(CHAT_DEMO_MODELS[0].id)
+  const [favoriteModelIds, setFavoriteModelIds] = useState<string[]>(
+    INITIAL_FAVORITE_MODELS,
+  )
 
   return (
     <div className="flex h-[640px] items-center justify-center bg-[var(--xd-canvas)] p-6 text-[var(--xd-ink)]">
@@ -68,6 +78,12 @@ function NewAppModalDemo({ initialMode }: { initialMode: NewAppMode }) {
         initialMode={initialMode}
         templates={PREDEFINED_MARBLE_TEMPLATES}
         folders={folders}
+        models={CHAT_DEMO_MODELS}
+        selectedModelId={selectedModelId}
+        onSelectModel={setSelectedModelId}
+        favoriteModelIds={favoriteModelIds}
+        onFavoriteModelIdsChange={setFavoriteModelIds}
+        onOpenProviders={() => setStatus('Opened Models & Providers')}
         onClose={() => setOpen(false)}
         onBuildWithAgent={({ prompt, modelId }) =>
           setStatus(`Building with ${modelId}: "${prompt}"`)
@@ -83,6 +99,10 @@ function NewAppModalDemo({ initialMode }: { initialMode: NewAppMode }) {
 function InteractiveEndToEndFlowDemo() {
   const { folders } = seedDriveFolders(INITIAL_WORKSPACE_DOCS)
   const [modalMode, setModalMode] = useState<NewAppMode | null>(null)
+  const [selectedModelId, setSelectedModelId] = useState(CHAT_DEMO_MODELS[0].id)
+  const [favoriteModelIds, setFavoriteModelIds] = useState<string[]>(
+    INITIAL_FAVORITE_MODELS,
+  )
   const [log, setLog] = useState<string[]>([])
 
   return (
@@ -130,6 +150,14 @@ function InteractiveEndToEndFlowDemo() {
         initialMode={modalMode ?? 'agent'}
         templates={PREDEFINED_MARBLE_TEMPLATES}
         folders={folders}
+        models={CHAT_DEMO_MODELS}
+        selectedModelId={selectedModelId}
+        onSelectModel={setSelectedModelId}
+        favoriteModelIds={favoriteModelIds}
+        onFavoriteModelIdsChange={setFavoriteModelIds}
+        onOpenProviders={() =>
+          setLog((prev) => ['Opened Models & Providers', ...prev])
+        }
         onClose={() => setModalMode(null)}
         onBuildWithAgent={({ prompt, modelId }) =>
           setLog((prev) => [`AI Agent (${modelId}): ${prompt}`, ...prev])
@@ -190,13 +218,54 @@ export const TopLeftNewButtonMenu: Story = {
 }
 
 /**
- * New App modal opened directly to the Build with AI Agent flow.
+ * New App modal opened directly to the Build with AI Agent flow with the shared T3-Code-style ModelPicker.
  *
- * @summary Build with AI Agent creation modal
+ * @summary Build with AI Agent creation modal with shared ModelPicker
  */
 export const CreateWithAIAgentModal: Story = {
   name: 'Modal · Build with AI Agent',
   render: () => <NewAppModalDemo initialMode="agent" />,
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    const body = within(document.body)
+    const dialog = await canvas.findByRole('dialog', {
+      name: 'Create new app',
+    })
+    await expect(
+      within(dialog).getByText('Build a new app with an AI agent'),
+    ).toBeVisible()
+    // Ensure no native <select> is used for choosing the AI model
+    await expect(
+      dialog.querySelector('select[aria-label="Select AI model"]'),
+    ).toBeNull()
+
+    const trigger = within(dialog).getByRole('button', {
+      name: 'Select AI model',
+    })
+    await expect(trigger).toHaveAttribute('data-xdrive-model-picker', 'true')
+    await expect(trigger).toHaveTextContent('Gemini 4 Neon')
+
+    // Pick a destination folder, then switch model via the shared picker and
+    // verify controlled selectedModelId updates do not reset modal state
+    const folderSelect = dialog.querySelector<HTMLSelectElement>(
+      'select[aria-label="Destination folder"]',
+    )
+    if (folderSelect && folderSelect.options.length > 1) {
+      await userEvent.selectOptions(folderSelect, folderSelect.options[1].value)
+    }
+    const chosenFolder = folderSelect?.value ?? ''
+
+    await userEvent.click(trigger)
+    const search = await body.findByPlaceholderText('Search models...')
+    await expect(search).toBeVisible()
+    const glmOption = await body.findByRole('option', { name: /GLM-5\.3/i })
+    await userEvent.click(glmOption)
+
+    await expect(trigger).toHaveTextContent('GLM-5.3')
+    if (folderSelect) {
+      await expect(folderSelect.value).toBe(chosenFolder)
+    }
+  },
 }
 
 /**
