@@ -4,8 +4,6 @@ import { TanStackDevtools } from '@tanstack/react-devtools'
 
 import ClerkProvider from '../integrations/clerk/provider'
 
-import ConvexProvider from '../integrations/convex/provider'
-
 import appCss from '../styles.css?url'
 
 export const Route = createRootRoute({
@@ -40,20 +38,18 @@ function RootDocument({ children }: { children: React.ReactNode }) {
       </head>
       <body>
         <ClerkProvider>
-          <ConvexProvider>
-            {children}
-            <TanStackDevtools
-              config={{
-                position: 'bottom-right',
-              }}
-              plugins={[
-                {
-                  name: 'Tanstack Router',
-                  render: <TanStackRouterDevtoolsPanel />,
-                },
-              ]}
-            />
-          </ConvexProvider>
+          {children}
+          <TanStackDevtools
+            config={{
+              position: 'bottom-right',
+            }}
+            plugins={[
+              {
+                name: 'Tanstack Router',
+                render: <TanStackRouterDevtoolsPanel />,
+              },
+            ]}
+          />
         </ClerkProvider>
         <Scripts />
       </body>

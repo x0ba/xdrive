@@ -27,6 +27,7 @@ import {
   moveDocumentOnDisk,
   purgeExpiredTrashOnDisk,
   readDocumentOptional,
+  readDriveSettingsOnDisk,
   readTrashMeta,
   renameFolderOnDisk,
   restoreDocumentOnDisk,
@@ -35,6 +36,7 @@ import {
   trashDocumentOnDisk,
   trashFilePath,
   updateDocumentMetaOnDisk,
+  updateDriveSettingsOnDisk,
 } from '#/lib/marble/drive-storage.server'
 import type { DriveFolderColor } from '#/lib/types'
 
@@ -169,7 +171,12 @@ function savedPayload(
   }
 }
 
-async function listTrash(retentionDays = DEFAULT_TRASH_RETENTION_DAYS) {
+async function listTrash(retentionDaysParam?: number) {
+  const settings = await readDriveSettingsOnDisk()
+  const retentionDays =
+    retentionDaysParam && retentionDaysParam > 0
+      ? retentionDaysParam
+      : settings.trashRetentionDays
   const purged = await purgeExpiredTrashOnDisk(retentionDays)
   let names: string[]
   try {
@@ -202,12 +209,13 @@ async function listTrash(retentionDays = DEFAULT_TRASH_RETENTION_DAYS) {
           ])
           const trashedAt = meta?.trashedAt ?? info.mtime.toISOString()
           const trashedMs = Date.parse(trashedAt)
-          const expiresAt = new Date(
-            trashedMs + retentionDays * DAY_MS,
-          ).toISOString()
+          const expiresMs = meta?.purgeAt
+            ? Date.parse(meta.purgeAt)
+            : trashedMs + retentionDays * DAY_MS
+          const expiresAt = new Date(expiresMs).toISOString()
           const daysRemaining = Math.max(
             0,
-            Math.ceil((trashedMs + retentionDays * DAY_MS - now) / DAY_MS),
+            Math.ceil((expiresMs - now) / DAY_MS),
           )
           return {
             slug,
@@ -236,9 +244,7 @@ async function listDrive() {
 async function readWorkspace(retentionDaysParam: string | null) {
   const parsed = retentionDaysParam ? Number(retentionDaysParam) : Number.NaN
   const retentionDays =
-    Number.isFinite(parsed) && parsed > 0
-      ? parsed
-      : DEFAULT_TRASH_RETENTION_DAYS
+    Number.isFinite(parsed) && parsed > 0 ? parsed : undefined
   const workspace = await loadDriveWorkspace(nodeCountOf, retentionDays)
   return json({ ok: true, ...workspace })
 }
@@ -367,6 +373,9 @@ export async function GET({ request }: { request: Request }) {
     if (action === 'workspace') {
       return await readWorkspace(url.searchParams.get('retentionDays'))
     }
+    if (action === 'settings') {
+      return json({ ok: true, settings: await readDriveSettingsOnDisk() })
+    }
     if (action === 'list') return await listDrive()
     if (action === 'trash') return await listTrash()
     if (action === 'read') {
@@ -386,7 +395,7 @@ export async function GET({ request }: { request: Request }) {
       {
         ok: false,
         error:
-          'Expected action=workspace, action=list, action=trash, action=read, or action=slice',
+          'Expected action=workspace, action=settings, action=list, action=trash, action=read, or action=slice',
       },
       400,
     )
@@ -411,6 +420,8 @@ export async function POST({ request }: { request: Request }) {
         source: body.source,
         folderPath,
         meta: body.meta,
+        checkpoints: body.checkpoints,
+        intentHistory: body.intentHistory,
       })
       return json(savedPayload(slug, body.source, location))
     }
@@ -432,6 +443,8 @@ export async function POST({ request }: { request: Request }) {
           source: applied.source,
           folderPath: applied.folderPath,
           meta: body.meta,
+          checkpoints: body.checkpoints,
+          intentHistory: body.intentHistory,
         })
         savedLocation = {
           folderPath: location.folderPath,
@@ -520,20 +533,35 @@ export async function POST({ request }: { request: Request }) {
           folderPath:
             body.folderPath === null ? '' : optionalString(body.folderPath),
           meta: body.meta,
+          checkpoints: body.checkpoints,
+          intentHistory: body.intentHistory,
         }),
       )
+    }
+    if (action === 'update_settings') {
+      return json({
+        ok: true,
+        settings: await updateDriveSettingsOnDisk(body.settings),
+      })
     }
     if (action === 'trash') {
       if (typeof body.slug !== 'string') {
         fail(400, 'trash requires a slug string')
       }
+      const retentionDays =
+        typeof body.retentionDays === 'number' && body.retentionDays > 0
+          ? body.retentionDays
+          : undefined
       return json(
         await trashDocumentOnDisk({
           slug: body.slug,
           folderPath:
             body.folderPath === null ? '' : optionalString(body.folderPath),
           trashedAt: optionalString(body.trashedAt),
+          retentionDays,
           meta: body.meta,
+          checkpoints: body.checkpoints,
+          intentHistory: body.intentHistory,
         }),
       )
     }
@@ -567,11 +595,14 @@ export async function POST({ request }: { request: Request }) {
       return json(await emptyTrashOnDisk())
     }
     if (action === 'purge_expired') {
+      const settings = await readDriveSettingsOnDisk()
       const retentionDays =
         typeof body.retentionDays === 'number' && body.retentionDays > 0
           ? body.retentionDays
-          : DEFAULT_TRASH_RETENTION_DAYS
-      const purged = await purgeExpiredTrashOnDisk(retentionDays)
+          : settings.trashRetentionDays || DEFAULT_TRASH_RETENTION_DAYS
+      const purged = await purgeExpiredTrashOnDisk(retentionDays, {
+        recordTimestamp: true,
+      })
       return json({ ok: true, retentionDays, purged })
     }
     if (action === 'doctor') {
@@ -593,7 +624,7 @@ export async function POST({ request }: { request: Request }) {
       {
         ok: false,
         error:
-          'Expected action save, apply_ops, create_folder, rename_folder, delete_folder, move_document, update_document_meta, trash, restore, delete, empty_trash, purge_expired, doctor, or diff',
+          'Expected action save, apply_ops, create_folder, rename_folder, delete_folder, move_document, update_document_meta, update_settings, trash, restore, delete, empty_trash, purge_expired, doctor, or diff',
       },
       400,
     )

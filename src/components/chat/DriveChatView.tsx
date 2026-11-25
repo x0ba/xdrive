@@ -39,6 +39,8 @@ export interface DriveChatViewProps {
   models: DriveChatModelOption[]
   selectedModelId: string
   onSelectModel: (modelId: string) => void
+  favoriteModelIds?: string[]
+  onFavoriteModelIdsChange?: (ids: string[]) => void
   reasoningEffort: ReasoningEffort
   onSelectReasoningEffort: (effort: ReasoningEffort) => void
   mode: DriveChatMode
@@ -148,6 +150,8 @@ export function DriveChatView({
   models,
   selectedModelId,
   onSelectModel,
+  favoriteModelIds,
+  onFavoriteModelIdsChange,
   reasoningEffort,
   onSelectReasoningEffort,
   mode,
@@ -674,6 +678,8 @@ export function DriveChatView({
                 models={models}
                 selectedModelId={selectedModelId}
                 onSelectModel={onSelectModel}
+                favoriteModelIds={favoriteModelIds}
+                onFavoriteModelIdsChange={onFavoriteModelIdsChange}
                 reasoningEffort={reasoningEffort}
                 onSelectReasoningEffort={onSelectReasoningEffort}
                 mode={mode}
@@ -748,6 +754,8 @@ export function DriveChatView({
               models={models}
               selectedModelId={selectedModelId}
               onSelectModel={onSelectModel}
+              favoriteModelIds={favoriteModelIds}
+              onFavoriteModelIdsChange={onFavoriteModelIdsChange}
               reasoningEffort={reasoningEffort}
               onSelectReasoningEffort={onSelectReasoningEffort}
               mode={mode}
