@@ -501,7 +501,7 @@ export function parseMarbleAcpResponse(
   const parsed = extractJsonObject(rawText)
   if (!parsed) {
     throw new Error(
-      `${provider.name} returned a non-JSON response that could not be applied as Marble ops: "${rawText.slice(0, 220)}"`,
+      `${provider.name} returned a non-JSON response that could not be applied as Marble ops.`,
     )
   }
 
