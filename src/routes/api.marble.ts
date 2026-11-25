@@ -23,14 +23,17 @@ import {
   getTrashDir,
   isEnoent,
   listDriveSummary,
+  listTemplatesOnDisk,
   loadDriveWorkspace,
   moveDocumentOnDisk,
   purgeExpiredTrashOnDisk,
   readDocumentOptional,
   readDriveSettingsOnDisk,
   readTrashMeta,
+  renameDocumentOnDisk,
   renameFolderOnDisk,
   restoreDocumentOnDisk,
+  saveAsTemplateOnDisk,
   saveDocumentToDisk,
   titleOf,
   trashDocumentOnDisk,
@@ -38,7 +41,11 @@ import {
   updateDocumentMetaOnDisk,
   updateDriveSettingsOnDisk,
 } from '#/lib/marble/drive-storage.server'
-import type { DriveFolderColor } from '#/lib/types'
+import type {
+  DriveFolderColor,
+  MarbleAppCategory,
+  MarbleDocumentFile,
+} from '#/lib/types'
 
 type MarbleFinding = { level: string; line: number; message: string }
 type MarbleSlice = { id: string; tag: string; html: string }
@@ -377,6 +384,12 @@ export async function GET({ request }: { request: Request }) {
       return json({ ok: true, settings: await readDriveSettingsOnDisk() })
     }
     if (action === 'list') return await listDrive()
+    if (action === 'templates') {
+      return json({
+        ok: true,
+        templates: await listTemplatesOnDisk(nodeCountOf),
+      })
+    }
     if (action === 'trash') return await listTrash()
     if (action === 'read') {
       return await readDrive(
@@ -395,7 +408,7 @@ export async function GET({ request }: { request: Request }) {
       {
         ok: false,
         error:
-          'Expected action=workspace, action=settings, action=list, action=trash, action=read, or action=slice',
+          'Expected action=workspace, action=settings, action=list, action=templates, action=trash, action=read, or action=slice',
       },
       400,
     )
@@ -538,6 +551,50 @@ export async function POST({ request }: { request: Request }) {
         }),
       )
     }
+    if (action === 'save_as_template') {
+      if (typeof body.title !== 'string') {
+        fail(400, 'save_as_template requires a title string')
+      }
+      const sourceFolderPath =
+        body.sourceFolderPath === null
+          ? ''
+          : optionalString(body.sourceFolderPath)
+      return json(
+        await saveAsTemplateOnDisk({
+          sourceSlug: optionalString(body.sourceSlug),
+          sourceFolderPath,
+          source: optionalString(body.source),
+          title: body.title,
+          description: optionalString(body.description),
+          category: optionalString(body.category) as
+            MarbleAppCategory | undefined,
+          tags: Array.isArray(body.tags)
+            ? body.tags.filter((t): t is string => typeof t === 'string')
+            : undefined,
+          id: optionalString(body.id),
+          slug: optionalString(body.slug),
+          createdBy: body.createdBy as
+            MarbleDocumentFile['createdBy'] | undefined,
+          nodeCountOf,
+        }),
+      )
+    }
+    if (action === 'rename_document') {
+      if (typeof body.slug !== 'string' || typeof body.title !== 'string') {
+        fail(400, 'rename_document requires slug and title strings')
+      }
+      const folderPath =
+        body.folderPath === null ? '' : optionalString(body.folderPath)
+      return json(
+        await renameDocumentOnDisk({
+          slug: body.slug,
+          folderPath,
+          title: body.title,
+          description: optionalString(body.description),
+          nextSlug: optionalString(body.nextSlug),
+        }),
+      )
+    }
     if (action === 'update_settings') {
       return json({
         ok: true,
@@ -624,7 +681,7 @@ export async function POST({ request }: { request: Request }) {
       {
         ok: false,
         error:
-          'Expected action save, apply_ops, create_folder, rename_folder, delete_folder, move_document, update_document_meta, update_settings, trash, restore, delete, empty_trash, purge_expired, doctor, or diff',
+          'Expected action save, apply_ops, create_folder, rename_folder, delete_folder, move_document, update_document_meta, save_as_template, rename_document, update_settings, trash, restore, delete, empty_trash, purge_expired, doctor, or diff',
       },
       400,
     )

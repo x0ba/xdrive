@@ -8,6 +8,7 @@ export {
   escapeText,
   extractAddressableNodes,
   inspectMarbleNodes,
+  updateMarbleSourceTitle,
 } from './engine-client'
 export type { MarbleIframeOptions, MarbleNodeRecord } from './engine-client'
 
@@ -20,6 +21,8 @@ export {
   INITIAL_WORKSPACE_DOCS,
   MARBLE_BASE_CSS,
   PREDEFINED_MARBLE_TEMPLATES,
+  TEMPLATES_FOLDER_ID,
+  TEMPLATES_FOLDER_NAME,
 } from './templates'
 
 export { INITIAL_AI_SUBSCRIPTIONS } from './subscriptions-seed'

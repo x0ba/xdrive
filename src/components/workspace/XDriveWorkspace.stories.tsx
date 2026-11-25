@@ -1,5 +1,11 @@
 import type { Meta, StoryObj } from '@storybook/tanstack-react'
-import { INITIAL_WORKSPACE_DOCS } from '#/lib/marble'
+import { expect, userEvent, within } from 'storybook/test'
+import {
+  INITIAL_WORKSPACE_DOCS,
+  PREDEFINED_MARBLE_TEMPLATES,
+  TEMPLATES_FOLDER_NAME,
+} from '#/lib/marble'
+import type { MarbleDocumentFile } from '#/lib/types'
 import { XDriveWorkspace } from './XDriveWorkspace'
 
 /**
@@ -214,5 +220,69 @@ export const EvergreenDontsSystem: Story = {
     ],
     initialMode: 'direct',
     initialAiSidebarOpen: true,
+  },
+}
+
+const USER_TEMPLATE_STORY_DOC: MarbleDocumentFile = {
+  ...PREDEFINED_MARBLE_TEMPLATES[0],
+  id: 'tpl-user-quantum-bench',
+  slug: 'user-quantum-bench-template',
+  fileName: 'user-quantum-bench-template.mrbl',
+  title: 'User Quantum Bench Template',
+  description: 'Saved from an existing workspace experiment.',
+  category: 'custom',
+  isTemplate: true,
+  starred: false,
+  pinned: false,
+  folder: TEMPLATES_FOLDER_NAME,
+  tags: ['benchmark', 'user-template'],
+}
+
+/**
+ * Workspace Templates view listing premade templates alongside user-created templates with edit, rename, duplicate, and trash actions.
+ *
+ * @summary Workspace Templates view with premade and user-made templates
+ */
+export const TemplatesWorkspace: Story = {
+  name: 'Drive · Templates',
+  args: {
+    initialTheme: 'dark',
+    initialNav: 'templates',
+    initialActiveTabId: 'home',
+    initialDocs: INITIAL_WORKSPACE_DOCS,
+    initialTemplates: [...PREDEFINED_MARBLE_TEMPLATES, USER_TEMPLATE_STORY_DOC],
+    initialAiSidebarOpen: false,
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    await expect(
+      await canvas.findByText('LaTeX Paper & Theorem Studio'),
+    ).toBeVisible()
+    await expect(canvas.getByText('User Quantum Bench Template')).toBeVisible()
+
+    await userEvent.click(
+      canvas.getByRole('button', {
+        name: 'Actions for User Quantum Bench Template',
+      }),
+    )
+    const menu = await canvas.findByRole('menu', {
+      name: 'Actions for User Quantum Bench Template',
+    })
+    await expect(
+      within(menu).getByRole('menuitem', { name: 'Move to trash' }),
+    ).toBeVisible()
+    await userEvent.click(
+      within(menu).getByRole('menuitem', { name: 'Rename' }),
+    )
+
+    const dialog = await canvas.findByRole('dialog', {
+      name: 'Rename template',
+    })
+    const nameInput = within(dialog).getByLabelText('Document name')
+    await userEvent.clear(nameInput)
+    await userEvent.type(nameInput, 'Renamed User Bench Template')
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Save' }))
+
+    await expect(canvas.getByText('Renamed User Bench Template')).toBeVisible()
   },
 }

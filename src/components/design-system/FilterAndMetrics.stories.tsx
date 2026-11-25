@@ -5,6 +5,7 @@ import {
   DriveFileIconTile,
   DriveFileListTable,
   DriveFilePreviewCard,
+  DriveRenameDocDialog,
 } from './DriveExplorer'
 import {
   AgentHeroComposer,
@@ -397,6 +398,85 @@ export const AgentHeroReasoningLevel: Story = {
   },
 }
 
+function EditableTemplateGalleryDemo() {
+  const [templates, setTemplates] = useState<MarbleTemplateBlueprint[]>([
+    ...MOCK_TEMPLATE_BLUEPRINTS,
+    {
+      id: 'tpl-user-benchmark',
+      title: 'User Ablation Benchmark',
+      fileName: 'user-ablation-benchmark.mrbl',
+      category: 'custom',
+      description: 'Saved by the user from an existing workspace experiment.',
+      nodeCount: 96,
+      byteSize: 21400,
+      affordances: ['data-marble-editable'],
+      recommendedModel: 'Grok 4.7',
+      previewHighlights: [],
+    },
+  ])
+  const [renaming, setRenaming] = useState<MarbleTemplateBlueprint | null>(null)
+  const [lastAction, setLastAction] = useState<string | null>(null)
+
+  return (
+    <div className="mx-auto max-w-5xl space-y-4 bg-[var(--xd-canvas)] p-6 text-[var(--xd-ink)]">
+      {lastAction && (
+        <p className="rounded border border-[var(--xd-border)] bg-[var(--xd-rail)] px-3 py-1.5 text-[12px] text-[var(--xd-ink-secondary)]">
+          {lastAction}
+        </p>
+      )}
+      <div className="grid grid-cols-1 gap-3 lg:grid-cols-3">
+        {templates.map((tpl) => (
+          <TemplateGalleryCard
+            key={tpl.id}
+            template={tpl}
+            onEditTemplate={(target) =>
+              setLastAction(`Editing template ${target.title}`)
+            }
+            onDuplicateTemplate={(target) =>
+              setLastAction(`Created app from ${target.title}`)
+            }
+            onRenameTemplate={(target) => setRenaming(target)}
+            onDuplicateAsTemplate={(target) => {
+              const copy: MarbleTemplateBlueprint = {
+                ...target,
+                id: `${target.id}-copy`,
+                title: `${target.title} copy`,
+                fileName: target.fileName.replace('.mrbl', '-copy.mrbl'),
+              }
+              setTemplates((prev) => [copy, ...prev])
+              setLastAction(`Duplicated template ${target.title}`)
+            }}
+            onDeleteTemplate={(target) => {
+              setTemplates((prev) =>
+                prev.filter((item) => item.id !== target.id),
+              )
+              setLastAction(`Moved template ${target.title} to trash`)
+            }}
+          />
+        ))}
+      </div>
+
+      <DriveRenameDocDialog
+        open={renaming !== null}
+        isTemplate
+        initialTitle={renaming?.title ?? ''}
+        initialDescription={renaming?.description ?? ''}
+        onClose={() => setRenaming(null)}
+        onSubmit={({ title, description }) => {
+          if (!renaming) return
+          setTemplates((prev) =>
+            prev.map((item) =>
+              item.id === renaming.id ? { ...item, title, description } : item,
+            ),
+          )
+          setLastAction(`Renamed template to ${title}`)
+          setRenaming(null)
+        }}
+      />
+    </div>
+  )
+}
+
 export const TemplateGallery: Story = {
   render: () => (
     <div className="mx-auto max-w-5xl space-y-4 bg-[var(--xd-canvas)] p-6 text-[var(--xd-ink)]">
@@ -407,4 +487,57 @@ export const TemplateGallery: Story = {
       </div>
     </div>
   ),
+}
+
+/**
+ * Editable template gallery supporting premade and user-made templates with edit, rename, duplicate, and trash actions.
+ *
+ * @summary Editable template gallery with management actions
+ */
+export const EditableTemplateGallery: Story = {
+  render: () => <EditableTemplateGalleryDemo />,
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    const editLinks = canvas.getAllByRole('link', { name: 'Edit' })
+    await expect(editLinks[0]).toHaveAttribute(
+      'href',
+      '/d/tpl-latex-paper/template-latex-paper',
+    )
+    await expect(
+      canvas.getAllByRole('button', { name: 'Use template' }).length,
+    ).toBeGreaterThanOrEqual(4)
+
+    await userEvent.click(
+      canvas.getByRole('button', {
+        name: 'Actions for User Ablation Benchmark',
+      }),
+    )
+    const menu = await canvas.findByRole('menu', {
+      name: 'Actions for User Ablation Benchmark',
+    })
+    await userEvent.click(
+      within(menu).getByRole('menuitem', { name: 'Rename' }),
+    )
+
+    const dialog = await canvas.findByRole('dialog', {
+      name: 'Rename template',
+    })
+    const input = within(dialog).getByLabelText('Document name')
+    await userEvent.clear(input)
+    await userEvent.type(input, 'User Benchmark v2')
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Save' }))
+
+    await expect(canvas.getByText('User Benchmark v2')).toBeVisible()
+
+    await userEvent.click(
+      canvas.getByRole('button', { name: 'Actions for User Benchmark v2' }),
+    )
+    const updatedMenu = await canvas.findByRole('menu', {
+      name: 'Actions for User Benchmark v2',
+    })
+    await userEvent.click(
+      within(updatedMenu).getByRole('menuitem', { name: 'Move to trash' }),
+    )
+    await expect(canvas.queryByText('User Benchmark v2')).toBeNull()
+  },
 }

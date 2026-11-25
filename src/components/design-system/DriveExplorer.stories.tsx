@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react'
 import type { Meta, StoryObj } from '@storybook/tanstack-react'
-import { expect, within } from 'storybook/test'
+import { expect, userEvent, within } from 'storybook/test'
 import {
   DriveBreadcrumbBar,
   DriveFileIconTile,
@@ -10,7 +10,9 @@ import {
   DriveFolderDialog,
   DriveMoveDialog,
   DrivePermanentDeleteDialog,
+  DriveRenameDocDialog,
   DriveTrashList,
+  SaveAsTemplateDialog,
   TRASH_RETENTION_DAYS,
   getDescendantFolderIds,
   getFolderAncestors,
@@ -20,7 +22,11 @@ import {
 } from './DriveExplorer'
 import { FilterPillBar } from './FilterAndMetrics'
 import type { DriveViewMode, SortOption } from './FilterAndMetrics'
-import { INITIAL_WORKSPACE_DOCS } from '#/lib/marble'
+import {
+  INITIAL_WORKSPACE_DOCS,
+  TEMPLATES_FOLDER_ID,
+  TEMPLATES_FOLDER_NAME,
+} from '#/lib/marble'
 import type {
   DriveFolder,
   DriveFolderColor,
@@ -64,6 +70,9 @@ function InteractiveDriveBrowserDemo() {
     | null
   >(null)
   const [moveDoc, setMoveDoc] = useState<MarbleDocumentFile | null>(null)
+  const [renameDoc, setRenameDoc] = useState<MarbleDocumentFile | null>(null)
+  const [templateSourceDoc, setTemplateSourceDoc] =
+    useState<MarbleDocumentFile | null>(null)
 
   const ancestors = useMemo(
     () => getFolderAncestors(folders, currentFolderId),
@@ -173,6 +182,68 @@ function InteractiveDriveBrowserDemo() {
     )
   }
 
+  const handleRenameDoc = (input: { title: string; description: string }) => {
+    if (!renameDoc) return
+    setDocs((prev) =>
+      prev.map((item) =>
+        item.id === renameDoc.id
+          ? {
+              ...item,
+              title: input.title,
+              description: input.description,
+            }
+          : item,
+      ),
+    )
+    setRenameDoc(null)
+  }
+
+  const handleSaveAsTemplate = (input: {
+    title: string
+    description: string
+  }) => {
+    if (!templateSourceDoc) return
+    let targetFolder = folders.find(
+      (f) =>
+        f.parentId === null &&
+        f.name.toLowerCase() === TEMPLATES_FOLDER_NAME.toLowerCase(),
+    )
+    if (!targetFolder) {
+      const now = new Date().toISOString()
+      targetFolder = {
+        id: TEMPLATES_FOLDER_ID,
+        name: TEMPLATES_FOLDER_NAME,
+        parentId: null,
+        color: 'accent',
+        createdAt: now,
+        updatedAt: now,
+      }
+      setFolders((prev) => [...prev, targetFolder!])
+    }
+    const slug =
+      input.title
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, '-')
+        .replace(/^-|-$/g, '') || 'template'
+    const copy: MarbleDocumentFile = {
+      ...templateSourceDoc,
+      id: `tpl-${Math.random().toString(16).slice(2, 8)}`,
+      slug,
+      fileName: `${slug}.mrbl`,
+      title: input.title,
+      description: input.description,
+      isTemplate: true,
+      isEvergreen: false,
+      starred: false,
+      pinned: false,
+      folder: targetFolder.name,
+      folderId: targetFolder.id,
+      updatedAt: 'just now',
+    }
+    setDocs((prev) => [copy, ...prev])
+    setTemplateSourceDoc(null)
+  }
+
   return (
     <div className="mx-auto max-w-6xl space-y-5 bg-[var(--xd-canvas)] p-6 text-[var(--xd-ink)]">
       <DriveBreadcrumbBar
@@ -212,6 +283,8 @@ function InteractiveDriveBrowserDemo() {
           }
           onDeleteFolder={handleDeleteFolder}
           onDropDocOnFolder={handleMoveDoc}
+          onRenameDoc={setRenameDoc}
+          onSaveAsTemplateDoc={setTemplateSourceDoc}
           onMoveDoc={setMoveDoc}
           onToggleStar={(doc) =>
             setDocs((prev) =>
@@ -265,6 +338,8 @@ function InteractiveDriveBrowserDemo() {
                       doc.folderId,
                       doc.folder,
                     )}
+                    onRename={setRenameDoc}
+                    onSaveAsTemplate={setTemplateSourceDoc}
                     onMove={setMoveDoc}
                     onToggleStar={(target) =>
                       setDocs((prev) =>
@@ -285,6 +360,8 @@ function InteractiveDriveBrowserDemo() {
                   <DriveFileIconTile
                     key={doc.id}
                     doc={doc}
+                    onRename={setRenameDoc}
+                    onSaveAsTemplate={setTemplateSourceDoc}
                     onMove={setMoveDoc}
                     onToggleStar={(target) =>
                       setDocs((prev) =>
@@ -334,6 +411,23 @@ function InteractiveDriveBrowserDemo() {
           if (moveDoc) handleMoveDoc(moveDoc.id, targetFolderId)
         }}
       />
+
+      <SaveAsTemplateDialog
+        open={templateSourceDoc !== null}
+        sourceTitle={templateSourceDoc?.title ?? ''}
+        initialDescription={templateSourceDoc?.description ?? ''}
+        onClose={() => setTemplateSourceDoc(null)}
+        onSubmit={handleSaveAsTemplate}
+      />
+
+      <DriveRenameDocDialog
+        open={renameDoc !== null}
+        isTemplate={renameDoc?.isTemplate}
+        initialTitle={renameDoc?.title ?? ''}
+        initialDescription={renameDoc?.description ?? ''}
+        onClose={() => setRenameDoc(null)}
+        onSubmit={handleRenameDoc}
+      />
     </div>
   )
 }
@@ -376,6 +470,76 @@ type Story = StoryObj<typeof meta>
 export const InteractiveDriveBrowser: Story = {
   name: 'Interactive Google Drive Browser',
   render: () => <InteractiveDriveBrowserDemo />,
+}
+
+/**
+ * Saving an existing Drive file as a reusable template in the Templates folder.
+ *
+ * @summary Save file as template action and dialog flow
+ */
+export const SaveAsTemplateFlow: Story = {
+  name: 'Action · Save as Template',
+  render: () => <InteractiveDriveBrowserDemo />,
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    const actionsButton = await canvas.findByRole('button', {
+      name: 'Actions for Threshold of the Rotated Surface Code',
+    })
+    await userEvent.click(actionsButton)
+    const saveMenuItem = await canvas.findByRole('menuitem', {
+      name: 'Save as template',
+    })
+    await userEvent.click(saveMenuItem)
+
+    const dialog = await canvas.findByRole('dialog', {
+      name: 'Save as template',
+    })
+    const titleInput = within(dialog).getByLabelText('Template name')
+    await userEvent.clear(titleInput)
+    await userEvent.type(titleInput, 'Surface Code Paper Blueprint')
+    const descInput = within(dialog).getByLabelText('Template description')
+    await userEvent.clear(descInput)
+    await userEvent.type(descInput, 'Custom user-made paper template')
+    await userEvent.click(
+      within(dialog).getByRole('button', { name: 'Save template' }),
+    )
+
+    await expect(canvas.getByText('Surface Code Paper Blueprint')).toBeVisible()
+    const templatesFolderLink = canvas.getByRole('link', {
+      name: /Templates/i,
+    })
+    await userEvent.click(templatesFolderLink)
+    await expect(canvas.getByText('Surface Code Paper Blueprint')).toBeVisible()
+  },
+}
+
+/**
+ * Renaming a file via its Drive action menu and rename dialog.
+ *
+ * @summary Rename file action and dialog flow
+ */
+export const RenameFileFlow: Story = {
+  name: 'Action · Rename File',
+  render: () => <InteractiveDriveBrowserDemo />,
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    const actionsButton = await canvas.findByRole('button', {
+      name: 'Actions for Threshold of the Rotated Surface Code',
+    })
+    await userEvent.click(actionsButton)
+    const renameMenuItem = await canvas.findByRole('menuitem', {
+      name: 'Rename',
+    })
+    await userEvent.click(renameMenuItem)
+
+    const dialog = await canvas.findByRole('dialog', { name: 'Rename file' })
+    const titleInput = within(dialog).getByLabelText('Document name')
+    await userEvent.clear(titleInput)
+    await userEvent.type(titleInput, 'Rotated Surface Code v2')
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Save' }))
+
+    await expect(canvas.getByText('Rotated Surface Code v2')).toBeVisible()
+  },
 }
 
 /**

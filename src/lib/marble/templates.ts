@@ -7,6 +7,9 @@ import {
   escapeText,
 } from './engine-client'
 
+export const TEMPLATES_FOLDER_NAME = 'Templates'
+export const TEMPLATES_FOLDER_ID = 'folder-templates'
+
 export const DOCUMENT_DESIGN_SYSTEM_ID = 'ws-document-design-system'
 export const DOCUMENT_DESIGN_SYSTEM_SLUG = 'document-design-system'
 export const DOCUMENT_DONTS_SYSTEM_ID = 'ws-document-donts-system'

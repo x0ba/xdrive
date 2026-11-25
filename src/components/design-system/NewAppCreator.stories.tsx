@@ -10,7 +10,9 @@ import type { NewAppMode } from './NewAppCreator'
 import {
   INITIAL_WORKSPACE_DOCS,
   PREDEFINED_MARBLE_TEMPLATES,
+  TEMPLATES_FOLDER_NAME,
 } from '#/lib/marble'
+import type { MarbleDocumentFile } from '#/lib/types'
 
 const INITIAL_FAVORITE_MODELS = [
   'antigravity/gemini-4-neon',
@@ -48,7 +50,13 @@ function TopLeftNewButtonMenuDemo() {
   )
 }
 
-function NewAppModalDemo({ initialMode }: { initialMode: NewAppMode }) {
+function NewAppModalDemo({
+  initialMode,
+  templates = PREDEFINED_MARBLE_TEMPLATES,
+}: {
+  initialMode: NewAppMode
+  templates?: MarbleDocumentFile[]
+}) {
   const { folders } = seedDriveFolders(INITIAL_WORKSPACE_DOCS)
   const [status, setStatus] = useState<string | null>(null)
   const [open, setOpen] = useState(true)
@@ -76,7 +84,7 @@ function NewAppModalDemo({ initialMode }: { initialMode: NewAppMode }) {
       <NewAppModal
         open={open}
         initialMode={initialMode}
-        templates={PREDEFINED_MARBLE_TEMPLATES}
+        templates={templates}
         folders={folders}
         models={CHAT_DEMO_MODELS}
         selectedModelId={selectedModelId}
@@ -286,6 +294,94 @@ export const CreateWithAIAgentModal: Story = {
 export const CreateFromTemplateModal: Story = {
   name: 'Modal · New from Template',
   render: () => <NewAppModalDemo initialMode="templates" />,
+}
+
+const USER_AND_PREMADE_TEMPLATES: MarbleDocumentFile[] = [
+  ...PREDEFINED_MARBLE_TEMPLATES,
+  {
+    ...PREDEFINED_MARBLE_TEMPLATES[0],
+    id: 'tpl-user-ablation-app',
+    slug: 'custom-ablation-explorer',
+    fileName: 'custom-ablation-explorer.mrbl',
+    title: 'Custom Ablation Explorer',
+    description: 'User-saved interactive experiment explorer template.',
+    category: 'custom',
+    isTemplate: true,
+    starred: false,
+    pinned: false,
+    folder: TEMPLATES_FOLDER_NAME,
+    tags: ['custom', 'ablation'],
+  },
+]
+
+/**
+ * New from Template modal combining premade and user-created templates with Apps category filtering and creation flow.
+ *
+ * @summary New from Template with premade and user-created templates
+ */
+export const CreateFromUserAndPremadeTemplates: Story = {
+  name: 'Modal · Premade + User Templates',
+  render: () => (
+    <NewAppModalDemo
+      initialMode="templates"
+      templates={USER_AND_PREMADE_TEMPLATES}
+    />
+  ),
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    const dialog = await canvas.findByRole('dialog', {
+      name: 'Create new app',
+    })
+    const templatesTab = within(dialog).getByRole('tab', {
+      name: /Templates/i,
+    })
+    await expect(templatesTab).toHaveTextContent(
+      String(USER_AND_PREMADE_TEMPLATES.length),
+    )
+
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Apps' }))
+    const userTemplateCard = await within(dialog).findByRole('button', {
+      name: /Custom Ablation Explorer/i,
+    })
+    await userEvent.click(userTemplateCard)
+
+    const nameInput = within(dialog).getByLabelText('New app name')
+    await userEvent.clear(nameInput)
+    await userEvent.type(nameInput, 'My Ablation Study')
+    await userEvent.click(
+      within(dialog).getByRole('button', { name: 'Create app' }),
+    )
+
+    await expect(
+      canvas.getByText(
+        'Created "My Ablation Study" from Custom Ablation Explorer',
+      ),
+    ).toBeVisible()
+  },
+}
+
+/**
+ * New from Template modal empty state when the user has deleted all templates from their Templates folder.
+ *
+ * @summary Empty Templates folder modal state
+ */
+export const EmptyTemplatesModal: Story = {
+  name: 'Modal · Empty Templates',
+  render: () => <NewAppModalDemo initialMode="templates" templates={[]} />,
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    const dialog = await canvas.findByRole('dialog', {
+      name: 'Create new app',
+    })
+    await expect(
+      within(dialog).getByText(
+        /No templates in your Templates folder yet\. Save any file as a template from My Drive to start from it here\./i,
+      ),
+    ).toBeVisible()
+    await expect(
+      within(dialog).getByRole('button', { name: 'Create app' }),
+    ).toBeDisabled()
+  },
 }
 
 /**

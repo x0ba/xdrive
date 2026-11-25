@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { CSSProperties } from 'react'
 import { useCanGoBack, useRouter } from '@tanstack/react-router'
-import { Search, X } from 'lucide-react'
+import { LayoutTemplate, Search, X } from 'lucide-react'
 import { WorkspaceLink } from '#/components/routing/WorkspaceLink'
 import {
   TrashedDocumentView,
@@ -36,10 +36,12 @@ import {
   DriveFolderDialog,
   DriveMoveDialog,
   DrivePermanentDeleteDialog,
+  DriveRenameDocDialog,
   DriveTrashList,
   FilterPillBar,
   NewAppButton,
   NewAppModal,
+  SaveAsTemplateDialog,
   SidebarRail,
   TRASH_RETENTION_DAYS,
   TemplateGalleryCard,
@@ -114,6 +116,8 @@ import {
   INITIAL_AI_SUBSCRIPTIONS,
   MarbleCollaborationError,
   PREDEFINED_MARBLE_TEMPLATES,
+  TEMPLATES_FOLDER_ID,
+  TEMPLATES_FOLDER_NAME,
   applyDocumentContentUpdate,
   applyMarbleOpsClient,
   buildInteractiveMarbleIframeDoc,
@@ -123,6 +127,7 @@ import {
   generateMarbleCollaboration,
   inspectMarbleNodes,
   resolveEvergreenDesignContext,
+  updateMarbleSourceTitle,
 } from '#/lib/marble'
 import type { MarbleActionKind } from '#/lib/marble'
 import {
@@ -256,6 +261,7 @@ export interface XDriveWorkspaceProps {
   initialNav?: PrimaryNavId
   initialActiveTabId?: 'home' | string
   initialDocs?: MarbleDocumentFile[]
+  initialTemplates?: MarbleDocumentFile[]
   initialOpenDocIds?: string[]
   initialTrashedDocIds?: string[]
   trashRetentionDays?: number
@@ -270,7 +276,11 @@ type SimulatedRole = SharePermissionLevel | 'owner'
 type Place = { tabId: 'home' | string; nav: PrimaryNavId }
 type Trail = { cursor: number; places: Place[] }
 type LivePreview = { docId: string; ops: MarbleOp[]; run: number }
-type NamerState = { sourceId: string; title: string }
+type NamerState = {
+  sourceId: string
+  title: string
+  mode: 'duplicate' | 'use-template'
+}
 type FolderModalState =
   | { mode: 'create'; parentId: string | null }
   | { mode: 'rename'; folder: DriveFolder }
@@ -714,6 +724,48 @@ function folderDiskPath(
     .join('/')
 }
 
+function normalizeSeedTemplate(tpl: MarbleDocumentFile): MarbleDocumentFile {
+  return {
+    ...tpl,
+    isTemplate: true,
+    isEvergreen: false,
+    starred: false,
+    pinned: false,
+    folder: tpl.folder || TEMPLATES_FOLDER_NAME,
+  }
+}
+
+function slugifyLocalTitle(title: string, fallback = 'untitled'): string {
+  const slug = title
+    .normalize('NFKD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/\.mrbl$/i, '')
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 64)
+  return slug || fallback
+}
+
+function uniqueSlugForDocs(
+  baseTitle: string,
+  docs: readonly MarbleDocumentFile[],
+  excludeDocId?: string,
+  fallback = 'untitled',
+): string {
+  const used = new Set(
+    docs.filter((doc) => doc.id !== excludeDocId).map((doc) => doc.slug),
+  )
+  const base = slugifyLocalTitle(baseTitle, fallback)
+  let candidate = base
+  let suffix = 2
+  while (used.has(candidate)) {
+    candidate = `${base}-${suffix}`
+    suffix += 1
+  }
+  return candidate
+}
+
 function serializeDocMeta(doc: MarbleDocumentFile) {
   return {
     id: doc.id,
@@ -740,6 +792,7 @@ export function XDriveWorkspace({
   initialNav = 'drive',
   initialActiveTabId = 'home',
   initialDocs = [],
+  initialTemplates,
   initialOpenDocIds,
   initialTrashedDocIds,
   trashRetentionDays = TRASH_RETENTION_DAYS,
@@ -769,10 +822,20 @@ export function XDriveWorkspace({
     () => new Set(initialTrashedDocIds ?? []),
     [initialTrashedDocIds],
   )
-  const initialAvailableDocs = useMemo(
-    () => [...initialDocs, ...PREDEFINED_MARBLE_TEMPLATES],
-    [initialDocs],
+  const seededTemplateList = useMemo(
+    () =>
+      (initialTemplates ?? PREDEFINED_MARBLE_TEMPLATES).map(
+        normalizeSeedTemplate,
+      ),
+    [initialTemplates],
   )
+  const initialAvailableDocs = useMemo(() => {
+    const existingIds = new Set(initialDocs.map((doc) => doc.id))
+    return [
+      ...initialDocs,
+      ...seededTemplateList.filter((tpl) => !existingIds.has(tpl.id)),
+    ]
+  }, [initialDocs, seededTemplateList])
   const [theme, setTheme] = useState(initialTheme)
   const [localNav, setLocalNav] = useState<PrimaryNavId>(initialNav)
   const [localActiveTabId, setLocalActiveTabId] = useState<'home' | string>(
@@ -789,9 +852,12 @@ export function XDriveWorkspace({
     ).filter((id) => !initialTrashedSet.has(id)),
   )
   const initialDrive = useMemo(() => {
+    if (syncWithServer) {
+      return { folders: [] as DriveFolder[], docs: [] as MarbleDocumentFile[] }
+    }
     const nowMs = Date.now()
     const seeded = seedDriveFolders(
-      initialDocs.map((doc) => {
+      initialAvailableDocs.map((doc) => {
         if (!initialTrashedSet.has(doc.id)) return { ...doc }
         const index = (initialTrashedDocIds ?? []).indexOf(doc.id)
         const daysAgo = index <= 0 ? 2 : Math.min(26, 2 + index * 9)
@@ -809,7 +875,13 @@ export function XDriveWorkspace({
       trashRetentionDays,
     )
     return { folders: seeded.folders, docs: prunedDocs }
-  }, [initialDocs, initialTrashedDocIds, initialTrashedSet, trashRetentionDays])
+  }, [
+    syncWithServer,
+    initialAvailableDocs,
+    initialTrashedDocIds,
+    initialTrashedSet,
+    trashRetentionDays,
+  ])
   const [folders, setFolders] = useState<DriveFolder[]>(
     () => initialDrive.folders,
   )
@@ -818,6 +890,11 @@ export function XDriveWorkspace({
   >(null)
   const [folderModal, setFolderModal] = useState<FolderModalState | null>(null)
   const [moveDocId, setMoveDocId] = useState<string | null>(null)
+  const [renameDocTarget, setRenameDocTarget] =
+    useState<MarbleDocumentFile | null>(null)
+  const [saveTemplateTarget, setSaveTemplateTarget] =
+    useState<MarbleDocumentFile | null>(null)
+  const [templateSearchQuery, setTemplateSearchQuery] = useState('')
   const [permanentDeleteTarget, setPermanentDeleteTarget] =
     useState<PermanentDeleteTarget | null>(null)
   const [trashUndo, setTrashUndo] = useState<TrashUndoBanner | null>(null)
@@ -825,9 +902,6 @@ export function XDriveWorkspace({
     useState<NewAppMode | null>(null)
   const [docs, setDocs] = useState<MarbleDocumentFile[]>(
     () => initialDrive.docs,
-  )
-  const [templates, setTemplates] = useState<MarbleDocumentFile[]>(() =>
-    PREDEFINED_MARBLE_TEMPLATES.map((doc) => ({ ...doc })),
   )
   const [trail, setTrail] = useState<Trail>({
     cursor: 0,
@@ -1011,12 +1085,44 @@ export function XDriveWorkspace({
     [trashedDocs, searchQuery],
   )
 
-  const library = useMemo(
-    () => [...activeDocs, ...templates],
-    [activeDocs, templates],
+  const templatesFolder = useMemo(
+    () =>
+      folders.find(
+        (folder) =>
+          folder.parentId === null &&
+          folder.name.toLowerCase() === TEMPLATES_FOLDER_NAME.toLowerCase(),
+      ) ?? null,
+    [folders],
   )
+  const templateFolderIds = useMemo(() => {
+    if (!templatesFolder) return new Set<string>()
+    return getDescendantFolderIds(folders, templatesFolder.id)
+  }, [folders, templatesFolder])
+
+  const isDocInTemplatesFolder = (doc: MarbleDocumentFile): boolean => {
+    if (doc.folderId && templateFolderIds.has(doc.folderId)) return true
+    const folderName = doc.folder.trim().toLowerCase()
+    return (
+      folderName === TEMPLATES_FOLDER_NAME.toLowerCase() ||
+      folderName.startsWith(`${TEMPLATES_FOLDER_NAME.toLowerCase()}/`)
+    )
+  }
+
+  const isDocTemplate = (doc: MarbleDocumentFile): boolean =>
+    Boolean(doc.isTemplate || isDocInTemplatesFolder(doc))
+
+  const templates = useMemo(
+    () => activeDocs.filter(isDocTemplate),
+    [activeDocs, templateFolderIds],
+  )
+  const defaultCreateFolderId =
+    currentFolderId && templateFolderIds.has(currentFolderId)
+      ? null
+      : currentFolderId
+
+  const library = activeDocs
   libraryRef.current = library
-  allDocsRef.current = [...docs, ...templates]
+  allDocsRef.current = docs
   foldersRef.current = folders
   for (const doc of library) sourceRef.current.set(doc.id, doc.source)
 
@@ -1190,13 +1296,25 @@ export function XDriveWorkspace({
     }
   }, [])
 
+  function populateFallbackTemplatesIfEmpty() {
+    if (foldersRef.current.length > 0 || allDocsRef.current.length > 0) return
+    const fallback = seedDriveFolders(seededTemplateList)
+    foldersRef.current = fallback.folders
+    allDocsRef.current = fallback.docs
+    setFolders(fallback.folders)
+    setDocs(fallback.docs)
+  }
+
   async function reloadWorkspaceFromServer() {
     if (!syncWithServer) return
     try {
       const response = await fetch('/api/marble?action=workspace', {
         cache: 'no-store',
       })
-      if (!response.ok) return
+      if (!response.ok) {
+        populateFallbackTemplatesIfEmpty()
+        return
+      }
       const data = (await response.json()) as {
         ok?: boolean
         folders?: DriveFolder[]
@@ -1208,9 +1326,11 @@ export function XDriveWorkspace({
         !Array.isArray(data.folders) ||
         !Array.isArray(data.docs)
       ) {
+        populateFallbackTemplatesIfEmpty()
         return
       }
       foldersRef.current = data.folders
+      allDocsRef.current = data.docs
       setFolders(data.folders)
       setDocs(data.docs)
 
@@ -1269,6 +1389,7 @@ export function XDriveWorkspace({
       }
     } catch {
       // Static/Storybook environments do not expose /api/marble.
+      populateFallbackTemplatesIfEmpty()
     } finally {
       setDriveLoading(false)
     }
@@ -1694,13 +1815,13 @@ export function XDriveWorkspace({
   const filteredDocs = useMemo(() => {
     const scoped =
       currentFolderId === null
-        ? activeDocs
+        ? activeDocs.filter((doc) => !isDocTemplate(doc))
         : activeDocs.filter((doc) => doc.folderId === currentFolderId)
     return scoped
       .filter((doc) => matchesQuery(doc, searchQuery))
       .slice()
       .sort((a, b) => compareDocs(a, b, sortBy))
-  }, [activeDocs, currentFolderId, searchQuery, sortBy])
+  }, [activeDocs, currentFolderId, searchQuery, sortBy, templateFolderIds])
 
   const starredDocs = useMemo(() => {
     return activeDocs
@@ -1711,7 +1832,18 @@ export function XDriveWorkspace({
   }, [activeDocs, searchQuery, sortBy])
 
   const sharedDocs = useMemo(() => activeDocs.filter(isShared), [activeDocs])
-  const blueprints = useMemo(() => templates.map(toBlueprint), [templates])
+  const filteredTemplates = useMemo(
+    () =>
+      templates
+        .filter((tpl) => matchesQuery(tpl, templateSearchQuery))
+        .slice()
+        .sort((a, b) => compareDocs(a, b, sortBy)),
+    [templates, templateSearchQuery, sortBy],
+  )
+  const filteredBlueprints = useMemo(
+    () => filteredTemplates.map(toBlueprint),
+    [filteredTemplates],
+  )
   const evergreenDocs = useMemo(
     () =>
       activeDocs.filter(
@@ -1769,6 +1901,7 @@ export function XDriveWorkspace({
       category: doc.category,
       nodeCount: doc.nodeCount,
       starred: doc.starred,
+      isTemplate: isDocTemplate(doc),
     }))
 
   const sidebarKey = activeDoc?.id ?? 'drive'
@@ -2016,11 +2149,6 @@ export function XDriveWorkspace({
       doc.id === id ? updater(doc) : doc,
     )
     setDocs((prev) =>
-      prev.some((doc) => doc.id === id)
-        ? prev.map((doc) => (doc.id === id ? updater(doc) : doc))
-        : prev,
-    )
-    setTemplates((prev) =>
       prev.some((doc) => doc.id === id)
         ? prev.map((doc) => (doc.id === id ? updater(doc) : doc))
         : prev,
@@ -2279,7 +2407,6 @@ export function XDriveWorkspace({
     docOverride?: MarbleDocumentFile,
   ) {
     const doc = docOverride ?? allDocsRef.current.find((item) => item.id === id)
-    if (doc?.isTemplate) return
     const token = (saveTokens.current.get(id) ?? 0) + 1
     saveTokens.current.set(id, token)
     const folderPath = folderDiskPath(foldersRef.current, doc?.folderId ?? null)
@@ -2349,7 +2476,7 @@ export function XDriveWorkspace({
         ...doc.intentHistory.filter((item) => item.id !== proposal.id),
       ].slice(0, 20),
     }))
-    if (targetDoc && !targetDoc.isTemplate) {
+    if (targetDoc) {
       void syncDriveApi({
         action: 'update_document_meta',
         slug: targetDoc.slug,
@@ -3048,15 +3175,24 @@ export function XDriveWorkspace({
       title.trim() || `${sourceDoc.title} copy`,
       YOU.name,
     )
-    const targetFolderId = sourceDoc.isTemplate
-      ? currentFolderId
-      : (sourceDoc.folderId ?? currentFolderId)
+    const targetFolderId =
+      namer.mode === 'use-template'
+        ? defaultCreateFolderId
+        : sourceDoc.folderId !== undefined
+          ? sourceDoc.folderId
+          : defaultCreateFolderId
     const targetFolder = targetFolderId
       ? folders.find((f) => f.id === targetFolderId)
       : null
+    const isTemplateCopy =
+      namer.mode === 'duplicate' &&
+      (isDocTemplate(sourceDoc) ||
+        (targetFolder ? templateFolderIds.has(targetFolder.id) : false))
     const adopted = adoptDocument(copy, allDocsRef.current)
     const placed: MarbleDocumentFile = {
       ...adopted,
+      ...(isTemplateCopy ? { id: `tpl-${shortSha()}` } : {}),
+      isTemplate: isTemplateCopy,
       folderId: targetFolder ? targetFolder.id : null,
       folder: targetFolder ? targetFolder.name : 'My Drive',
     }
@@ -3065,6 +3201,199 @@ export function XDriveWorkspace({
     setNamer(null)
     openDocument(placed.id, { doc: placed })
     persist(placed.id, placed.slug, placed.source, [], placed.source, placed)
+  }
+
+  function saveDocumentAsTemplate(
+    sourceDoc: MarbleDocumentFile,
+    input: { title: string; description: string },
+  ) {
+    const cleanTitle = input.title.trim()
+    if (!cleanTitle) return
+    const cleanDescription = input.description.trim()
+    const now = new Date().toISOString()
+
+    let targetTemplatesFolder = foldersRef.current.find(
+      (folder) =>
+        folder.parentId === null &&
+        folder.name.toLowerCase() === TEMPLATES_FOLDER_NAME.toLowerCase(),
+    )
+    if (!targetTemplatesFolder) {
+      targetTemplatesFolder = {
+        id: TEMPLATES_FOLDER_ID,
+        name: TEMPLATES_FOLDER_NAME,
+        parentId: null,
+        color: 'accent',
+        createdAt: now,
+        updatedAt: now,
+      }
+      const nextFolders = [...foldersRef.current, targetTemplatesFolder]
+      foldersRef.current = nextFolders
+      setFolders(nextFolders)
+    }
+
+    const liveSource = sourceRef.current.get(sourceDoc.id) ?? sourceDoc.source
+    const nextSource = updateMarbleSourceTitle(liveSource, cleanTitle)
+    const nextSlug = uniqueSlugForDocs(
+      cleanTitle,
+      allDocsRef.current,
+      undefined,
+      'template',
+    )
+    const tplDoc: MarbleDocumentFile = {
+      ...sourceDoc,
+      id: `tpl-${shortSha()}`,
+      slug: nextSlug,
+      fileName: `${nextSlug}.mrbl`,
+      title: cleanTitle,
+      description: cleanDescription,
+      isTemplate: true,
+      isEvergreen: false,
+      source: nextSource,
+      nodeCount: countMarbleNodes(nextSource),
+      byteSize: byteSizeOf(nextSource),
+      version: 1,
+      syncState: 'saved',
+      createdAt: now,
+      updatedAt: now,
+      createdBy: YOU,
+      lastEditedBy: YOU,
+      starred: false,
+      pinned: false,
+      tags:
+        sourceDoc.tags.length > 0 ? [...sourceDoc.tags] : [sourceDoc.category],
+      folder: targetTemplatesFolder.name,
+      folderId: targetTemplatesFolder.id,
+      trashedAt: null,
+      share: {
+        isPublicLinkEnabled: false,
+        publicLinkUrl: `https://xdrive.app/d/${nextSlug}`,
+        publicPermission: 'view_only',
+        allowDuplication: true,
+        sharedAiDailyLimit: 40,
+        sharedAiUsedToday: 0,
+        collaborators: [],
+      },
+      checkpoints: [],
+      intentHistory: [],
+    }
+
+    sourceRef.current.set(tplDoc.id, tplDoc.source)
+    allDocsRef.current = [tplDoc, ...allDocsRef.current]
+    setDocs((prev) => [tplDoc, ...prev])
+    setSaveTemplateTarget(null)
+    setAgentStatus(`Saved "${tplDoc.title}" to ${TEMPLATES_FOLDER_NAME}`)
+
+    if (syncWithServer) {
+      void syncDriveApi(
+        {
+          action: 'save_as_template',
+          sourceSlug: sourceDoc.slug,
+          sourceFolderPath: folderDiskPath(
+            foldersRef.current,
+            sourceDoc.folderId,
+          ),
+          source: liveSource,
+          title: cleanTitle,
+          description: cleanDescription,
+          category: sourceDoc.category,
+          tags: tplDoc.tags,
+          id: tplDoc.id,
+          slug: tplDoc.slug,
+          createdBy: YOU,
+        },
+        { reloadOnError: true },
+      ).then((res) => {
+        if (!res) return
+        const serverFolder = res.folder as DriveFolder | undefined
+        const serverDoc = res.doc as MarbleDocumentFile | undefined
+        if (serverFolder) {
+          const updatedFolders = foldersRef.current.map((f) =>
+            f.parentId === null &&
+            f.name.toLowerCase() === TEMPLATES_FOLDER_NAME.toLowerCase()
+              ? serverFolder
+              : f,
+          )
+          foldersRef.current = updatedFolders
+          setFolders(updatedFolders)
+        }
+        if (serverDoc && serverDoc.id === tplDoc.id) {
+          sourceRef.current.set(serverDoc.id, serverDoc.source)
+          patchFile(tplDoc.id, () => serverDoc)
+        }
+      })
+    }
+  }
+
+  function renameDocument(
+    targetDoc: MarbleDocumentFile,
+    input: { title: string; description: string },
+  ) {
+    const cleanTitle = input.title.trim()
+    if (!cleanTitle) return
+    const nextDescription = input.description.trim()
+    const currentSource =
+      sourceRef.current.get(targetDoc.id) ?? targetDoc.source
+    const nextSource = updateMarbleSourceTitle(currentSource, cleanTitle)
+    const isEvergreen =
+      Boolean(targetDoc.isEvergreen) ||
+      targetDoc.slug === DOCUMENT_DESIGN_SYSTEM_SLUG ||
+      targetDoc.slug === DOCUMENT_DONTS_SYSTEM_SLUG
+    const nextSlug = isEvergreen
+      ? targetDoc.slug
+      : uniqueSlugForDocs(
+          cleanTitle,
+          allDocsRef.current,
+          targetDoc.id,
+          targetDoc.slug,
+        )
+    const now = new Date().toISOString()
+
+    sourceRef.current.set(targetDoc.id, nextSource)
+    patchFile(targetDoc.id, (doc) => ({
+      ...doc,
+      title: cleanTitle,
+      description: nextDescription,
+      slug: nextSlug,
+      fileName: `${nextSlug}.mrbl`,
+      source: nextSource,
+      updatedAt: now,
+    }))
+    setRenameDocTarget(null)
+    setAgentStatus(`Renamed to "${cleanTitle}"`)
+
+    if (syncWithServer) {
+      void syncDriveApi(
+        {
+          action: 'rename_document',
+          slug: targetDoc.slug,
+          folderPath: folderDiskPath(foldersRef.current, targetDoc.folderId),
+          title: cleanTitle,
+          description: nextDescription,
+          nextSlug,
+        },
+        { reloadOnError: true },
+      ).then((res) => {
+        if (!res || typeof res.slug !== 'string') return
+        const serverSlug = res.slug
+        const serverFileName =
+          typeof res.fileName === 'string' ? res.fileName : `${serverSlug}.mrbl`
+        const serverSource =
+          typeof res.source === 'string' ? res.source : nextSource
+        sourceRef.current.set(targetDoc.id, serverSource)
+        patchFile(targetDoc.id, (doc) => ({
+          ...doc,
+          slug: serverSlug,
+          fileName: serverFileName,
+          source: serverSource,
+          isTemplate:
+            typeof res.isTemplate === 'boolean'
+              ? res.isTemplate
+              : doc.isTemplate,
+          updatedAt:
+            typeof res.updatedAt === 'string' ? res.updatedAt : doc.updatedAt,
+        }))
+      })
+    }
   }
 
   function navigateToFolder(folderId: string | null) {
@@ -3151,7 +3480,14 @@ export function XDriveWorkspace({
     setDocs((prev) =>
       prev.map((doc) =>
         doc.folderId && removed.has(doc.folderId)
-          ? { ...doc, folderId: folder.parentId, folder: parentName }
+          ? {
+              ...doc,
+              folderId: folder.parentId,
+              folder: parentName,
+              isTemplate: folder.parentId
+                ? templateFolderIds.has(folder.parentId)
+                : false,
+            }
           : doc,
       ),
     )
@@ -3197,18 +3533,23 @@ export function XDriveWorkspace({
       targetFolder ? targetFolder.id : null,
     )
     const folderName = targetFolder ? targetFolder.name : 'My Drive'
+    const nextIsTemplate = targetFolder
+      ? templateFolderIds.has(targetFolder.id)
+      : false
     const now = new Date().toISOString()
     patchFile(docId, (doc) => ({
       ...doc,
       folderId: targetFolder ? targetFolder.id : null,
       folder: folderName,
+      isTemplate: nextIsTemplate,
       updatedAt: now,
     }))
-    if (targetDoc && !targetDoc.isTemplate) {
+    if (targetDoc) {
       const nextDoc: MarbleDocumentFile = {
         ...targetDoc,
         folderId: targetFolder ? targetFolder.id : null,
         folder: folderName,
+        isTemplate: nextIsTemplate,
         updatedAt: now,
       }
       void syncDriveApi(
@@ -3229,7 +3570,7 @@ export function XDriveWorkspace({
   function toggleFlag(id: string, flag: 'starred' | 'pinned') {
     const targetDoc = allDocsRef.current.find((doc) => doc.id === id)
     patchFile(id, (doc) => ({ ...doc, [flag]: !doc[flag] }))
-    if (targetDoc && !targetDoc.isTemplate) {
+    if (targetDoc) {
       const nextDoc = { ...targetDoc, [flag]: !targetDoc[flag] }
       void syncDriveApi({
         action: 'update_document_meta',
@@ -3291,7 +3632,7 @@ export function XDriveWorkspace({
 
   function moveDocumentToTrash(docId: string) {
     const target = docs.find((doc) => doc.id === docId)
-    if (!target || target.trashedAt || target.isTemplate) return
+    if (!target || target.trashedAt) return
     const trashedAt = new Date().toISOString()
     setDocs((prev) =>
       prev.map((doc) => (doc.id === docId ? { ...doc, trashedAt } : doc)),
@@ -3596,6 +3937,9 @@ export function XDriveWorkspace({
         const adopted = adoptDocument(draftDoc, allDocsRef.current)
         const created: MarbleDocumentFile = {
           ...adopted,
+          isTemplate: matchedFolder
+            ? templateFolderIds.has(matchedFolder.id)
+            : false,
           folder: matchedFolder ? matchedFolder.name : 'My Drive',
           folderId: matchedFolder ? matchedFolder.id : null,
         }
@@ -3709,6 +4053,9 @@ export function XDriveWorkspace({
           ...doc,
           folderId: nextFolderId,
           folder: nextFolderName,
+          isTemplate: nextFolderId
+            ? templateFolderIds.has(nextFolderId)
+            : false,
           updatedAt: now,
         }))
         const movedDoc = allDocsRef.current.find((d) => d.id === target.id)
@@ -4562,9 +4909,19 @@ export function XDriveWorkspace({
       {
         id: 'nav-templates',
         label: 'Templates',
-        hint: 'Predefined .mrbl templates',
+        hint: 'Saved & premade .mrbl templates',
         run: () => visit('home', 'templates'),
       },
+      ...(activeDoc && !isDocTemplate(activeDoc)
+        ? [
+            {
+              id: 'action-save-as-template',
+              label: 'Save current file as template',
+              hint: `Save a copy into ${TEMPLATES_FOLDER_NAME}`,
+              run: () => setSaveTemplateTarget(activeDoc),
+            },
+          ]
+        : []),
       {
         id: 'nav-shared',
         label: 'Shared',
@@ -4834,7 +5191,7 @@ export function XDriveWorkspace({
                 createAppFromTemplate({
                   template: tpl,
                   title: tpl.title,
-                  folderId: currentFolderId,
+                  folderId: defaultCreateFolderId,
                 })
               }
               onCreateFolder={() =>
@@ -4858,6 +5215,14 @@ export function XDriveWorkspace({
           pinnedApps={pinnedApps}
           activeAppId={activeDoc?.id}
           onSelectApp={openDocument}
+          onRenameApp={(appId) => {
+            const doc = findDoc(appId)
+            if (doc) setRenameDocTarget(doc)
+          }}
+          onSaveAsTemplateApp={(appId) => {
+            const doc = findDoc(appId)
+            if (doc) setSaveTemplateTarget(doc)
+          }}
           onMoveApp={(appId) => setMoveDocId(appId)}
           onDuplicateApp={(appId) => {
             const doc = findDoc(appId)
@@ -4865,6 +5230,7 @@ export function XDriveWorkspace({
               setNamer({
                 sourceId: doc.id,
                 title: `${doc.title} copy`,
+                mode: 'duplicate',
               })
             }
           }}
@@ -4937,23 +5303,36 @@ export function XDriveWorkspace({
                 }
                 category={activeDoc.category}
                 fileName={activeDoc.fileName}
+                isTemplate={isDocTemplate(activeDoc)}
                 syncState={activeDoc.syncState}
                 interactionMode={mode}
                 modeHrefs={docModeHrefs}
                 onChangeInteractionMode={(next) => setMode(activeDoc.id, next)}
+                onSaveAsTemplate={
+                  !isDocTemplate(activeDoc)
+                    ? () => setSaveTemplateTarget(activeDoc)
+                    : undefined
+                }
+                onUseTemplate={
+                  isDocTemplate(activeDoc)
+                    ? () =>
+                        setNamer({
+                          sourceId: activeDoc.id,
+                          title: `${activeDoc.title} copy`,
+                          mode: 'use-template',
+                        })
+                    : undefined
+                }
                 onDuplicate={() =>
                   setNamer({
                     sourceId: activeDoc.id,
                     title: `${activeDoc.title} copy`,
+                    mode: 'duplicate',
                   })
                 }
                 shareHref={activeDocShareHref}
                 onOpenShare={() => setShareId(activeDoc.id)}
-                onMoveToTrash={
-                  !activeDoc.isTemplate
-                    ? () => moveDocumentToTrash(activeDoc.id)
-                    : undefined
-                }
+                onMoveToTrash={() => moveDocumentToTrash(activeDoc.id)}
                 sharePermission={
                   simulatedRole === 'owner'
                     ? activeDoc.share.publicPermission
@@ -5318,7 +5697,10 @@ export function XDriveWorkspace({
                     <DriveFileListTable
                       folders={visibleFolders}
                       folderCounts={folderItemCounts}
-                      docs={filteredDocs.map(forCard)}
+                      docs={filteredDocs.map((doc) => ({
+                        ...forCard(doc),
+                        isTemplate: isDocTemplate(doc),
+                      }))}
                       resolveFolderLabel={(doc) =>
                         getFolderPathLabel(folders, doc.folderId, doc.folder)
                       }
@@ -5332,11 +5714,20 @@ export function XDriveWorkspace({
                       onDeleteFolder={deleteFolder}
                       onDropDocOnFolder={moveDocumentToFolder}
                       onOpenDoc={(doc) => openDocument(doc.id)}
+                      onRenameDoc={(doc) => {
+                        const live = findDoc(doc.id)
+                        if (live) setRenameDocTarget(live)
+                      }}
+                      onSaveAsTemplateDoc={(doc) => {
+                        const live = findDoc(doc.id)
+                        if (live) setSaveTemplateTarget(live)
+                      }}
                       onMoveDoc={(doc) => setMoveDocId(doc.id)}
                       onDuplicateDoc={(doc) =>
                         setNamer({
                           sourceId: doc.id,
                           title: `${doc.title} copy`,
+                          mode: 'duplicate',
                         })
                       }
                       onShareDoc={(doc) => setShareId(doc.id)}
@@ -5390,18 +5781,26 @@ export function XDriveWorkspace({
                               {filteredDocs.map((doc) => (
                                 <DriveFilePreviewCard
                                   key={doc.id}
-                                  doc={forCard(doc)}
+                                  doc={{
+                                    ...forCard(doc),
+                                    isTemplate: isDocTemplate(doc),
+                                  }}
                                   folderLabel={getFolderPathLabel(
                                     folders,
                                     doc.folderId,
                                     doc.folder,
                                   )}
                                   onOpen={() => openDocument(doc.id)}
+                                  onRename={() => setRenameDocTarget(doc)}
+                                  onSaveAsTemplate={() =>
+                                    setSaveTemplateTarget(doc)
+                                  }
                                   onMove={() => setMoveDocId(doc.id)}
                                   onDuplicate={() =>
                                     setNamer({
                                       sourceId: doc.id,
                                       title: `${doc.title} copy`,
+                                      mode: 'duplicate',
                                     })
                                   }
                                   onShare={() => setShareId(doc.id)}
@@ -5420,13 +5819,21 @@ export function XDriveWorkspace({
                               {filteredDocs.map((doc) => (
                                 <DriveFileIconTile
                                   key={doc.id}
-                                  doc={forCard(doc)}
+                                  doc={{
+                                    ...forCard(doc),
+                                    isTemplate: isDocTemplate(doc),
+                                  }}
                                   onOpen={() => openDocument(doc.id)}
+                                  onRename={() => setRenameDocTarget(doc)}
+                                  onSaveAsTemplate={() =>
+                                    setSaveTemplateTarget(doc)
+                                  }
                                   onMove={() => setMoveDocId(doc.id)}
                                   onDuplicate={() =>
                                     setNamer({
                                       sourceId: doc.id,
                                       title: `${doc.title} copy`,
+                                      mode: 'duplicate',
                                     })
                                   }
                                   onShare={() => setShareId(doc.id)}
@@ -5476,16 +5883,28 @@ export function XDriveWorkspace({
                   ) : viewMode === 'list' ? (
                     <DriveFileListTable
                       folders={[]}
-                      docs={starredDocs.map(forCard)}
+                      docs={starredDocs.map((doc) => ({
+                        ...forCard(doc),
+                        isTemplate: isDocTemplate(doc),
+                      }))}
                       resolveFolderLabel={(doc) =>
                         getFolderPathLabel(folders, doc.folderId, doc.folder)
                       }
                       onOpenDoc={(doc) => openDocument(doc.id)}
+                      onRenameDoc={(doc) => {
+                        const live = findDoc(doc.id)
+                        if (live) setRenameDocTarget(live)
+                      }}
+                      onSaveAsTemplateDoc={(doc) => {
+                        const live = findDoc(doc.id)
+                        if (live) setSaveTemplateTarget(live)
+                      }}
                       onMoveDoc={(doc) => setMoveDocId(doc.id)}
                       onDuplicateDoc={(doc) =>
                         setNamer({
                           sourceId: doc.id,
                           title: `${doc.title} copy`,
+                          mode: 'duplicate',
                         })
                       }
                       onShareDoc={(doc) => setShareId(doc.id)}
@@ -5498,13 +5917,19 @@ export function XDriveWorkspace({
                       {starredDocs.map((doc) => (
                         <DriveFileIconTile
                           key={doc.id}
-                          doc={forCard(doc)}
+                          doc={{
+                            ...forCard(doc),
+                            isTemplate: isDocTemplate(doc),
+                          }}
                           onOpen={() => openDocument(doc.id)}
+                          onRename={() => setRenameDocTarget(doc)}
+                          onSaveAsTemplate={() => setSaveTemplateTarget(doc)}
                           onMove={() => setMoveDocId(doc.id)}
                           onDuplicate={() =>
                             setNamer({
                               sourceId: doc.id,
                               title: `${doc.title} copy`,
+                              mode: 'duplicate',
                             })
                           }
                           onShare={() => setShareId(doc.id)}
@@ -5519,18 +5944,24 @@ export function XDriveWorkspace({
                       {starredDocs.map((doc) => (
                         <DriveFilePreviewCard
                           key={doc.id}
-                          doc={forCard(doc)}
+                          doc={{
+                            ...forCard(doc),
+                            isTemplate: isDocTemplate(doc),
+                          }}
                           folderLabel={getFolderPathLabel(
                             folders,
                             doc.folderId,
                             doc.folder,
                           )}
                           onOpen={() => openDocument(doc.id)}
+                          onRename={() => setRenameDocTarget(doc)}
+                          onSaveAsTemplate={() => setSaveTemplateTarget(doc)}
                           onMove={() => setMoveDocId(doc.id)}
                           onDuplicate={() =>
                             setNamer({
                               sourceId: doc.id,
                               title: `${doc.title} copy`,
+                              mode: 'duplicate',
                             })
                           }
                           onShare={() => setShareId(doc.id)}
@@ -5607,24 +6038,124 @@ export function XDriveWorkspace({
 
               {nav === 'templates' && (
                 <div className="mx-auto flex w-full max-w-5xl flex-col gap-4 px-6 py-6">
-                  <h1 className="text-[16px] font-semibold tracking-tight">
-                    Templates
-                  </h1>
-                  <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
-                    {blueprints.map((template) => (
-                      <TemplateGalleryCard
-                        key={template.id}
-                        template={template}
-                        onPreviewTemplate={() => openDocument(template.id)}
-                        onDuplicateTemplate={() =>
-                          setNamer({
-                            sourceId: template.id,
-                            title: `${template.title} copy`,
-                          })
-                        }
-                      />
-                    ))}
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <div className="flex items-center gap-2.5">
+                      <h1 className="text-[16px] font-semibold tracking-tight">
+                        Templates
+                      </h1>
+                      <span className="xd-tabular text-[12px] text-[var(--xd-ink-muted)]">
+                        {templates.length}{' '}
+                        {templates.length === 1 ? 'template' : 'templates'}
+                      </span>
+                    </div>
+
+                    <div className="flex items-center gap-2">
+                      <div className="relative flex items-center">
+                        <Search className="pointer-events-none absolute left-2.5 h-3.5 w-3.5 text-[var(--xd-ink-muted)]" />
+                        <input
+                          type="search"
+                          value={templateSearchQuery}
+                          onChange={(e) =>
+                            setTemplateSearchQuery(e.target.value)
+                          }
+                          placeholder="Filter templates..."
+                          aria-label="Filter templates"
+                          className="h-7 w-48 rounded border border-[var(--xd-border)] bg-[var(--xd-rail)] pl-8 pr-2.5 text-[12px] text-[var(--xd-ink)] placeholder:text-[var(--xd-ink-muted)] focus:border-[var(--xd-accent)] focus:outline-none"
+                        />
+                      </div>
+
+                      {templatesFolder && (
+                        <WorkspaceLink
+                          href={folderHref(templatesFolder)}
+                          onNavigate={() =>
+                            navigateToFolder(templatesFolder.id)
+                          }
+                          className="inline-flex h-7 items-center gap-1.5 rounded border border-[var(--xd-border)] bg-[var(--xd-canvas)] px-2.5 text-[12px] font-medium text-[var(--xd-ink-secondary)] transition-colors hover:bg-[var(--xd-surface-hover)] hover:text-[var(--xd-ink)]"
+                        >
+                          <LayoutTemplate className="h-3.5 w-3.5 text-[var(--xd-accent)]" />
+                          <span>Open folder</span>
+                        </WorkspaceLink>
+                      )}
+                    </div>
                   </div>
+
+                  {agentStatus && (
+                    <div className="flex items-center justify-between rounded-md border border-[var(--xd-border)] bg-[var(--xd-rail)] px-3 py-2 text-[12px] text-[var(--xd-ink-secondary)]">
+                      <span>{agentStatus}</span>
+                      <button
+                        type="button"
+                        onClick={() => setAgentStatus(null)}
+                        aria-label="Dismiss status"
+                        className="text-[var(--xd-ink-muted)] hover:text-[var(--xd-ink)]"
+                      >
+                        <X className="h-3.5 w-3.5" />
+                      </button>
+                    </div>
+                  )}
+
+                  {templates.length === 0 ? (
+                    <div className="flex flex-col items-center justify-center rounded-lg border border-dashed border-[var(--xd-border-strong)] px-6 py-14 text-center">
+                      <p className="text-[13.5px] font-medium text-[var(--xd-ink)]">
+                        No templates yet
+                      </p>
+                      <p className="mt-1 max-w-sm text-[12px] text-[var(--xd-ink-muted)]">
+                        Templates are stored in your {TEMPLATES_FOLDER_NAME}{' '}
+                        folder. Open any file’s menu and choose “Save as
+                        template” to add one.
+                      </p>
+                      <button
+                        type="button"
+                        onClick={() => navigateToFolder(null)}
+                        className="mt-4 rounded border border-[var(--xd-border-strong)] bg-[var(--xd-canvas)] px-3 py-1.5 text-[12px] font-medium text-[var(--xd-ink)] transition-colors hover:bg-[var(--xd-surface-hover)]"
+                      >
+                        Go to My Drive
+                      </button>
+                    </div>
+                  ) : filteredBlueprints.length === 0 ? (
+                    <div className="flex flex-col items-center justify-center rounded-lg border border-dashed border-[var(--xd-border-strong)] px-6 py-12 text-center">
+                      <p className="text-[13px] font-medium text-[var(--xd-ink)]">
+                        No templates match this filter
+                      </p>
+                      <button
+                        type="button"
+                        onClick={() => setTemplateSearchQuery('')}
+                        className="mt-3 rounded border border-[var(--xd-border-strong)] bg-[var(--xd-canvas)] px-3 py-1.5 text-[12px] font-medium text-[var(--xd-ink)] hover:bg-[var(--xd-surface-hover)]"
+                      >
+                        Clear search
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+                      {filteredBlueprints.map((template) => (
+                        <TemplateGalleryCard
+                          key={template.id}
+                          template={template}
+                          onEditTemplate={() => openDocument(template.id)}
+                          onDuplicateTemplate={() =>
+                            setNamer({
+                              sourceId: template.id,
+                              title: `${template.title} copy`,
+                              mode: 'use-template',
+                            })
+                          }
+                          onRenameTemplate={() => {
+                            const doc = findDoc(template.id)
+                            if (doc) setRenameDocTarget(doc)
+                          }}
+                          onDuplicateAsTemplate={() =>
+                            setNamer({
+                              sourceId: template.id,
+                              title: `${template.title} copy`,
+                              mode: 'duplicate',
+                            })
+                          }
+                          onDeleteTemplate={() =>
+                            moveDocumentToTrash(template.id)
+                          }
+                        />
+                      ))}
+                    </div>
+                  )}
                 </div>
               )}
 
@@ -5864,7 +6395,7 @@ export function XDriveWorkspace({
         modeHrefs={{ agent: newAgentHref, templates: newTemplateHref }}
         templates={templates}
         folders={folders}
-        initialFolderId={currentFolderId}
+        initialFolderId={defaultCreateFolderId}
         models={driveChatModels}
         selectedModelId={modelId}
         onSelectModel={handleSelectModel}
@@ -5989,17 +6520,12 @@ export function XDriveWorkspace({
           }
           onConfigChange={(config) => {
             patchFile(shareDoc.id, (doc) => ({ ...doc, share: config }))
-            if (!shareDoc.isTemplate) {
-              void syncDriveApi({
-                action: 'update_document_meta',
-                slug: shareDoc.slug,
-                folderPath: folderDiskPath(
-                  foldersRef.current,
-                  shareDoc.folderId,
-                ),
-                meta: serializeDocMeta({ ...shareDoc, share: config }),
-              })
-            }
+            void syncDriveApi({
+              action: 'update_document_meta',
+              slug: shareDoc.slug,
+              folderPath: folderDiskPath(foldersRef.current, shareDoc.folderId),
+              meta: serializeDocMeta({ ...shareDoc, share: config }),
+            })
           }}
           onSimulatePermission={(level) => {
             setSimulatedRole(level)
@@ -6018,7 +6544,11 @@ export function XDriveWorkspace({
               commitDuplicate(namer.title)
             }}
           >
-            <h2 className="text-[13.5px] font-semibold">Duplicate file</h2>
+            <h2 className="text-[13.5px] font-semibold">
+              {namer.mode === 'use-template'
+                ? 'New from template'
+                : 'Duplicate file'}
+            </h2>
             <input
               autoFocus
               aria-label="App name"
@@ -6045,6 +6575,27 @@ export function XDriveWorkspace({
             </div>
           </form>
         </div>
+      )}
+      {saveTemplateTarget && (
+        <SaveAsTemplateDialog
+          open
+          sourceTitle={saveTemplateTarget.title}
+          initialDescription={saveTemplateTarget.description}
+          onClose={() => setSaveTemplateTarget(null)}
+          onSubmit={(input) =>
+            saveDocumentAsTemplate(saveTemplateTarget, input)
+          }
+        />
+      )}
+      {renameDocTarget && (
+        <DriveRenameDocDialog
+          open
+          isTemplate={isDocTemplate(renameDocTarget)}
+          initialTitle={renameDocTarget.title}
+          initialDescription={renameDocTarget.description}
+          onClose={() => setRenameDocTarget(null)}
+          onSubmit={(input) => renameDocument(renameDocTarget, input)}
+        />
       )}
       {paletteOpen && (
         <div

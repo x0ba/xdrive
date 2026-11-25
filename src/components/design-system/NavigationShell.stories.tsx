@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import type { Meta, StoryObj } from '@storybook/tanstack-react'
-import { expect, within } from 'storybook/test'
+import { expect, userEvent, within } from 'storybook/test'
 import {
   BrowserTabStrip,
   DocumentBreadcrumbHeader,
@@ -234,6 +234,57 @@ export const LeftNavigationRail: Story = {
   },
 }
 
+function DocumentToolbarTemplateActionsDemo() {
+  const [regularMode, setRegularMode] =
+    useState<CanvasInteractionMode>('direct')
+  const [templateMode, setTemplateMode] =
+    useState<CanvasInteractionMode>('direct')
+  const [status, setStatus] = useState('')
+
+  return (
+    <div className="space-y-4 bg-[var(--xd-canvas)] p-6 text-[var(--xd-ink)]">
+      <div className="overflow-hidden rounded-md border border-[var(--xd-border)]">
+        <DocumentBreadcrumbHeader
+          folder="Papers"
+          category="latex"
+          fileName="surface-code.mrbl"
+          syncState="saved"
+          interactionMode={regularMode}
+          onChangeInteractionMode={setRegularMode}
+          onSaveAsTemplate={() =>
+            setStatus('Saved surface-code.mrbl as template')
+          }
+          onDuplicate={() => setStatus('Duplicated surface-code.mrbl')}
+          onMoveToTrash={() => setStatus('Trashed surface-code.mrbl')}
+          sharePermission="edit_with_ai_shared"
+          isPublicLinkEnabled={false}
+        />
+      </div>
+
+      <div className="overflow-hidden rounded-md border border-[var(--xd-border)]">
+        <DocumentBreadcrumbHeader
+          folder="Templates"
+          category="latex"
+          fileName="latex-studio.mrbl"
+          isTemplate
+          syncState="saved"
+          interactionMode={templateMode}
+          onChangeInteractionMode={setTemplateMode}
+          onUseTemplate={() => setStatus('Created app from latex-studio.mrbl')}
+          onDuplicate={() => setStatus('Duplicated latex-studio.mrbl')}
+          onMoveToTrash={() => setStatus('Trashed latex-studio.mrbl')}
+          sharePermission="edit_with_ai_shared"
+          isPublicLinkEnabled={false}
+        />
+      </div>
+
+      {status && (
+        <p className="text-[12px] text-[var(--xd-ink-secondary)]">{status}</p>
+      )}
+    </div>
+  )
+}
+
 /**
  * Active document breadcrumb header with canvas interaction mode switcher and share indicator.
  *
@@ -241,4 +292,29 @@ export const LeftNavigationRail: Story = {
  */
 export const DocumentToolbar: Story = {
   render: () => <DocumentToolbarDemo />,
+}
+
+/**
+ * Document breadcrumb header showing template vs regular document actions (`Save as template` vs `Template` badge + `Use template` + `Move to trash`).
+ *
+ * @summary Document toolbar template actions
+ */
+export const DocumentToolbarTemplateActions: Story = {
+  render: () => <DocumentToolbarTemplateActionsDemo />,
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    const saveBtn = canvas.getByRole('button', { name: 'Save as template' })
+    await expect(saveBtn).toBeVisible()
+    await userEvent.click(saveBtn)
+    await expect(
+      canvas.getByText('Saved surface-code.mrbl as template'),
+    ).toBeVisible()
+
+    await expect(canvas.getByText('Template')).toBeVisible()
+    const useBtn = canvas.getByRole('button', { name: 'Use template' })
+    await expect(useBtn).toBeVisible()
+    await expect(
+      canvas.getAllByRole('button', { name: 'Move to trash' }),
+    ).toHaveLength(2)
+  },
 }

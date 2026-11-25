@@ -231,6 +231,7 @@ export function duplicateMarbleTemplate(
     fileName: `${slug}.mrbl`,
     title: newTitle,
     isTemplate: false,
+    isEvergreen: false,
     templateId: templateDoc.id,
     source,
     nodeCount: countMarbleNodes(source),
@@ -344,13 +345,27 @@ function previewText(text: string): string {
   return `${clean.slice(0, 139)}…`
 }
 
+export function updateMarbleSourceTitle(source: string, title: string): string {
+  const escaped = escapeText(title)
+  if (/<title(\s[^>]*)?>[\s\S]*?<\/title>/i.test(source)) {
+    return source.replace(
+      /<title(\s[^>]*)?>[\s\S]*?<\/title>/i,
+      (_match, attrs: string | undefined) => {
+        return `<title${attrs ?? ''}>${escaped}</title>`
+      },
+    )
+  }
+  if (/<head(\s[^>]*)?>/i.test(source)) {
+    return source.replace(
+      /<head(\s[^>]*)?>/i,
+      (match) => `${match}\n<title>${escaped}</title>`,
+    )
+  }
+  return source
+}
+
 function retitleSource(source: string, title: string): string {
-  const next = source.replace(
-    /<title(\s[^>]*)?>[\s\S]*?<\/title>/i,
-    (_match, attrs: string | undefined) => {
-      return `<title${attrs ?? ''}>${escapeText(title)}</title>`
-    },
-  )
+  const next = updateMarbleSourceTitle(source, title)
   const heading = pickPrimaryHeading(parseElements(next))
   if (!heading?.id) return next
   return applyOne(next, { type: 'setText', id: heading.id, text: title }).source
