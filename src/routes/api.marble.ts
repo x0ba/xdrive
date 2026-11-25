@@ -1,14 +1,4 @@
-import { randomBytes } from 'node:crypto'
-import {
-  mkdir,
-  readdir,
-  readFile,
-  rename,
-  rm,
-  stat,
-  writeFile,
-} from 'node:fs/promises'
-import path from 'node:path'
+import { readdir, readFile, stat } from 'node:fs/promises'
 
 // @ts-expect-error @bdhmin/marble has no type declarations.
 import * as marbleCollab from '@bdhmin/marble/collab'
@@ -19,6 +9,34 @@ import * as marbleGuard from '@bdhmin/marble/guard'
 // @ts-expect-error @bdhmin/marble has no type declarations.
 import * as marblePatcher from '@bdhmin/marble/patcher'
 import { createFileRoute } from '@tanstack/react-router'
+
+import {
+  DEFAULT_TRASH_RETENTION_DAYS,
+  DriveStorageError,
+  SLUG_PATTERN,
+  assertSlug,
+  byteSizeOf,
+  createFolderOnDisk,
+  deleteDocumentPermanentlyOnDisk,
+  deleteFolderOnDisk,
+  emptyTrashOnDisk,
+  getTrashDir,
+  isEnoent,
+  listDriveSummary,
+  loadDriveWorkspace,
+  moveDocumentOnDisk,
+  purgeExpiredTrashOnDisk,
+  readDocumentOptional,
+  readTrashMeta,
+  renameFolderOnDisk,
+  restoreDocumentOnDisk,
+  saveDocumentToDisk,
+  titleOf,
+  trashDocumentOnDisk,
+  trashFilePath,
+  updateDocumentMetaOnDisk,
+} from '#/lib/marble/drive-storage.server'
+import type { DriveFolderColor } from '#/lib/types'
 
 type MarbleFinding = { level: string; line: number; message: string }
 type MarbleSlice = { id: string; tag: string; html: string }
@@ -54,11 +72,7 @@ const sliceOf = marblePatcher.sliceOf as (
   id: string,
 ) => MarbleSlice
 
-const DRIVE_DIR = path.resolve(process.cwd(), 'marble-drive')
-const TRASH_DIR = path.resolve(DRIVE_DIR, '.trash')
-const DEFAULT_TRASH_RETENTION_DAYS = 30
 const DAY_MS = 24 * 60 * 60 * 1000
-const SLUG_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/
 const GUARDED_TYPES = new Set([
   'setText',
   'setInner',
@@ -94,24 +108,11 @@ function json(data: unknown, status = 200) {
 }
 
 function errorResponse(error: unknown) {
-  const status = error instanceof MarbleHttpError ? error.status : 400
+  const status =
+    error instanceof MarbleHttpError || error instanceof DriveStorageError
+      ? error.status
+      : 400
   return json({ ok: false, error: messageOf(error) }, status)
-}
-
-function isEnoent(error: unknown) {
-  return (
-    typeof error === 'object' &&
-    error !== null &&
-    'code' in error &&
-    (error as { code?: unknown }).code === 'ENOENT'
-  )
-}
-
-function assertSlug(slug: string) {
-  if (!SLUG_PATTERN.test(slug) || slug.includes('..')) {
-    fail(400, 'Invalid slug')
-  }
-  return slug
 }
 
 function requireSlug(value: string | null | undefined) {
@@ -123,248 +124,12 @@ function fileNameFor(slug: string) {
   return `${assertSlug(slug)}.mrbl`
 }
 
-function mrblPath(slug: string) {
-  const fileName = fileNameFor(slug)
-  const full = path.resolve(DRIVE_DIR, fileName)
-  if (path.dirname(full) !== path.resolve(DRIVE_DIR)) {
-    fail(400, 'Invalid slug')
-  }
-  return full
-}
-
-function trashPath(slug: string) {
-  const fileName = fileNameFor(slug)
-  const full = path.resolve(TRASH_DIR, fileName)
-  if (path.dirname(full) !== path.resolve(TRASH_DIR)) {
-    fail(400, 'Invalid slug')
-  }
-  return full
-}
-
-function trashMetaPath(slug: string) {
-  const full = path.resolve(TRASH_DIR, `${assertSlug(slug)}.meta.json`)
-  if (path.dirname(full) !== path.resolve(TRASH_DIR)) {
-    fail(400, 'Invalid slug')
-  }
-  return full
-}
-
-async function readTrashMeta(slug: string): Promise<{ trashedAt: string } | null> {
-  try {
-    const raw = await readFile(trashMetaPath(slug), 'utf8')
-    const parsed = JSON.parse(raw) as { trashedAt?: unknown }
-    if (typeof parsed.trashedAt === 'string' && !Number.isNaN(Date.parse(parsed.trashedAt))) {
-      return { trashedAt: parsed.trashedAt }
-    }
-    return null
-  } catch (error) {
-    if (isEnoent(error)) return null
-    return null
-  }
-}
-
-async function purgeExpiredTrash(retentionDays = DEFAULT_TRASH_RETENTION_DAYS) {
-  let names: string[]
-  try {
-    names = await readdir(TRASH_DIR)
-  } catch (error) {
-    if (isEnoent(error)) return [] as string[]
-    throw error
-  }
-
-  const now = Date.now()
-  const cutoffMs = retentionDays * DAY_MS
-  const purged: string[] = []
-
-  for (const fileName of names) {
-    if (!fileName.endsWith('.mrbl')) continue
-    const slug = fileName.slice(0, -'.mrbl'.length)
-    if (!SLUG_PATTERN.test(slug) || slug.includes('..')) continue
-    const full = trashPath(slug)
-    const meta = await readTrashMeta(slug)
-    let trashedMs = meta ? Date.parse(meta.trashedAt) : Number.NaN
-    if (Number.isNaN(trashedMs)) {
-      try {
-        const info = await stat(full)
-        trashedMs = info.mtimeMs
-      } catch (error) {
-        if (isEnoent(error)) continue
-        throw error
-      }
-    }
-    if (now - trashedMs >= cutoffMs) {
-      await Promise.all([
-        rm(full, { force: true }),
-        rm(trashMetaPath(slug), { force: true }),
-      ])
-      purged.push(slug)
-    }
-  }
-
-  return purged
-}
-
-async function listTrash(retentionDays = DEFAULT_TRASH_RETENTION_DAYS) {
-  const purged = await purgeExpiredTrash(retentionDays)
-  let names: string[]
-  try {
-    names = await readdir(TRASH_DIR)
-  } catch (error) {
-    if (isEnoent(error)) {
-      return json({
-        ok: true,
-        retentionDays,
-        purged,
-        documents: [],
-      })
-    }
-    throw error
-  }
-
-  const now = Date.now()
-  const documents = (
-    await Promise.all(
-      names
-        .filter((name) => name.endsWith('.mrbl'))
-        .map(async (fileName) => {
-          const slug = fileName.slice(0, -'.mrbl'.length)
-          if (!SLUG_PATTERN.test(slug) || slug.includes('..')) return null
-          const full = trashPath(slug)
-          const [source, info, meta] = await Promise.all([
-            readFile(full, 'utf8'),
-            stat(full),
-            readTrashMeta(slug),
-          ])
-          const trashedAt = meta?.trashedAt ?? info.mtime.toISOString()
-          const trashedMs = Date.parse(trashedAt)
-          const expiresAt = new Date(
-            trashedMs + retentionDays * DAY_MS,
-          ).toISOString()
-          const daysRemaining = Math.max(
-            0,
-            Math.ceil((trashedMs + retentionDays * DAY_MS - now) / DAY_MS),
-          )
-          return {
-            slug,
-            fileName,
-            title: titleOf(source, slug),
-            nodeCount: nodeCountOf(source),
-            byteSize: byteSizeOf(source),
-            trashedAt,
-            expiresAt,
-            daysRemaining,
-          }
-        }),
-    )
-  ).filter((document) => document !== null)
-
-  documents.sort((a, b) => (a.trashedAt < b.trashedAt ? 1 : -1))
-  return json({ ok: true, retentionDays, purged, documents })
-}
-
-async function trashDocument(slug: string, trashedAtIso?: string) {
-  const validSlug = assertSlug(slug)
-  const trashedAt =
-    trashedAtIso && !Number.isNaN(Date.parse(trashedAtIso))
-      ? trashedAtIso
-      : new Date().toISOString()
-  await mkdir(TRASH_DIR, { recursive: true })
-  const src = mrblPath(validSlug)
-  const dst = trashPath(validSlug)
-  let existedOnDisk = false
-  try {
-    await rename(src, dst)
-    existedOnDisk = true
-  } catch (error) {
-    if (!isEnoent(error)) throw error
-  }
-  if (existedOnDisk) {
-    await writeFile(
-      trashMetaPath(validSlug),
-      JSON.stringify({ slug: validSlug, trashedAt }, null, 2),
-      'utf8',
-    )
-  }
-  return {
-    ok: true as const,
-    slug: validSlug,
-    trashedAt,
-    existedOnDisk,
-    retentionDays: DEFAULT_TRASH_RETENTION_DAYS,
-  }
-}
-
-async function restoreDocument(slug: string) {
-  const validSlug = assertSlug(slug)
-  const src = trashPath(validSlug)
-  const dst = mrblPath(validSlug)
-  let restoredOnDisk = false
-  try {
-    await mkdir(DRIVE_DIR, { recursive: true })
-    await rename(src, dst)
-    restoredOnDisk = true
-  } catch (error) {
-    if (!isEnoent(error)) throw error
-  }
-  await rm(trashMetaPath(validSlug), { force: true })
-  return {
-    ok: true as const,
-    slug: validSlug,
-    restoredOnDisk,
-  }
-}
-
-async function deleteDocumentPermanently(slug: string) {
-  const validSlug = assertSlug(slug)
-  await Promise.all([
-    rm(trashPath(validSlug), { force: true }),
-    rm(trashMetaPath(validSlug), { force: true }),
-    rm(mrblPath(validSlug), { force: true }),
-  ])
-  return { ok: true as const, slug: validSlug, deleted: true }
-}
-
-async function emptyTrashOnDisk() {
-  let names: string[]
-  try {
-    names = await readdir(TRASH_DIR)
-  } catch (error) {
-    if (isEnoent(error)) return { ok: true as const, deletedCount: 0 }
-    throw error
-  }
-  let deletedCount = 0
-  for (const name of names) {
-    if (!name.endsWith('.mrbl') && !name.endsWith('.meta.json')) continue
-    await rm(path.resolve(TRASH_DIR, name), { force: true })
-    if (name.endsWith('.mrbl')) deletedCount += 1
-  }
-  return { ok: true as const, deletedCount }
-}
-
-function titleOf(source: string, slug: string) {
-  const titled = source.match(/<title[^>]*>([\s\S]*?)<\/title>/i)?.[1]
-  const text = titled?.replace(/\s+/g, ' ').trim()
-  if (text && text !== '__TITLE__') {
-    return text
-      .replace(/&amp;/g, '&')
-      .replace(/&lt;/g, '<')
-      .replace(/&gt;/g, '>')
-      .replace(/&quot;/g, '"')
-      .replace(/&#39;/g, "'")
-  }
-  return slug
-}
-
 function nodeCountOf(source: string) {
   try {
     return [...knownIds(source)].length
   } catch {
     return source.match(/data-marble-id\s*=\s*["'][^"']*["']/g)?.length ?? 0
   }
-}
-
-function byteSizeOf(source: string) {
-  return new TextEncoder().encode(source).byteLength
 }
 
 function findingsOf(fileName: string, source: string) {
@@ -386,50 +151,42 @@ function doctorHealth(fileName: string, source: string) {
   return { errors, warnings, findings }
 }
 
-async function readOptional(slug: string) {
-  try {
-    return await readFile(mrblPath(slug), 'utf8')
-  } catch (error) {
-    if (isEnoent(error)) return null
-    throw error
-  }
-}
-
-async function writeDocument(slug: string, source: string) {
-  await mkdir(DRIVE_DIR, { recursive: true })
-  const target = mrblPath(slug)
-  const temporary = `${target}.${randomBytes(8).toString('hex')}.tmp`
-  try {
-    await writeFile(temporary, source, 'utf8')
-    await rename(temporary, target)
-  } catch (error) {
-    await rm(temporary, { force: true })
-    throw error
-  }
-}
-
-function savedPayload(slug: string, source: string) {
+function savedPayload(
+  slug: string,
+  source: string,
+  location: { folderPath: string; relPath: string },
+) {
   const fileName = fileNameFor(slug)
   return {
     ok: true as const,
     slug,
     fileName,
+    folderPath: location.folderPath,
+    relPath: location.relPath,
     nodeCount: nodeCountOf(source),
     byteSize: byteSizeOf(source),
     doctor: doctorHealth(fileName, source),
   }
 }
 
-async function listDrive() {
-  await purgeExpiredTrash()
+async function listTrash(retentionDays = DEFAULT_TRASH_RETENTION_DAYS) {
+  const purged = await purgeExpiredTrashOnDisk(retentionDays)
   let names: string[]
   try {
-    names = await readdir(DRIVE_DIR)
+    names = await readdir(getTrashDir())
   } catch (error) {
-    if (isEnoent(error)) return json({ ok: true, documents: [] })
+    if (isEnoent(error)) {
+      return json({
+        ok: true,
+        retentionDays,
+        purged,
+        documents: [],
+      })
+    }
     throw error
   }
 
+  const now = Date.now()
   const documents = (
     await Promise.all(
       names
@@ -437,58 +194,87 @@ async function listDrive() {
         .map(async (fileName) => {
           const slug = fileName.slice(0, -'.mrbl'.length)
           if (!SLUG_PATTERN.test(slug) || slug.includes('..')) return null
-          const full = mrblPath(slug)
-          const [source, info] = await Promise.all([
+          const full = trashFilePath(slug)
+          const [source, info, meta] = await Promise.all([
             readFile(full, 'utf8'),
             stat(full),
+            readTrashMeta(slug),
           ])
-          const doctor = doctorHealth(fileName, source)
+          const trashedAt = meta?.trashedAt ?? info.mtime.toISOString()
+          const trashedMs = Date.parse(trashedAt)
+          const expiresAt = new Date(
+            trashedMs + retentionDays * DAY_MS,
+          ).toISOString()
+          const daysRemaining = Math.max(
+            0,
+            Math.ceil((trashedMs + retentionDays * DAY_MS - now) / DAY_MS),
+          )
           return {
             slug,
             fileName,
-            title: titleOf(source, slug),
+            title: meta?.meta?.title ?? titleOf(source, slug),
+            originalFolderPath: meta?.originalFolderPath ?? '',
             nodeCount: nodeCountOf(source),
             byteSize: byteSizeOf(source),
-            modifiedAt: info.mtime.toISOString(),
-            doctor: {
-              errors: doctor.errors,
-              warnings: doctor.warnings,
-              findings: doctor.findings,
-            },
+            trashedAt,
+            expiresAt,
+            daysRemaining,
           }
         }),
     )
   ).filter((document) => document !== null)
 
-  documents.sort((a, b) => (a.modifiedAt < b.modifiedAt ? 1 : -1))
-  return json({ ok: true, documents })
+  documents.sort((a, b) => (a.trashedAt < b.trashedAt ? 1 : -1))
+  return json({ ok: true, retentionDays, purged, documents })
 }
 
-async function readDrive(slugValue: string | null) {
+async function listDrive() {
+  const summary = await listDriveSummary(nodeCountOf, doctorHealth)
+  return json({ ok: true, ...summary })
+}
+
+async function readWorkspace(retentionDaysParam: string | null) {
+  const parsed = retentionDaysParam ? Number(retentionDaysParam) : Number.NaN
+  const retentionDays =
+    Number.isFinite(parsed) && parsed > 0
+      ? parsed
+      : DEFAULT_TRASH_RETENTION_DAYS
+  const workspace = await loadDriveWorkspace(nodeCountOf, retentionDays)
+  return json({ ok: true, ...workspace })
+}
+
+async function readDrive(slugValue: string | null, folderPath: string | null) {
   const slug = requireSlug(slugValue)
-  const source = await readOptional(slug)
-  if (source === null) fail(404, `No marble document for slug "${slug}"`)
+  const record = await readDocumentOptional(slug, folderPath ?? undefined)
+  if (record === null) fail(404, `No marble document for slug "${slug}"`)
   const fileName = fileNameFor(slug)
   return json({
     ok: true,
     slug,
-    source,
-    knownIds: [...knownIds(source)],
-    doctor: examine(fileName, source),
+    folderPath: record.location.folderPath,
+    relPath: record.location.relPath,
+    source: record.source,
+    knownIds: [...knownIds(record.source)],
+    doctor: examine(fileName, record.source),
   })
 }
 
-async function sliceDrive(slugValue: string | null, id: string | null) {
+async function sliceDrive(
+  slugValue: string | null,
+  id: string | null,
+  folderPath: string | null,
+) {
   const slug = requireSlug(slugValue)
   if (!id) fail(400, 'id is required')
-  const source = await readOptional(slug)
-  if (source === null) fail(404, `No marble document for slug "${slug}"`)
+  const record = await readDocumentOptional(slug, folderPath ?? undefined)
+  if (record === null) fail(404, `No marble document for slug "${slug}"`)
   return json({
     ok: true,
     slug,
+    folderPath: record.location.folderPath,
     id,
-    slice: sliceOf(source, id),
-    outline: outlineOf(source, id),
+    slice: sliceOf(record.source, id),
+    outline: outlineOf(record.source, id),
   })
 }
 
@@ -531,12 +317,14 @@ function applyValidated(currentSource: string, ops: unknown[]) {
 
 async function applyPostedOps(
   slug: string | undefined,
+  folderPath: string | undefined,
   source: unknown,
   ops: unknown,
 ) {
   if (!Array.isArray(ops)) fail(400, 'ops must be an array')
   const clientSource = typeof source === 'string' ? source : null
-  const disk = slug ? await readOptional(slug) : null
+  const diskRecord = slug ? await readDocumentOptional(slug, folderPath) : null
+  const disk = diskRecord?.source ?? null
   const currentSource = clientSource ?? disk
   if (currentSource === null) {
     fail(400, 'apply_ops requires source or an existing document slug')
@@ -544,9 +332,15 @@ async function applyPostedOps(
 
   const applied = applyValidated(currentSource, ops)
   if (disk !== null && clientSource !== null && disk !== clientSource) {
-    return mergeOps(disk, diffSources(clientSource, applied)).source
+    return {
+      source: mergeOps(disk, diffSources(clientSource, applied)).source,
+      folderPath: folderPath ?? diskRecord?.location.folderPath,
+    }
   }
-  return applied
+  return {
+    source: applied,
+    folderPath: folderPath ?? diskRecord?.location.folderPath,
+  }
 }
 
 async function readBody(request: Request) {
@@ -562,23 +356,37 @@ async function readBody(request: Request) {
   return body as Record<string, unknown>
 }
 
+function optionalString(value: unknown): string | undefined {
+  return typeof value === 'string' ? value : undefined
+}
+
 export async function GET({ request }: { request: Request }) {
   const url = new URL(request.url)
   try {
     const action = url.searchParams.get('action')
+    if (action === 'workspace') {
+      return await readWorkspace(url.searchParams.get('retentionDays'))
+    }
     if (action === 'list') return await listDrive()
     if (action === 'trash') return await listTrash()
-    if (action === 'read') return await readDrive(url.searchParams.get('slug'))
+    if (action === 'read') {
+      return await readDrive(
+        url.searchParams.get('slug'),
+        url.searchParams.get('folderPath'),
+      )
+    }
     if (action === 'slice') {
       return await sliceDrive(
         url.searchParams.get('slug'),
         url.searchParams.get('id'),
+        url.searchParams.get('folderPath'),
       )
     }
     return json(
       {
         ok: false,
-        error: 'Expected action=list, action=trash, action=read, or action=slice',
+        error:
+          'Expected action=workspace, action=list, action=trash, action=read, or action=slice',
       },
       400,
     )
@@ -596,42 +404,164 @@ export async function POST({ request }: { request: Request }) {
         fail(400, 'save requires slug and source strings')
       }
       const slug = assertSlug(body.slug)
-      await writeDocument(slug, body.source)
-      return json(savedPayload(slug, body.source))
+      const folderPath =
+        body.folderPath === null ? '' : optionalString(body.folderPath)
+      const location = await saveDocumentToDisk({
+        slug,
+        source: body.source,
+        folderPath,
+        meta: body.meta,
+      })
+      return json(savedPayload(slug, body.source, location))
     }
     if (action === 'apply_ops') {
       const slug =
         typeof body.slug === 'string' ? assertSlug(body.slug) : undefined
-      const nextSource = await applyPostedOps(slug, body.source, body.ops)
-      if (slug) await writeDocument(slug, nextSource)
+      const folderPath =
+        body.folderPath === null ? '' : optionalString(body.folderPath)
+      const applied = await applyPostedOps(
+        slug,
+        folderPath,
+        body.source,
+        body.ops,
+      )
+      let savedLocation: { folderPath: string; relPath: string } | null = null
+      if (slug) {
+        const location = await saveDocumentToDisk({
+          slug,
+          source: applied.source,
+          folderPath: applied.folderPath,
+          meta: body.meta,
+        })
+        savedLocation = {
+          folderPath: location.folderPath,
+          relPath: location.relPath,
+        }
+      }
       const fileName = slug ? fileNameFor(slug) : 'unsaved.mrbl'
       return json({
         ok: true,
-        source: nextSource,
-        nodeCount: nodeCountOf(nextSource),
-        byteSize: byteSizeOf(nextSource),
-        doctor: examine(fileName, nextSource),
+        source: applied.source,
+        folderPath: savedLocation?.folderPath ?? applied.folderPath ?? '',
+        relPath: savedLocation?.relPath,
+        nodeCount: nodeCountOf(applied.source),
+        byteSize: byteSizeOf(applied.source),
+        doctor: examine(fileName, applied.source),
       })
+    }
+    if (action === 'create_folder') {
+      if (typeof body.name !== 'string') {
+        fail(400, 'create_folder requires a name string')
+      }
+      return json(
+        await createFolderOnDisk({
+          id: optionalString(body.id),
+          name: body.name,
+          parentPath:
+            body.parentPath === null ? '' : optionalString(body.parentPath),
+          color: optionalString(body.color) as DriveFolderColor | undefined,
+          createdAt: optionalString(body.createdAt),
+          updatedAt: optionalString(body.updatedAt),
+        }),
+      )
+    }
+    if (action === 'rename_folder') {
+      if (
+        typeof body.oldPath !== 'string' ||
+        typeof body.newName !== 'string'
+      ) {
+        fail(400, 'rename_folder requires oldPath and newName strings')
+      }
+      return json(
+        await renameFolderOnDisk({
+          oldPath: body.oldPath,
+          newName: body.newName,
+          color: optionalString(body.color) as DriveFolderColor | undefined,
+          updatedAt: optionalString(body.updatedAt),
+        }),
+      )
+    }
+    if (action === 'delete_folder') {
+      if (typeof body.folderPath !== 'string') {
+        fail(400, 'delete_folder requires a folderPath string')
+      }
+      return json(await deleteFolderOnDisk({ folderPath: body.folderPath }))
+    }
+    if (action === 'move_document') {
+      if (typeof body.slug !== 'string') {
+        fail(400, 'move_document requires a slug string')
+      }
+      const toFolderPath =
+        body.toFolderPath === null || body.toFolderPath === undefined
+          ? ''
+          : typeof body.toFolderPath === 'string'
+            ? body.toFolderPath
+            : fail(400, 'toFolderPath must be a string or null')
+      return json(
+        await moveDocumentOnDisk({
+          slug: body.slug,
+          fromFolderPath:
+            body.fromFolderPath === null
+              ? ''
+              : optionalString(body.fromFolderPath),
+          toFolderPath,
+          source: optionalString(body.source),
+          meta: body.meta,
+        }),
+      )
+    }
+    if (action === 'update_document_meta') {
+      if (typeof body.slug !== 'string') {
+        fail(400, 'update_document_meta requires a slug string')
+      }
+      return json(
+        await updateDocumentMetaOnDisk({
+          slug: body.slug,
+          folderPath:
+            body.folderPath === null ? '' : optionalString(body.folderPath),
+          meta: body.meta,
+        }),
+      )
     }
     if (action === 'trash') {
       if (typeof body.slug !== 'string') {
         fail(400, 'trash requires a slug string')
       }
-      const trashedAt =
-        typeof body.trashedAt === 'string' ? body.trashedAt : undefined
-      return json(await trashDocument(body.slug, trashedAt))
+      return json(
+        await trashDocumentOnDisk({
+          slug: body.slug,
+          folderPath:
+            body.folderPath === null ? '' : optionalString(body.folderPath),
+          trashedAt: optionalString(body.trashedAt),
+          meta: body.meta,
+        }),
+      )
     }
     if (action === 'restore') {
       if (typeof body.slug !== 'string') {
         fail(400, 'restore requires a slug string')
       }
-      return json(await restoreDocument(body.slug))
+      return json(
+        await restoreDocumentOnDisk({
+          slug: body.slug,
+          targetFolderPath:
+            body.targetFolderPath === null
+              ? ''
+              : optionalString(body.targetFolderPath),
+        }),
+      )
     }
     if (action === 'delete') {
       if (typeof body.slug !== 'string') {
         fail(400, 'delete requires a slug string')
       }
-      return json(await deleteDocumentPermanently(body.slug))
+      return json(
+        await deleteDocumentPermanentlyOnDisk({
+          slug: body.slug,
+          folderPath:
+            body.folderPath === null ? '' : optionalString(body.folderPath),
+        }),
+      )
     }
     if (action === 'empty_trash') {
       return json(await emptyTrashOnDisk())
@@ -641,7 +571,7 @@ export async function POST({ request }: { request: Request }) {
         typeof body.retentionDays === 'number' && body.retentionDays > 0
           ? body.retentionDays
           : DEFAULT_TRASH_RETENTION_DAYS
-      const purged = await purgeExpiredTrash(retentionDays)
+      const purged = await purgeExpiredTrashOnDisk(retentionDays)
       return json({ ok: true, retentionDays, purged })
     }
     if (action === 'doctor') {
@@ -663,7 +593,7 @@ export async function POST({ request }: { request: Request }) {
       {
         ok: false,
         error:
-          'Expected action save, apply_ops, trash, restore, delete, empty_trash, purge_expired, doctor, or diff',
+          'Expected action save, apply_ops, create_folder, rename_folder, delete_folder, move_document, update_document_meta, trash, restore, delete, empty_trash, purge_expired, doctor, or diff',
       },
       400,
     )
@@ -679,7 +609,13 @@ export async function DELETE({ request }: { request: Request }) {
       return json(await emptyTrashOnDisk())
     }
     const slug = requireSlug(url.searchParams.get('slug'))
-    return json(await deleteDocumentPermanently(slug))
+    const folderPath = url.searchParams.get('folderPath')
+    return json(
+      await deleteDocumentPermanentlyOnDisk({
+        slug,
+        folderPath: folderPath ?? undefined,
+      }),
+    )
   } catch (error) {
     return errorResponse(error)
   }

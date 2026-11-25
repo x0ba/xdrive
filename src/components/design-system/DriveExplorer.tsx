@@ -1511,6 +1511,14 @@ export function DriveFolderDialog({
 
   if (!open) return null
 
+  const trimmedName = name.trim()
+  const invalidNameReason =
+    trimmedName.startsWith('.')
+      ? 'Folder names cannot start with ".".'
+      : trimmedName.includes('/') || trimmedName.includes('\\')
+        ? 'Folder names cannot contain "/" or "\\".'
+        : null
+
   return (
     <div
       className="fixed inset-0 z-50 flex items-start justify-center bg-black/45 px-4 pt-[18vh]"
@@ -1523,9 +1531,8 @@ export function DriveFolderDialog({
         onMouseDown={(e) => e.stopPropagation()}
         onSubmit={(event) => {
           event.preventDefault()
-          const trimmed = name.trim()
-          if (!trimmed) return
-          onSubmit(trimmed, color)
+          if (!trimmedName || invalidNameReason) return
+          onSubmit(trimmedName, color)
         }}
       >
         <div className="flex items-center justify-between">
@@ -1557,6 +1564,11 @@ export function DriveFolderDialog({
           aria-label="Folder name"
           className="mt-3 h-8 w-full rounded border border-[var(--xd-border)] bg-[var(--xd-rail)] px-2.5 text-[12.5px] text-[var(--xd-ink)] placeholder:text-[var(--xd-ink-muted)] focus:border-[var(--xd-accent)] focus:outline-none"
         />
+        {invalidNameReason && (
+          <p className="mt-1.5 text-[11px] text-[var(--xd-danger)]">
+            {invalidNameReason}
+          </p>
+        )}
 
         <div className="mt-3 flex items-center justify-between">
           <span className="text-[11.5px] text-[var(--xd-ink-muted)]">
@@ -1595,7 +1607,7 @@ export function DriveFolderDialog({
           </button>
           <button
             type="submit"
-            disabled={!name.trim()}
+            disabled={!trimmedName || Boolean(invalidNameReason)}
             className="h-7 rounded bg-[var(--xd-accent)] px-3 text-[12px] font-medium text-white transition-colors hover:bg-[var(--xd-accent-hover)] disabled:opacity-40"
           >
             {mode === 'create' ? 'Create folder' : 'Save name'}

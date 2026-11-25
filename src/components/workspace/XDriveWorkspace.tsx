@@ -182,6 +182,7 @@ export interface XDriveWorkspaceProps {
   initialAiSidebarOpen?: boolean
   initialSimulatedRole?: SharePermissionLevel | 'owner'
   initialSelectedIds?: string[]
+  syncWithServer?: boolean
 }
 
 type SimulatedRole = SharePermissionLevel | 'owner'
@@ -621,6 +622,37 @@ function isShared(doc: MarbleDocumentFile): boolean {
   return doc.share.isPublicLinkEnabled || doc.share.collaborators.length > 0
 }
 
+function folderDiskPath(
+  folderList: DriveFolder[],
+  folderId: string | null | undefined,
+): string {
+  if (!folderId) return ''
+  return getFolderAncestors(folderList, folderId)
+    .map((folder) => folder.name)
+    .join('/')
+}
+
+function serializeDocMeta(doc: MarbleDocumentFile) {
+  return {
+    id: doc.id,
+    slug: doc.slug,
+    title: doc.title,
+    description: doc.description,
+    category: doc.category,
+    isEvergreen: doc.isEvergreen,
+    templateId: doc.templateId,
+    version: doc.version,
+    createdAt: doc.createdAt,
+    updatedAt: doc.updatedAt,
+    createdBy: doc.createdBy,
+    lastEditedBy: doc.lastEditedBy,
+    starred: doc.starred,
+    pinned: doc.pinned,
+    tags: doc.tags,
+    share: doc.share,
+  }
+}
+
 export function XDriveWorkspace({
   initialTheme = 'dark',
   initialNav = 'drive',
@@ -633,6 +665,7 @@ export function XDriveWorkspace({
   initialAiSidebarOpen = false,
   initialSimulatedRole = 'owner',
   initialSelectedIds,
+  syncWithServer = false,
 }: XDriveWorkspaceProps) {
   const initialTrashedSet = useMemo(
     () => new Set(initialTrashedDocIds ?? []),
@@ -762,12 +795,14 @@ export function XDriveWorkspace({
   const [chatStreamingThreadId, setChatStreamingThreadId] = useState<
     string | null
   >(null)
+  const [driveLoading, setDriveLoading] = useState(syncWithServer)
 
   const activeTabRef = useRef(activeTabId)
   activeTabRef.current = activeTabId
   const libraryRef = useRef<MarbleDocumentFile[]>([])
   const allDocsRef = useRef<MarbleDocumentFile[]>([])
   const foldersRef = useRef<DriveFolder[]>([])
+  const driveSyncQueueRef = useRef<Promise<unknown>>(Promise.resolve())
   const chatAbortRef = useRef<AbortController | null>(null)
   const chatUndoMapRef = useRef(new Map<string, () => void>())
   const chatHydratedRef = useRef(false)
@@ -842,6 +877,41 @@ export function XDriveWorkspace({
       chatAbortRef.current?.abort()
     }
   }, [])
+
+  async function reloadWorkspaceFromServer() {
+    if (!syncWithServer) return
+    try {
+      const response = await fetch(
+        `/api/marble?action=workspace&retentionDays=${encodeURIComponent(String(trashRetentionDays))}`,
+        { cache: 'no-store' },
+      )
+      if (!response.ok) return
+      const data = (await response.json()) as {
+        ok?: boolean
+        folders?: DriveFolder[]
+        docs?: MarbleDocumentFile[]
+      }
+      if (
+        !data.ok ||
+        !Array.isArray(data.folders) ||
+        !Array.isArray(data.docs)
+      ) {
+        return
+      }
+      foldersRef.current = data.folders
+      setFolders(data.folders)
+      setDocs(data.docs)
+    } catch {
+      // Static/Storybook environments do not expose /api/marble.
+    } finally {
+      setDriveLoading(false)
+    }
+  }
+
+  useEffect(() => {
+    if (!syncWithServer) return
+    void reloadWorkspaceFromServer()
+  }, [syncWithServer, trashRetentionDays])
 
   const findDoc = (id: string | null | undefined) =>
     library.find((doc) => doc.id === id) ?? null
@@ -1276,34 +1346,91 @@ export function XDriveWorkspace({
     setSelection((prev) => ({ ...prev, [id]: elements }))
   }
 
+  function enqueueDriveMutation<T>(task: () => Promise<T>): Promise<T> {
+    const next = driveSyncQueueRef.current.then(task, task)
+    driveSyncQueueRef.current = next.then(
+      () => undefined,
+      () => undefined,
+    )
+    return next
+  }
+
+  function syncDriveApi(
+    body: Record<string, unknown>,
+    options?: { reloadOnError?: boolean },
+  ) {
+    return enqueueDriveMutation(async () => {
+      try {
+        const response = await fetch('/api/marble', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify(body),
+        })
+        const data = (await response.json().catch(() => null)) as {
+          ok?: boolean
+          error?: string
+          [key: string]: unknown
+        } | null
+        if (!response.ok || (data && data.ok === false)) {
+          const message =
+            data?.error ?? `Drive sync failed (${response.status})`
+          if (syncWithServer) {
+            setAgentStatus(message)
+            if (options?.reloadOnError) {
+              await reloadWorkspaceFromServer()
+            }
+          }
+          return null
+        }
+        return data
+      } catch {
+        // Static/Storybook environments do not expose /api/marble.
+        return null
+      }
+    })
+  }
+
   function persist(
     id: string,
     slug: string,
     prior: string,
     ops: MarbleOp[],
     nextSource: string,
+    docOverride?: MarbleDocumentFile,
   ) {
     const token = (saveTokens.current.get(id) ?? 0) + 1
     saveTokens.current.set(id, token)
+    const doc = docOverride ?? allDocsRef.current.find((item) => item.id === id)
+    const folderPath = folderDiskPath(foldersRef.current, doc?.folderId ?? null)
+    const meta = doc
+      ? serializeDocMeta({
+          ...doc,
+          source: nextSource,
+          nodeCount: countMarbleNodes(nextSource),
+          byteSize: byteSizeOf(nextSource),
+        })
+      : undefined
     const body =
       ops.length > 0
-        ? { action: 'apply_ops', slug, source: prior, ops }
-        : { action: 'save', slug, source: nextSource }
-    void fetch('/api/marble', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify(body),
+        ? { action: 'apply_ops', slug, folderPath, source: prior, ops, meta }
+        : { action: 'save', slug, folderPath, source: nextSource, meta }
+    void enqueueDriveMutation(async () => {
+      const response = await fetch('/api/marble', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(body),
+      })
+      if (!response.ok) throw new Error('Marble save failed')
     })
-      .then((response) => {
-        if (!response.ok) throw new Error('Marble save failed')
+      .then(() => {
         if (saveTokens.current.get(id) !== token) return
-        patchFile(id, (doc) =>
-          doc.syncState === 'saving' ? { ...doc, syncState: 'saved' } : doc,
+        patchFile(id, (item) =>
+          item.syncState === 'saving' ? { ...item, syncState: 'saved' } : item,
         )
       })
       .catch(() => {
         if (saveTokens.current.get(id) !== token) return
-        patchFile(id, (doc) => ({ ...doc, syncState: 'retrying' }))
+        patchFile(id, (item) => ({ ...item, syncState: 'retrying' }))
       })
   }
 
@@ -1656,7 +1783,14 @@ export function XDriveWorkspace({
           ...result.proposal,
           status: 'committed',
         })
-        persist(created.id, created.slug, created.source, [], created.source)
+        persist(
+          created.id,
+          created.slug,
+          created.source,
+          [],
+          created.source,
+          created,
+        )
         setAgentStatus(`Opened ${created.fileName}`)
         return
       }
@@ -1789,7 +1923,7 @@ export function XDriveWorkspace({
     setDocs((prev) => [placed, ...prev])
     setOpenTabIds((prev) => [...prev, placed.id])
     visit(placed.id, 'drive')
-    persist(placed.id, placed.slug, placed.source, [], placed.source)
+    persist(placed.id, placed.slug, placed.source, [], placed.source, placed)
     setAgentStatus(`Created ${placed.fileName} from ${input.template.title}`)
   }
 
@@ -1937,7 +2071,7 @@ export function XDriveWorkspace({
     setOpenTabIds((prev) => [...prev, placed.id])
     setNamer(null)
     visit(placed.id, 'drive')
-    persist(placed.id, placed.slug, placed.source, [], placed.source)
+    persist(placed.id, placed.slug, placed.source, [], placed.source, placed)
   }
 
   function navigateToFolder(folderId: string | null) {
@@ -1949,6 +2083,10 @@ export function XDriveWorkspace({
     if (!folderModal) return
     const now = new Date().toISOString()
     if (folderModal.mode === 'create') {
+      const parentPath = folderDiskPath(
+        foldersRef.current,
+        folderModal.parentId,
+      )
       const created: DriveFolder = {
         id: `folder-${shortSha()}`,
         name,
@@ -1957,15 +2095,29 @@ export function XDriveWorkspace({
         createdAt: now,
         updatedAt: now,
       }
+      foldersRef.current = [...foldersRef.current, created]
       setFolders((prev) => [...prev, created])
-    } else {
-      setFolders((prev) =>
-        prev.map((folder) =>
-          folder.id === folderModal.folder.id
-            ? { ...folder, name, color, updatedAt: now }
-            : folder,
-        ),
+      void syncDriveApi(
+        {
+          action: 'create_folder',
+          id: created.id,
+          name: created.name,
+          parentPath,
+          color: created.color,
+          createdAt: created.createdAt,
+          updatedAt: created.updatedAt,
+        },
+        { reloadOnError: true },
       )
+    } else {
+      const oldPath = folderDiskPath(foldersRef.current, folderModal.folder.id)
+      const nextFolders = foldersRef.current.map((folder) =>
+        folder.id === folderModal.folder.id
+          ? { ...folder, name, color, updatedAt: now }
+          : folder,
+      )
+      foldersRef.current = nextFolders
+      setFolders(nextFolders)
       setDocs((prev) =>
         prev.map((doc) =>
           doc.folderId === folderModal.folder.id
@@ -1973,16 +2125,32 @@ export function XDriveWorkspace({
             : doc,
         ),
       )
+      void syncDriveApi(
+        {
+          action: 'rename_folder',
+          oldPath,
+          newName: name,
+          color,
+          updatedAt: now,
+        },
+        { reloadOnError: true },
+      )
     }
     setFolderModal(null)
   }
 
   function deleteFolder(folder: DriveFolder) {
-    const removed = getDescendantFolderIds(folders, folder.id)
+    const folderPath = folderDiskPath(foldersRef.current, folder.id)
+    const removed = getDescendantFolderIds(foldersRef.current, folder.id)
     const parentName = folder.parentId
-      ? (folders.find((f) => f.id === folder.parentId)?.name ?? 'My Drive')
+      ? (foldersRef.current.find((f) => f.id === folder.parentId)?.name ??
+        'My Drive')
       : 'My Drive'
-    setFolders((prev) => prev.filter((item) => !removed.has(item.id)))
+    const nextFolders = foldersRef.current.filter(
+      (item) => !removed.has(item.id),
+    )
+    foldersRef.current = nextFolders
+    setFolders(nextFolders)
     setDocs((prev) =>
       prev.map((doc) =>
         doc.folderId && removed.has(doc.folderId)
@@ -1993,34 +2161,85 @@ export function XDriveWorkspace({
     if (currentFolderId && removed.has(currentFolderId)) {
       setCurrentFolderId(folder.parentId)
     }
+    void syncDriveApi(
+      { action: 'delete_folder', folderPath },
+      { reloadOnError: true },
+    ).then((result) => {
+      const moved = result?.movedFiles
+      if (
+        syncWithServer &&
+        Array.isArray(moved) &&
+        moved.some((item) => {
+          const rec = item as { from?: string; to?: string }
+          return (
+            rec.from?.split('/').pop() !== rec.to?.split('/').pop()
+          )
+        })
+      ) {
+        void reloadWorkspaceFromServer()
+      }
+    })
   }
 
   function moveDocumentToFolder(docId: string, targetFolderId: string | null) {
+    const targetDoc = allDocsRef.current.find((doc) => doc.id === docId)
+    const fromFolderPath = folderDiskPath(
+      foldersRef.current,
+      targetDoc?.folderId ?? null,
+    )
     const targetFolder = targetFolderId
-      ? folders.find((f) => f.id === targetFolderId)
+      ? foldersRef.current.find((f) => f.id === targetFolderId)
       : null
+    const toFolderPath = folderDiskPath(
+      foldersRef.current,
+      targetFolder ? targetFolder.id : null,
+    )
     const folderName = targetFolder ? targetFolder.name : 'My Drive'
+    const now = new Date().toISOString()
     patchFile(docId, (doc) => ({
       ...doc,
       folderId: targetFolder ? targetFolder.id : null,
       folder: folderName,
-      updatedAt: new Date().toISOString(),
+      updatedAt: now,
     }))
+    if (targetDoc && !targetDoc.isTemplate) {
+      const nextDoc: MarbleDocumentFile = {
+        ...targetDoc,
+        folderId: targetFolder ? targetFolder.id : null,
+        folder: folderName,
+        updatedAt: now,
+      }
+      void syncDriveApi(
+        {
+          action: 'move_document',
+          slug: targetDoc.slug,
+          fromFolderPath,
+          toFolderPath,
+          source: sourceRef.current.get(targetDoc.id) ?? targetDoc.source,
+          meta: serializeDocMeta(nextDoc),
+        },
+        { reloadOnError: true },
+      )
+    }
     setMoveDocId(null)
   }
 
   function toggleFlag(id: string, flag: 'starred' | 'pinned') {
+    const targetDoc = allDocsRef.current.find((doc) => doc.id === id)
     patchFile(id, (doc) => ({ ...doc, [flag]: !doc[flag] }))
+    if (targetDoc && !targetDoc.isTemplate) {
+      const nextDoc = { ...targetDoc, [flag]: !targetDoc[flag] }
+      void syncDriveApi({
+        action: 'update_document_meta',
+        slug: targetDoc.slug,
+        folderPath: folderDiskPath(foldersRef.current, targetDoc.folderId),
+        meta: serializeDocMeta(nextDoc),
+      })
+    }
   }
 
   function syncTrashApi(body: Record<string, unknown>) {
-    void fetch('/api/marble', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify(body),
-    }).catch(() => {
-      // Static/Storybook environments do not expose /api/marble.
-    })
+    void syncDriveApi(body)
   }
 
   function cleanupRemovedDocIds(removedIds: Set<string>) {
@@ -2079,14 +2298,20 @@ export function XDriveWorkspace({
     if (shareId === docId) setShareId(null)
     if (moveDocId === docId) setMoveDocId(null)
     setTrashUndo({ docId: target.id, title: target.title })
-    syncTrashApi({ action: 'trash', slug: target.slug, trashedAt })
+    syncTrashApi({
+      action: 'trash',
+      slug: target.slug,
+      folderPath: folderDiskPath(foldersRef.current, target.folderId),
+      trashedAt,
+      meta: serializeDocMeta(target),
+    })
   }
 
   function restoreDocumentFromTrash(docId: string) {
     const target = docs.find((doc) => doc.id === docId)
     if (!target || !target.trashedAt) return
     const parentFolder = target.folderId
-      ? folders.find((folder) => folder.id === target.folderId)
+      ? foldersRef.current.find((folder) => folder.id === target.folderId)
       : null
     const restoredFolderId = parentFolder ? parentFolder.id : null
     const restoredFolderName = parentFolder ? parentFolder.name : 'My Drive'
@@ -2104,7 +2329,11 @@ export function XDriveWorkspace({
     )
     setTrashUndo((prev) => (prev?.docId === docId ? null : prev))
     setAgentStatus(`Restored "${target.title}" to ${restoredFolderName}`)
-    syncTrashApi({ action: 'restore', slug: target.slug })
+    syncTrashApi({
+      action: 'restore',
+      slug: target.slug,
+      targetFolderPath: folderDiskPath(foldersRef.current, restoredFolderId),
+    })
   }
 
   function permanentlyDeleteDocument(docId: string) {
@@ -2117,7 +2346,11 @@ export function XDriveWorkspace({
     cleanupRemovedDocIds(new Set([docId]))
     setPermanentDeleteTarget(null)
     setAgentStatus(`Permanently deleted "${target.title}"`)
-    syncTrashApi({ action: 'delete', slug: target.slug })
+    syncTrashApi({
+      action: 'delete',
+      slug: target.slug,
+      folderPath: folderDiskPath(foldersRef.current, target.folderId),
+    })
   }
 
   function emptyTrash() {
@@ -2321,11 +2554,22 @@ export function XDriveWorkspace({
         }
         allDocsRef.current = [created, ...allDocsRef.current]
         setDocs((prev) => [created, ...prev])
-        persist(created.id, created.slug, created.source, [], created.source)
+        persist(
+          created.id,
+          created.slug,
+          created.source,
+          [],
+          created.source,
+          created,
+        )
         chatUndoMapRef.current.set(action.id, () => {
           setDocs((prev) => prev.filter((d) => d.id !== created.id))
           cleanupRemovedDocIds(new Set([created.id]))
-          syncTrashApi({ action: 'delete', slug: created.slug })
+          syncTrashApi({
+            action: 'delete',
+            slug: created.slug,
+            folderPath: folderDiskPath(foldersRef.current, created.folderId),
+          })
         })
         updateChatAction(threadId, msgId, action.id, (act) =>
           act.kind === 'create_document'
@@ -2348,6 +2592,13 @@ export function XDriveWorkspace({
         const prevTitle = target.title
         const prevDescription = target.description
         const prevTags = target.tags
+        const nextDoc: MarbleDocumentFile = {
+          ...target,
+          title: action.nextTitle,
+          description: action.nextDescription ?? target.description,
+          tags: action.nextTags ?? target.tags,
+          updatedAt: now,
+        }
         patchFile(target.id, (doc) => ({
           ...doc,
           title: action.nextTitle,
@@ -2355,14 +2606,33 @@ export function XDriveWorkspace({
           tags: action.nextTags ?? doc.tags,
           updatedAt: now,
         }))
+        void syncDriveApi({
+          action: 'update_document_meta',
+          slug: target.slug,
+          folderPath: folderDiskPath(foldersRef.current, target.folderId),
+          meta: serializeDocMeta(nextDoc),
+        })
         chatUndoMapRef.current.set(action.id, () => {
+          const revertedAt = new Date().toISOString()
           patchFile(target.id, (doc) => ({
             ...doc,
             title: prevTitle,
             description: prevDescription,
             tags: prevTags,
-            updatedAt: new Date().toISOString(),
+            updatedAt: revertedAt,
           }))
+          void syncDriveApi({
+            action: 'update_document_meta',
+            slug: target.slug,
+            folderPath: folderDiskPath(foldersRef.current, target.folderId),
+            meta: serializeDocMeta({
+              ...target,
+              title: prevTitle,
+              description: prevDescription,
+              tags: prevTags,
+              updatedAt: revertedAt,
+            }),
+          })
         })
         updateChatAction(threadId, msgId, action.id, (act) => ({
           ...act,
@@ -2379,6 +2649,7 @@ export function XDriveWorkspace({
         }
         const prevFolderId = target.folderId ?? null
         const prevFolder = target.folder
+        const fromFolderPath = folderDiskPath(foldersRef.current, prevFolderId)
         const resolvedFolder =
           (action.targetFolderId
             ? foldersRef.current.find((f) => f.id === action.targetFolderId)
@@ -2390,19 +2661,53 @@ export function XDriveWorkspace({
           null
         const nextFolderId = resolvedFolder ? resolvedFolder.id : null
         const nextFolderName = resolvedFolder ? resolvedFolder.name : 'My Drive'
+        const toFolderPath = folderDiskPath(foldersRef.current, nextFolderId)
         patchFile(target.id, (doc) => ({
           ...doc,
           folderId: nextFolderId,
           folder: nextFolderName,
           updatedAt: now,
         }))
+        void syncDriveApi(
+          {
+            action: 'move_document',
+            slug: target.slug,
+            fromFolderPath,
+            toFolderPath,
+            source: sourceRef.current.get(target.id) ?? target.source,
+            meta: serializeDocMeta({
+              ...target,
+              folderId: nextFolderId,
+              folder: nextFolderName,
+              updatedAt: now,
+            }),
+          },
+          { reloadOnError: true },
+        )
         chatUndoMapRef.current.set(action.id, () => {
+          const revertedAt = new Date().toISOString()
           patchFile(target.id, (doc) => ({
             ...doc,
             folderId: prevFolderId,
             folder: prevFolder,
-            updatedAt: new Date().toISOString(),
+            updatedAt: revertedAt,
           }))
+          void syncDriveApi(
+            {
+              action: 'move_document',
+              slug: target.slug,
+              fromFolderPath: folderDiskPath(foldersRef.current, nextFolderId),
+              toFolderPath: folderDiskPath(foldersRef.current, prevFolderId),
+              source: sourceRef.current.get(target.id) ?? target.source,
+              meta: serializeDocMeta({
+                ...target,
+                folderId: prevFolderId,
+                folder: prevFolder,
+                updatedAt: revertedAt,
+              }),
+            },
+            { reloadOnError: true },
+          )
         })
         updateChatAction(threadId, msgId, action.id, (act) =>
           act.kind === 'move_document'
@@ -2427,6 +2732,14 @@ export function XDriveWorkspace({
         const prevPinned = target.pinned
         const prevTags = target.tags
         const prevDescription = target.description
+        const nextDoc: MarbleDocumentFile = {
+          ...target,
+          starred: action.starred ?? target.starred,
+          pinned: action.pinned ?? target.pinned,
+          tags: action.tags ?? target.tags,
+          description: action.description ?? target.description,
+          updatedAt: now,
+        }
         patchFile(target.id, (doc) => ({
           ...doc,
           starred: action.starred ?? doc.starred,
@@ -2435,15 +2748,35 @@ export function XDriveWorkspace({
           description: action.description ?? doc.description,
           updatedAt: now,
         }))
+        void syncDriveApi({
+          action: 'update_document_meta',
+          slug: target.slug,
+          folderPath: folderDiskPath(foldersRef.current, target.folderId),
+          meta: serializeDocMeta(nextDoc),
+        })
         chatUndoMapRef.current.set(action.id, () => {
+          const revertedAt = new Date().toISOString()
           patchFile(target.id, (doc) => ({
             ...doc,
             starred: prevStarred,
             pinned: prevPinned,
             tags: prevTags,
             description: prevDescription,
-            updatedAt: new Date().toISOString(),
+            updatedAt: revertedAt,
           }))
+          void syncDriveApi({
+            action: 'update_document_meta',
+            slug: target.slug,
+            folderPath: folderDiskPath(foldersRef.current, target.folderId),
+            meta: serializeDocMeta({
+              ...target,
+              starred: prevStarred,
+              pinned: prevPinned,
+              tags: prevTags,
+              description: prevDescription,
+              updatedAt: revertedAt,
+            }),
+          })
         })
         updateChatAction(threadId, msgId, action.id, (act) => ({
           ...act,
@@ -2480,6 +2813,7 @@ export function XDriveWorkspace({
       }
 
       if (action.kind === 'create_folder') {
+        const parentPath = folderDiskPath(foldersRef.current, action.parentId)
         const created: DriveFolder = {
           id: `folder-${shortSha()}`,
           name: action.name,
@@ -2490,6 +2824,18 @@ export function XDriveWorkspace({
         }
         foldersRef.current = [...foldersRef.current, created]
         setFolders((prev) => [...prev, created])
+        void syncDriveApi(
+          {
+            action: 'create_folder',
+            id: created.id,
+            name: created.name,
+            parentPath,
+            color: created.color,
+            createdAt: created.createdAt,
+            updatedAt: created.updatedAt,
+          },
+          { reloadOnError: true },
+        )
         chatUndoMapRef.current.set(action.id, () => {
           deleteFolder(created)
         })
@@ -2513,18 +2859,19 @@ export function XDriveWorkspace({
         }
         const prevName = target.name
         const prevColor = target.color
-        setFolders((prev) =>
-          prev.map((f) =>
-            f.id === target.id
-              ? {
-                  ...f,
-                  name: action.nextName,
-                  color: action.nextColor ?? f.color,
-                  updatedAt: now,
-                }
-              : f,
-          ),
+        const oldPath = folderDiskPath(foldersRef.current, target.id)
+        const nextFolders = foldersRef.current.map((f) =>
+          f.id === target.id
+            ? {
+                ...f,
+                name: action.nextName,
+                color: action.nextColor ?? f.color,
+                updatedAt: now,
+              }
+            : f,
         )
+        foldersRef.current = nextFolders
+        setFolders(nextFolders)
         setDocs((prev) =>
           prev.map((doc) =>
             doc.folderId === target.id
@@ -2532,18 +2879,39 @@ export function XDriveWorkspace({
               : doc,
           ),
         )
+        void syncDriveApi(
+          {
+            action: 'rename_folder',
+            oldPath,
+            newName: action.nextName,
+            color: action.nextColor ?? target.color,
+            updatedAt: now,
+          },
+          { reloadOnError: true },
+        )
         chatUndoMapRef.current.set(action.id, () => {
-          setFolders((prev) =>
-            prev.map((f) =>
-              f.id === target.id
-                ? { ...f, name: prevName, color: prevColor }
-                : f,
-            ),
+          const currentPath = folderDiskPath(foldersRef.current, target.id)
+          const revertedFolders = foldersRef.current.map((f) =>
+            f.id === target.id
+              ? { ...f, name: prevName, color: prevColor }
+              : f,
           )
+          foldersRef.current = revertedFolders
+          setFolders(revertedFolders)
           setDocs((prev) =>
             prev.map((doc) =>
               doc.folderId === target.id ? { ...doc, folder: prevName } : doc,
             ),
+          )
+          void syncDriveApi(
+            {
+              action: 'rename_folder',
+              oldPath: currentPath,
+              newName: prevName,
+              color: prevColor,
+              updatedAt: new Date().toISOString(),
+            },
+            { reloadOnError: true },
           )
         })
         updateChatAction(threadId, msgId, action.id, (act) => ({
@@ -2560,15 +2928,27 @@ export function XDriveWorkspace({
           throw new Error(`Folder "${action.folderName}" was not found.`)
         }
         const snapshotFolders = [...foldersRef.current]
-        const affectedDocs = docs
-          .filter((d) => d.folderId === target.id)
+        const removedIds = getDescendantFolderIds(snapshotFolders, target.id)
+        const deletedFoldersOrdered = snapshotFolders
+          .filter((f) => removedIds.has(f.id))
+          .sort(
+            (a, b) =>
+              getFolderAncestors(snapshotFolders, a.id).length -
+              getFolderAncestors(snapshotFolders, b.id).length,
+          )
+        const affectedDocs = allDocsRef.current
+          .filter((d) => d.folderId && removedIds.has(d.folderId))
           .map((d) => ({
             id: d.id,
+            slug: d.slug,
             folderId: d.folderId ?? null,
             folder: d.folder,
+            doc: d,
           }))
+        const parentPath = folderDiskPath(snapshotFolders, target.parentId)
         deleteFolder(target)
         chatUndoMapRef.current.set(action.id, () => {
+          foldersRef.current = snapshotFolders
           setFolders(snapshotFolders)
           setDocs((prev) =>
             prev.map((d) => {
@@ -2578,6 +2958,26 @@ export function XDriveWorkspace({
                 : d
             }),
           )
+          for (const folder of deletedFoldersOrdered) {
+            void syncDriveApi({
+              action: 'create_folder',
+              id: folder.id,
+              name: folder.name,
+              parentPath: folderDiskPath(snapshotFolders, folder.parentId),
+              color: folder.color,
+              createdAt: folder.createdAt,
+              updatedAt: folder.updatedAt,
+            })
+          }
+          for (const item of affectedDocs) {
+            void syncDriveApi({
+              action: 'move_document',
+              slug: item.slug,
+              fromFolderPath: parentPath,
+              toFolderPath: folderDiskPath(snapshotFolders, item.folderId),
+              meta: serializeDocMeta(item.doc),
+            })
+          }
         })
         updateChatAction(threadId, msgId, action.id, (act) => ({
           ...act,
@@ -3503,7 +3903,16 @@ export function XDriveWorkspace({
                     onChangeSearchQuery={setSearchQuery}
                   />
 
-                  {visibleFolders.length === 0 && filteredDocs.length === 0 ? (
+                  {driveLoading &&
+                  visibleFolders.length === 0 &&
+                  filteredDocs.length === 0 ? (
+                    <div className="flex flex-col items-center justify-center rounded-lg border border-dashed border-[var(--xd-border-strong)] px-6 py-16 text-center">
+                      <p className="text-[13px] text-[var(--xd-ink-muted)]">
+                        Loading Drive…
+                      </p>
+                    </div>
+                  ) : visibleFolders.length === 0 &&
+                    filteredDocs.length === 0 ? (
                     <div className="flex flex-col items-center justify-center rounded-lg border border-dashed border-[var(--xd-border-strong)] px-6 py-16 text-center">
                       {searchQuery.trim() ? (
                         <>
@@ -4167,9 +4576,20 @@ export function XDriveWorkspace({
           simulatedPermission={
             simulatedRole === 'owner' ? undefined : simulatedRole
           }
-          onConfigChange={(config) =>
+          onConfigChange={(config) => {
             patchFile(shareDoc.id, (doc) => ({ ...doc, share: config }))
-          }
+            if (!shareDoc.isTemplate) {
+              void syncDriveApi({
+                action: 'update_document_meta',
+                slug: shareDoc.slug,
+                folderPath: folderDiskPath(
+                  foldersRef.current,
+                  shareDoc.folderId,
+                ),
+                meta: serializeDocMeta({ ...shareDoc, share: config }),
+              })
+            }
+          }}
           onSimulatePermission={(level) => {
             setSimulatedRole(level)
             openDocument(shareDoc.id)
