@@ -31,7 +31,7 @@ export type SortOption = 'updated' | 'nodes' | 'size' | 'title'
 export type DriveViewMode = 'list' | 'icon' | 'preview'
 
 export interface FilterPillBarProps {
-  selectedCategory: MarbleAppCategory | 'all'
+  selectedCategory?: MarbleAppCategory | 'all'
   onSelectCategory?: (category: MarbleAppCategory | 'all') => void
   selectedAccess?: SharePermissionLevel | 'all'
   onSelectAccess?: (access: SharePermissionLevel | 'all') => void
@@ -44,19 +44,6 @@ export interface FilterPillBarProps {
   totalResults?: number
 }
 
-const CATEGORY_TABS: Array<{
-  value: MarbleAppCategory | 'all'
-  label: string
-}> = [
-  { value: 'all', label: 'All' },
-  { value: 'latex', label: 'LaTeX' },
-  { value: 'notebook', label: 'Notebooks' },
-  { value: 'document', label: 'Docs' },
-  { value: 'slides', label: 'Slides' },
-  { value: 'matrix', label: 'Matrices' },
-  { value: 'sandbox', label: 'Sandbox' },
-]
-
 const SORT_OPTIONS: Array<{ value: SortOption; label: string }> = [
   { value: 'updated', label: 'Recent' },
   { value: 'title', label: 'Name' },
@@ -64,8 +51,6 @@ const SORT_OPTIONS: Array<{ value: SortOption; label: string }> = [
 ]
 
 export function FilterPillBar({
-  selectedCategory,
-  onSelectCategory,
   sortBy,
   onSelectSort,
   viewMode,
@@ -75,45 +60,19 @@ export function FilterPillBar({
 }: FilterPillBarProps) {
   return (
     <div className="flex flex-wrap items-center justify-between gap-3 border-b border-[var(--xd-border)] pb-3 text-[12px]">
-      <div
-        role="tablist"
-        aria-label="Filter by category"
-        className="flex flex-wrap items-center gap-1"
-      >
-        {CATEGORY_TABS.map((tab) => {
-          const active = selectedCategory === tab.value
-          return (
-            <button
-              key={tab.value}
-              type="button"
-              role="tab"
-              aria-selected={active}
-              onClick={() => onSelectCategory?.(tab.value)}
-              className={`rounded px-2.5 py-1 text-[12px] transition-colors ${
-                active
-                  ? 'bg-[var(--xd-surface-active)] font-medium text-[var(--xd-ink)]'
-                  : 'text-[var(--xd-ink-secondary)] hover:bg-[var(--xd-surface-hover)] hover:text-[var(--xd-ink)]'
-              }`}
-            >
-              {tab.label}
-            </button>
-          )
-        })}
+      <div className="relative flex min-w-0 flex-1 items-center sm:max-w-xs">
+        <Search className="pointer-events-none absolute left-2.5 h-3.5 w-3.5 text-[var(--xd-ink-muted)]" />
+        <input
+          type="search"
+          value={searchQuery}
+          onChange={(e) => onChangeSearchQuery?.(e.target.value)}
+          placeholder="Filter files..."
+          aria-label="Filter files"
+          className="h-7 w-full rounded border border-[var(--xd-border)] bg-[var(--xd-canvas)] pr-2.5 pl-8 text-[12px] text-[var(--xd-ink)] placeholder:text-[var(--xd-ink-muted)] focus:border-[var(--xd-accent)] focus:outline-none"
+        />
       </div>
 
       <div className="flex items-center gap-2">
-        <div className="relative flex items-center">
-          <Search className="pointer-events-none absolute left-2.5 h-3.5 w-3.5 text-[var(--xd-ink-muted)]" />
-          <input
-            type="search"
-            value={searchQuery}
-            onChange={(e) => onChangeSearchQuery?.(e.target.value)}
-            placeholder="Filter files..."
-            aria-label="Filter files"
-            className="h-7 w-44 rounded border border-[var(--xd-border)] bg-[var(--xd-canvas)] pr-2.5 pl-8 text-[12px] text-[var(--xd-ink)] placeholder:text-[var(--xd-ink-muted)] focus:border-[var(--xd-accent)] focus:outline-none"
-          />
-        </div>
-
         <div className="relative flex items-center">
           <select
             aria-label="Sort files"
@@ -441,10 +400,7 @@ export function TemplateGalleryCard({
    ============================================================================ */
 
 export interface AgentHeroComposerProps {
-  models?: Pick<
-    AIModelSpec,
-    'id' | 'name' | 'providerId' | 'badge' | 'role'
-  >[]
+  models?: Pick<AIModelSpec, 'id' | 'name' | 'providerId' | 'badge' | 'role'>[]
   selectedModelId?: string
   onSelectModel?: (modelId: string) => void
   onSubmitPrompt?: (prompt: string, modelId: string) => void
@@ -527,8 +483,7 @@ const QUICK_STARTERS: Array<{
   {
     category: 'matrix',
     label: 'Literature matrix',
-    prompt:
-      'Synthesize a sortable transformer scaling law comparison matrix.',
+    prompt: 'Synthesize a sortable transformer scaling law comparison matrix.',
   },
 ]
 

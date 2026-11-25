@@ -85,6 +85,11 @@ export function AppContextMenu({
       role="menu"
       aria-label={ariaLabel}
       style={{ left: pos.left, top: pos.top }}
+      onClick={(e) => e.stopPropagation()}
+      onContextMenu={(e) => {
+        e.preventDefault()
+        e.stopPropagation()
+      }}
       className="fixed z-50 min-w-[216px] rounded-md border border-[var(--xd-border-strong)] bg-[var(--xd-elevated)] p-1 text-[12px] text-[var(--xd-ink)] shadow-lg"
     >
       {items.map((item) => {

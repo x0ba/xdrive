@@ -23,7 +23,6 @@ import { INITIAL_WORKSPACE_DOCS } from '#/lib/marble'
 import type {
   DriveFolder,
   DriveFolderColor,
-  MarbleAppCategory,
   MarbleDocumentFile,
 } from '#/lib/types'
 
@@ -56,7 +55,6 @@ function InteractiveDriveBrowserDemo() {
   const [docs, setDocs] = useState<MarbleDocumentFile[]>(initial.docs)
   const [currentFolderId, setCurrentFolderId] = useState<string | null>(null)
   const [viewMode, setViewMode] = useState<DriveViewMode>('preview')
-  const [category, setCategory] = useState<MarbleAppCategory | 'all'>('all')
   const [sortBy, setSortBy] = useState<SortOption>('updated')
   const [searchQuery, setSearchQuery] = useState('')
   const [folderModal, setFolderModal] = useState<
@@ -90,7 +88,6 @@ function InteractiveDriveBrowserDemo() {
       .filter((doc) =>
         currentFolderId === null ? true : doc.folderId === currentFolderId,
       )
-      .filter((doc) => category === 'all' || doc.category === category)
       .filter(
         (doc) =>
           !needle ||
@@ -103,7 +100,7 @@ function InteractiveDriveBrowserDemo() {
         if (sortBy === 'size') return b.byteSize - a.byteSize
         return 0
       })
-  }, [docs, currentFolderId, category, searchQuery, sortBy])
+  }, [docs, currentFolderId, searchQuery, sortBy])
 
   const handleMoveDoc = (docId: string, targetFolderId: string | null) => {
     const targetName = targetFolderId
@@ -189,8 +186,6 @@ function InteractiveDriveBrowserDemo() {
       />
 
       <FilterPillBar
-        selectedCategory={category}
-        onSelectCategory={setCategory}
         sortBy={sortBy}
         onSelectSort={setSortBy}
         viewMode={viewMode}
@@ -538,9 +533,7 @@ function InteractiveTrashDemo() {
         open={confirmTarget !== null}
         mode={confirmTarget?.mode ?? 'single'}
         fileName={
-          confirmTarget?.mode === 'single'
-            ? confirmTarget.doc.title
-            : undefined
+          confirmTarget?.mode === 'single' ? confirmTarget.doc.title : undefined
         }
         itemCount={trashedDocs.length}
         onClose={() => setConfirmTarget(null)}

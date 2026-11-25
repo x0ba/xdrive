@@ -30,14 +30,14 @@ export interface NotesSidebarProps {
   notes: NoteItem[]
   activeNoteId: string
   folders: string[]
-  selectedFolder: string
+  selectedFolder?: string
   searchQuery: string
-  sortBy: NotesSortBy
+  sortBy?: NotesSortBy
   readOnly?: boolean
   onSelectNote: (id: string) => void
-  onSelectFolder: (folder: string) => void
+  onSelectFolder?: (folder: string) => void
   onSearchChange: (query: string) => void
-  onSortChange: (sort: NotesSortBy) => void
+  onSortChange?: (sort: NotesSortBy) => void
   onCreateNote: (folder?: string) => void
   onDuplicateNote: (id: string) => void
   onTogglePin: (id: string) => void
@@ -53,14 +53,12 @@ export function NotesSidebar({
   notes,
   activeNoteId,
   folders,
-  selectedFolder,
+  selectedFolder = 'All',
   searchQuery,
-  sortBy,
+  sortBy = 'updated',
   readOnly = false,
   onSelectNote,
-  onSelectFolder,
   onSearchChange,
-  onSortChange,
   onCreateNote,
   onDuplicateNote,
   onTogglePin,
@@ -335,7 +333,7 @@ export function NotesSidebar({
       className="flex h-full w-64 shrink-0 select-none flex-col border-r border-[var(--xd-border)] bg-[var(--xd-rail)]"
     >
       {/* Top search & compose */}
-      <div className="space-y-2 border-b border-[var(--xd-border)] p-2.5">
+      <div className="border-b border-[var(--xd-border)] p-2.5">
         <div className="flex items-center gap-1.5">
           <div className="relative flex flex-1 items-center">
             <Search className="pointer-events-none absolute left-2 h-3.5 w-3.5 text-[var(--xd-ink-muted)]" />
@@ -362,46 +360,6 @@ export function NotesSidebar({
           >
             <Plus className="h-3.5 w-3.5" />
           </button>
-        </div>
-
-        {/* Folder pills & sort */}
-        <div className="flex items-center justify-between gap-1.5">
-          <div className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto pb-0.5">
-            {['All', ...folders].map((folder) => {
-              const active = selectedFolder === folder
-              return (
-                <button
-                  key={folder}
-                  type="button"
-                  onClick={() => onSelectFolder(folder)}
-                  className={cn(
-                    'shrink-0 rounded px-1.5 py-0.5 text-[11px] transition-colors',
-                    active
-                      ? 'bg-[var(--xd-surface-active)] font-medium text-[var(--xd-ink)]'
-                      : 'text-[var(--xd-ink-muted)] hover:bg-[var(--xd-surface-hover)] hover:text-[var(--xd-ink)]',
-                  )}
-                >
-                  {folder}
-                </button>
-              )
-            })}
-          </div>
-          <select
-            aria-label="Sort notes"
-            value={sortBy}
-            onChange={(e) => onSortChange(e.target.value as NotesSortBy)}
-            className="h-5 shrink-0 rounded bg-transparent text-[11px] text-[var(--xd-ink-muted)] hover:text-[var(--xd-ink)] focus:outline-none"
-          >
-            <option value="updated" className="bg-[var(--xd-canvas)]">
-              Edited
-            </option>
-            <option value="created" className="bg-[var(--xd-canvas)]">
-              Created
-            </option>
-            <option value="title" className="bg-[var(--xd-canvas)]">
-              Title
-            </option>
-          </select>
         </div>
       </div>
 

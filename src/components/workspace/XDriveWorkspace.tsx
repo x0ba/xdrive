@@ -193,8 +193,7 @@ type FolderModalState =
   | { mode: 'create'; parentId: string | null }
   | { mode: 'rename'; folder: DriveFolder }
 type PermanentDeleteTarget =
-  | { mode: 'single'; doc: MarbleDocumentFile }
-  | { mode: 'empty' }
+  { mode: 'single'; doc: MarbleDocumentFile } | { mode: 'empty' }
 type TrashUndoBanner = { docId: string; title: string }
 type PaletteItem = { id: string; label: string; hint: string; run: () => void }
 
@@ -737,7 +736,6 @@ export function XDriveWorkspace({
     threadId: string
     label: string
   } | null>(null)
-  const [category, setCategory] = useState<MarbleAppCategory | 'all'>('all')
   const [sortBy, setSortBy] = useState<SortOption>('updated')
   const [viewMode, setViewMode] = useState<DriveViewMode>('preview')
   const [searchQuery, setSearchQuery] = useState('')
@@ -782,10 +780,7 @@ export function XDriveWorkspace({
   const frameRef = useRef<HTMLIFrameElement | null>(null)
   const richStageRef = useRef<HTMLDivElement | null>(null)
 
-  const activeDocs = useMemo(
-    () => docs.filter((doc) => !doc.trashedAt),
-    [docs],
-  )
+  const activeDocs = useMemo(() => docs.filter((doc) => !doc.trashedAt), [docs])
   const trashedDocs = useMemo(
     () =>
       docs
@@ -917,9 +912,7 @@ export function XDriveWorkspace({
     const needle = searchQuery.trim().toLowerCase()
     return folders
       .filter((folder) => folder.parentId === currentFolderId)
-      .filter(
-        (folder) => !needle || folder.name.toLowerCase().includes(needle),
-      )
+      .filter((folder) => !needle || folder.name.toLowerCase().includes(needle))
       .slice()
       .sort((a, b) => a.name.localeCompare(b.name))
   }, [folders, currentFolderId, searchQuery])
@@ -930,20 +923,18 @@ export function XDriveWorkspace({
         ? activeDocs
         : activeDocs.filter((doc) => doc.folderId === currentFolderId)
     return scoped
-      .filter((doc) => category === 'all' || doc.category === category)
       .filter((doc) => matchesQuery(doc, searchQuery))
       .slice()
       .sort((a, b) => compareDocs(a, b, sortBy))
-  }, [activeDocs, currentFolderId, category, searchQuery, sortBy])
+  }, [activeDocs, currentFolderId, searchQuery, sortBy])
 
   const starredDocs = useMemo(() => {
     return activeDocs
       .filter((doc) => doc.starred)
-      .filter((doc) => category === 'all' || doc.category === category)
       .filter((doc) => matchesQuery(doc, searchQuery))
       .slice()
       .sort((a, b) => compareDocs(a, b, sortBy))
-  }, [activeDocs, category, searchQuery, sortBy])
+  }, [activeDocs, searchQuery, sortBy])
 
   const sharedDocs = useMemo(() => activeDocs.filter(isShared), [activeDocs])
   const blueprints = useMemo(() => templates.map(toBlueprint), [templates])
@@ -1001,6 +992,7 @@ export function XDriveWorkspace({
       fileName: doc.fileName,
       category: doc.category,
       nodeCount: doc.nodeCount,
+      starred: doc.starred,
     }))
 
   const sidebarKey = activeDoc?.id ?? 'drive'
@@ -2030,7 +2022,10 @@ export function XDriveWorkspace({
   function cleanupRemovedDocIds(removedIds: Set<string>) {
     if (removedIds.size === 0) return
     setOpenTabIds((prev) => prev.filter((id) => !removedIds.has(id)))
-    if (activeTabRef.current !== 'home' && removedIds.has(activeTabRef.current)) {
+    if (
+      activeTabRef.current !== 'home' &&
+      removedIds.has(activeTabRef.current)
+    ) {
       const remaining = openTabIds.filter((id) => !removedIds.has(id))
       visit(remaining[remaining.length - 1] ?? 'home', nav)
     }
@@ -2060,9 +2055,7 @@ export function XDriveWorkspace({
       return next
     })
     for (const id of removedIds) sourceRef.current.delete(id)
-    setLivePreview((prev) =>
-      prev && removedIds.has(prev.docId) ? null : prev,
-    )
+    setLivePreview((prev) => (prev && removedIds.has(prev.docId) ? null : prev))
     setShareId((prev) => (prev && removedIds.has(prev) ? null : prev))
     setMoveDocId((prev) => (prev && removedIds.has(prev) ? null : prev))
     setTrashUndo((prev) => (prev && removedIds.has(prev.docId) ? null : prev))
@@ -2530,7 +2523,9 @@ export function XDriveWorkspace({
         )
         setDocs((prev) =>
           prev.map((doc) =>
-            doc.folderId === target.id ? { ...doc, folder: action.nextName } : doc,
+            doc.folderId === target.id
+              ? { ...doc, folder: action.nextName }
+              : doc,
           ),
         )
         chatUndoMapRef.current.set(action.id, () => {
@@ -2563,7 +2558,11 @@ export function XDriveWorkspace({
         const snapshotFolders = [...foldersRef.current]
         const affectedDocs = docs
           .filter((d) => d.folderId === target.id)
-          .map((d) => ({ id: d.id, folderId: d.folderId ?? null, folder: d.folder }))
+          .map((d) => ({
+            id: d.id,
+            folderId: d.folderId ?? null,
+            folder: d.folder,
+          }))
         deleteFolder(target)
         chatUndoMapRef.current.set(action.id, () => {
           setFolders(snapshotFolders)
@@ -2849,8 +2848,7 @@ export function XDriveWorkspace({
       role: 'user',
       content: text,
       createdAt: now,
-      contextRefs:
-        input.contextRefs.length > 0 ? input.contextRefs : undefined,
+      contextRefs: input.contextRefs.length > 0 ? input.contextRefs : undefined,
     }
     const assistantMsg: DriveChatMessage = {
       id: messageId('chat-a'),
@@ -2913,9 +2911,7 @@ export function XDriveWorkspace({
     const idx = targetThread.messages.findIndex((m) => m.id === assistantId)
     if (idx <= 0) return
     const priorMessages = targetThread.messages.slice(0, idx)
-    const lastUser = [...priorMessages]
-      .reverse()
-      .find((m) => m.role === 'user')
+    const lastUser = [...priorMessages].reverse().find((m) => m.role === 'user')
     if (!lastUser) return
 
     const selectedModel =
@@ -3191,9 +3187,7 @@ export function XDriveWorkspace({
         openTabs={openTabs}
         activeTabId={activeDoc ? activeDoc.id : 'home'}
         activeNav={nav}
-        onSelectTab={(tabId) =>
-          visit(tabId, tabId === 'home' ? 'drive' : nav)
-        }
+        onSelectTab={(tabId) => visit(tabId, tabId === 'home' ? 'drive' : nav)}
         onSelectChat={() => visit('home', 'chat')}
         onCloseTab={closeTab}
         onNewTab={() => visit('home', 'drive')}
@@ -3239,12 +3233,30 @@ export function XDriveWorkspace({
           onCreateFolder={(parentId) =>
             setFolderModal({ mode: 'create', parentId })
           }
+          onRenameFolder={(folder) =>
+            setFolderModal({ mode: 'rename', folder })
+          }
+          onDeleteFolder={deleteFolder}
           onDropDocOnFolder={moveDocumentToFolder}
           trashCount={trashedDocs.length}
           onDropDocOnTrash={moveDocumentToTrash}
           pinnedApps={pinnedApps}
           activeAppId={activeDoc?.id}
           onSelectApp={openDocument}
+          onMoveApp={(appId) => setMoveDocId(appId)}
+          onDuplicateApp={(appId) => {
+            const doc = findDoc(appId)
+            if (doc) {
+              setNamer({
+                sourceId: doc.id,
+                title: `${doc.title} copy`,
+              })
+            }
+          }}
+          onShareApp={(appId) => setShareId(appId)}
+          onToggleStarApp={(appId) => toggleFlag(appId, 'starred')}
+          onUnpinApp={(appId) => toggleFlag(appId, 'pinned')}
+          onDeleteApp={(appId) => moveDocumentToTrash(appId)}
         />
         <div className="flex min-h-0 min-w-0 flex-1 flex-col">
           {activeDoc ? (
@@ -3479,8 +3491,6 @@ export function XDriveWorkspace({
                   )}
 
                   <FilterPillBar
-                    selectedCategory={category}
-                    onSelectCategory={setCategory}
                     sortBy={sortBy}
                     onSelectSort={setSortBy}
                     viewMode={viewMode}
@@ -3499,7 +3509,7 @@ export function XDriveWorkspace({
                       <p className="mt-1 text-[12px] text-[var(--xd-ink-muted)]">
                         {currentFolderId
                           ? 'Create a subfolder or drag files here from My Drive.'
-                          : 'Try clearing your search or category filter.'}
+                          : 'Try clearing your search filter.'}
                       </p>
                       {currentFolderId && (
                         <button
@@ -3663,8 +3673,6 @@ export function XDriveWorkspace({
                   </div>
 
                   <FilterPillBar
-                    selectedCategory={category}
-                    onSelectCategory={setCategory}
                     sortBy={sortBy}
                     onSelectSort={setSortBy}
                     viewMode={viewMode}
@@ -3998,8 +4006,8 @@ export function XDriveWorkspace({
               antigravityStatus || openCodeGoStatus
                 ? Boolean(
                     antigravityStatus?.authenticated ||
-                      (openCodeGoStatus?.authenticated &&
-                        openCodeGoStatus.entitled),
+                    (openCodeGoStatus?.authenticated &&
+                      openCodeGoStatus.entitled),
                   )
                 : undefined
             }

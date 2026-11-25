@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react'
-import { Check, Folder, Hash, Lock, Pin, Unlock } from 'lucide-react'
+import { Check, Hash, Lock, Pin, Unlock } from 'lucide-react'
 import { cn } from '#/lib/utils'
 import {
   DEFAULT_NOTES_SEED,
@@ -13,7 +13,7 @@ import {
 import { NotesFormattingBar } from './NotesFormattingBar'
 import type { MarkdownFormatCommand } from './NotesFormattingBar'
 import { NotesSidebar } from './NotesSidebar'
-import type { NoteItem, NotesSortBy, NotesViewMode } from './types'
+import type { NoteItem, NotesViewMode } from './types'
 
 export interface NotesAppProps {
   /** Initial notes when rendered standalone (e.g. in Storybook) */
@@ -309,9 +309,7 @@ export function NotesApp({
       'note-hypothesis'
     )
   })
-  const [selectedFolder, setSelectedFolder] = useState<string>('All')
   const [searchQuery, setSearchQuery] = useState('')
-  const [sortBy, setSortBy] = useState<NotesSortBy>('updated')
   const [viewMode, setViewMode] = useState<NotesViewMode>(initialViewMode)
   const [unlockedIds, setUnlockedIds] = useState<Record<string, boolean>>({})
   const [toast, setToast] = useState<string | null>(null)
@@ -660,14 +658,10 @@ export function NotesApp({
         notes={notes}
         activeNoteId={activeNote?.id ?? ''}
         folders={folders}
-        selectedFolder={selectedFolder}
         searchQuery={searchQuery}
-        sortBy={sortBy}
         readOnly={readOnly}
         onSelectNote={(id) => setActiveNoteId(id)}
-        onSelectFolder={setSelectedFolder}
         onSearchChange={setSearchQuery}
-        onSortChange={setSortBy}
         onCreateNote={createNote}
         onDuplicateNote={duplicateNote}
         onTogglePin={togglePin}
@@ -715,13 +709,9 @@ export function NotesApp({
             </div>
           ) : (
             <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
-              {/* Apple Notes centered date & metadata header */}
+              {/* Apple Notes date & metadata header */}
               <div className="flex flex-wrap items-center justify-between gap-2 px-6 pt-3 pb-1 text-[11.5px] text-[var(--xd-ink-muted)]">
                 <div className="flex items-center gap-2">
-                  <span className="inline-flex items-center gap-1 rounded border border-[var(--xd-border)] bg-[var(--xd-rail)] px-1.5 py-0.5 text-[11px] text-[var(--xd-ink-secondary)]">
-                    <Folder className="h-3 w-3" />
-                    <span>{activeNote.folder}</span>
-                  </span>
                   {activeNote.pinned && (
                     <span className="inline-flex items-center gap-1 text-[11px] text-[var(--xd-sketch)]">
                       <Pin className="h-3 w-3 fill-current" />

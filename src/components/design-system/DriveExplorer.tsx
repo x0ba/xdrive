@@ -24,6 +24,8 @@ import type {
   DriveFolderColor,
   MarbleDocumentFile,
 } from '#/lib/types'
+import { AppContextMenu } from '#/components/apps/shared'
+import type { ContextMenuItem } from '#/components/apps/shared'
 import {
   formatBytes,
   getCategoryIcon,
@@ -156,7 +158,8 @@ export function getFolderPathLabel(
   folderId: string | null | undefined,
   fallback?: string,
 ): string {
-  if (!folderId) return fallback && fallback !== 'My Drive' ? fallback : 'My Drive'
+  if (!folderId)
+    return fallback && fallback !== 'My Drive' ? fallback : 'My Drive'
   const chain = getFolderAncestors(folders, folderId)
   if (chain.length === 0) return fallback || 'My Drive'
   return chain.map((folder) => folder.name).join(' / ')
@@ -171,7 +174,11 @@ export function getDescendantFolderIds(
   while (added) {
     added = false
     for (const folder of folders) {
-      if (folder.parentId && result.has(folder.parentId) && !result.has(folder.id)) {
+      if (
+        folder.parentId &&
+        result.has(folder.parentId) &&
+        !result.has(folder.id)
+      ) {
         result.add(folder.id)
         added = true
       }
@@ -291,6 +298,25 @@ interface ActionMenuItem {
   onSelect: () => void
 }
 
+function toContextMenuItems(items: ActionMenuItem[]): ContextMenuItem[] {
+  const result: ContextMenuItem[] = []
+  let insertedDangerDivider = false
+  for (const item of items) {
+    if (item.danger && !insertedDangerDivider && result.length > 0) {
+      result.push({ id: `sep-${item.id}`, label: '', divider: true })
+      insertedDangerDivider = true
+    }
+    result.push({
+      id: item.id,
+      label: item.label,
+      icon: item.icon,
+      danger: item.danger,
+      onSelect: item.onSelect,
+    })
+  }
+  return result
+}
+
 function CompactActionMenu({
   label,
   items,
@@ -381,8 +407,8 @@ function CompactActionMenu({
 export interface DriveBreadcrumbBarProps {
   rootLabel?: string
   ancestors: DriveFolder[]
-  itemCount: number
-  folderCount: number
+  itemCount?: number
+  folderCount?: number
   onNavigateFolder?: (folderId: string | null) => void
   onCreateFolder?: () => void
   onDropDocOnFolder?: (docId: string, folderId: string | null) => void
@@ -391,18 +417,13 @@ export interface DriveBreadcrumbBarProps {
 export function DriveBreadcrumbBar({
   rootLabel = 'My Drive',
   ancestors,
-  itemCount,
-  folderCount,
   onNavigateFolder,
   onCreateFolder,
   onDropDocOnFolder,
 }: DriveBreadcrumbBarProps) {
   const [dropTargetId, setDropTargetId] = useState<string | 'root' | null>(null)
 
-  const handleDragOver = (
-    event: React.DragEvent,
-    target: string | 'root',
-  ) => {
+  const handleDragOver = (event: React.DragEvent, target: string | 'root') => {
     if (!onDropDocOnFolder) return
     event.preventDefault()
     event.dataTransfer.dropEffect = 'move'
@@ -417,13 +438,6 @@ export function DriveBreadcrumbBar({
       onDropDocOnFolder(docId, folderId)
     }
   }
-
-  const countText =
-    folderCount > 0 && itemCount > 0
-      ? `${folderCount} ${folderCount === 1 ? 'folder' : 'folders'}, ${itemCount} ${itemCount === 1 ? 'file' : 'files'}`
-      : folderCount > 0
-        ? `${folderCount} ${folderCount === 1 ? 'folder' : 'folders'}`
-        : `${itemCount} ${itemCount === 1 ? 'file' : 'files'}`
 
   return (
     <div className="flex flex-wrap items-center justify-between gap-3">
@@ -482,12 +496,8 @@ export function DriveBreadcrumbBar({
         })}
       </nav>
 
-      <div className="flex shrink-0 items-center gap-2.5">
-        <span className="xd-tabular text-[12px] text-[var(--xd-ink-muted)]">
-          {countText}
-        </span>
-
-        {onCreateFolder && (
+      {onCreateFolder && (
+        <div className="flex shrink-0 items-center gap-2.5">
           <button
             type="button"
             onClick={onCreateFolder}
@@ -496,8 +506,8 @@ export function DriveBreadcrumbBar({
             <FolderPlus className="h-3.5 w-3.5 text-[var(--xd-ink-secondary)]" />
             <span>New folder</span>
           </button>
-        )}
-      </div>
+        </div>
+      )}
     </div>
   )
 }
@@ -528,6 +538,7 @@ export function DriveFolderCard({
   onDropDoc,
 }: DriveFolderCardProps) {
   const [dragOver, setDragOver] = useState(false)
+  const [contextMenu, setContextMenu] = useState({ open: false, x: 0, y: 0 })
 
   const menuItems: ActionMenuItem[] = [
     {
@@ -570,57 +581,73 @@ export function DriveFolderCard({
   ]
 
   return (
-    <div
-      role="button"
-      tabIndex={0}
-      onClick={() => onOpen?.(folder)}
-      onKeyDown={(event) => {
-        if (event.key === 'Enter' || event.key === ' ') {
+    <>
+      <div
+        role="button"
+        tabIndex={0}
+        onClick={() => onOpen?.(folder)}
+        onContextMenu={(event) => {
           event.preventDefault()
-          onOpen?.(folder)
-        }
-      }}
-      onDragOver={(event) => {
-        if (!onDropDoc) return
-        event.preventDefault()
-        event.dataTransfer.dropEffect = 'move'
-        setDragOver(true)
-      }}
-      onDragLeave={() => setDragOver(false)}
-      onDrop={(event) => {
-        event.preventDefault()
-        setDragOver(false)
-        const docId = readDraggedDocId(event)
-        if (docId && onDropDoc) onDropDoc(docId, folder.id)
-      }}
-      className={`group flex h-11 cursor-pointer items-center justify-between gap-2 rounded-md border px-3 text-left transition-colors ${
-        dragOver
-          ? 'border-[var(--xd-accent)] bg-[var(--xd-accent-soft)]'
-          : selected
-            ? 'border-[var(--xd-accent-border)] bg-[var(--xd-accent-soft)]'
-            : 'border-[var(--xd-border)] bg-[var(--xd-rail)] hover:border-[var(--xd-border-strong)] hover:bg-[var(--xd-elevated)]'
-      }`}
-    >
-      <div className="flex min-w-0 items-center gap-2.5">
-        <Folder
-          className={`h-4 w-4 shrink-0 fill-current/15 ${getFolderIconClass(folder.color)}`}
-        />
-        <span className="truncate text-[13px] font-medium text-[var(--xd-ink)]">
-          {folder.name}
-        </span>
+          event.stopPropagation()
+          setContextMenu({ open: true, x: event.clientX, y: event.clientY })
+        }}
+        onKeyDown={(event) => {
+          if (event.key === 'Enter' || event.key === ' ') {
+            event.preventDefault()
+            onOpen?.(folder)
+          }
+        }}
+        onDragOver={(event) => {
+          if (!onDropDoc) return
+          event.preventDefault()
+          event.dataTransfer.dropEffect = 'move'
+          setDragOver(true)
+        }}
+        onDragLeave={() => setDragOver(false)}
+        onDrop={(event) => {
+          event.preventDefault()
+          setDragOver(false)
+          const docId = readDraggedDocId(event)
+          if (docId && onDropDoc) onDropDoc(docId, folder.id)
+        }}
+        className={`group flex h-11 cursor-pointer items-center justify-between gap-2 rounded-md border px-3 text-left transition-colors ${
+          dragOver
+            ? 'border-[var(--xd-accent)] bg-[var(--xd-accent-soft)]'
+            : selected
+              ? 'border-[var(--xd-accent-border)] bg-[var(--xd-accent-soft)]'
+              : 'border-[var(--xd-border)] bg-[var(--xd-rail)] hover:border-[var(--xd-border-strong)] hover:bg-[var(--xd-elevated)]'
+        }`}
+      >
+        <div className="flex min-w-0 items-center gap-2.5">
+          <Folder
+            className={`h-4 w-4 shrink-0 fill-current/15 ${getFolderIconClass(folder.color)}`}
+          />
+          <span className="truncate text-[13px] font-medium text-[var(--xd-ink)]">
+            {folder.name}
+          </span>
+        </div>
+
+        <div className="flex shrink-0 items-center gap-1">
+          <span className="xd-tabular text-[11px] text-[var(--xd-ink-muted)]">
+            {itemCount}
+          </span>
+          <CompactActionMenu
+            label={`Actions for ${folder.name}`}
+            items={menuItems}
+            triggerClassName="inline-flex h-6 w-6 items-center justify-center rounded text-[var(--xd-ink-muted)] opacity-0 transition-opacity hover:bg-[var(--xd-surface-hover)] hover:text-[var(--xd-ink)] group-hover:opacity-100 focus:opacity-100"
+          />
+        </div>
       </div>
 
-      <div className="flex shrink-0 items-center gap-1">
-        <span className="xd-tabular text-[11px] text-[var(--xd-ink-muted)]">
-          {itemCount}
-        </span>
-        <CompactActionMenu
-          label={`Actions for ${folder.name}`}
-          items={menuItems}
-          triggerClassName="inline-flex h-6 w-6 items-center justify-center rounded text-[var(--xd-ink-muted)] opacity-0 transition-opacity hover:bg-[var(--xd-surface-hover)] hover:text-[var(--xd-ink)] group-hover:opacity-100 focus:opacity-100"
-        />
-      </div>
-    </div>
+      <AppContextMenu
+        open={contextMenu.open}
+        x={contextMenu.x}
+        y={contextMenu.y}
+        items={toContextMenuItems(menuItems)}
+        onClose={() => setContextMenu((prev) => ({ ...prev, open: false }))}
+        ariaLabel={`Actions for ${folder.name}`}
+      />
+    </>
   )
 }
 
@@ -648,7 +675,9 @@ function extractPreviewSnippets(doc: MarbleDocumentFile): {
   const h1Match = source.match(/<h1[^>]*>([\s\S]*?)<\/h1>/i)
   const heading = h1Match ? stripTags(h1Match[1]) : doc.title
 
-  const pMatches = Array.from(source.matchAll(/<(?:p|li|h2|h3)[^>]*>([\s\S]*?)<\/(?:p|li|h2|h3)>/gi))
+  const pMatches = Array.from(
+    source.matchAll(/<(?:p|li|h2|h3)[^>]*>([\s\S]*?)<\/(?:p|li|h2|h3)>/gi),
+  )
     .map((match) => stripTags(match[1]))
     .filter((text) => text.length > 12)
     .slice(0, 3)
@@ -659,11 +688,7 @@ function extractPreviewSnippets(doc: MarbleDocumentFile): {
   }
 }
 
-export function DriveDocumentThumbnail({
-  doc,
-}: {
-  doc: MarbleDocumentFile
-}) {
+export function DriveDocumentThumbnail({ doc }: { doc: MarbleDocumentFile }) {
   const snippet = useMemo(() => extractPreviewSnippets(doc), [doc])
 
   if (doc.category === 'slides') {
@@ -702,11 +727,7 @@ export function DriveDocumentThumbnail({
             SVG
           </span>
         </div>
-        <svg
-          viewBox="0 0 180 72"
-          className="h-16 w-full"
-          aria-hidden="true"
-        >
+        <svg viewBox="0 0 180 72" className="h-16 w-full" aria-hidden="true">
           <line
             x1="8"
             y1="62"
@@ -979,75 +1000,92 @@ function buildFileMenuItems(props: DriveFileCardProps): ActionMenuItem[] {
 export function DriveFilePreviewCard(props: DriveFileCardProps) {
   const { doc, folderLabel, onOpen, onToggleStar } = props
   const menuItems = buildFileMenuItems(props)
+  const [contextMenu, setContextMenu] = useState({ open: false, x: 0, y: 0 })
 
   return (
-    <article
-      draggable
-      onDragStart={(e) => setDraggedDoc(e, doc.id)}
-      onClick={() => onOpen?.(doc)}
-      className="group flex cursor-pointer flex-col overflow-hidden rounded-lg border border-[var(--xd-border)] bg-[var(--xd-rail)] transition-colors hover:border-[var(--xd-border-strong)] hover:bg-[var(--xd-elevated)]"
-    >
-      {/* Top Google Drive File Card Header */}
-      <div className="flex items-center justify-between gap-2 px-3 py-2">
-        <div className="flex min-w-0 items-center gap-2">
-          <span className="shrink-0 text-[var(--xd-accent)]">
-            {getCategoryIcon(doc.category, 'h-3.5 w-3.5')}
-          </span>
-          <h3 className="truncate text-[12.5px] font-medium text-[var(--xd-ink)]">
-            {doc.title}
-          </h3>
+    <>
+      <article
+        draggable
+        onDragStart={(e) => setDraggedDoc(e, doc.id)}
+        onClick={() => onOpen?.(doc)}
+        onContextMenu={(event) => {
+          event.preventDefault()
+          event.stopPropagation()
+          setContextMenu({ open: true, x: event.clientX, y: event.clientY })
+        }}
+        className="group flex cursor-pointer flex-col overflow-hidden rounded-lg border border-[var(--xd-border)] bg-[var(--xd-rail)] transition-colors hover:border-[var(--xd-border-strong)] hover:bg-[var(--xd-elevated)]"
+      >
+        {/* Top Google Drive File Card Header */}
+        <div className="flex items-center justify-between gap-2 px-3 py-2">
+          <div className="flex min-w-0 items-center gap-2">
+            <span className="shrink-0 text-[var(--xd-accent)]">
+              {getCategoryIcon(doc.category, 'h-3.5 w-3.5')}
+            </span>
+            <h3 className="truncate text-[12.5px] font-medium text-[var(--xd-ink)]">
+              {doc.title}
+            </h3>
+          </div>
+
+          <div
+            className="flex shrink-0 items-center gap-0.5"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {onToggleStar && (
+              <button
+                type="button"
+                onClick={() => onToggleStar(doc)}
+                aria-label={doc.starred ? 'Remove star' : 'Star file'}
+                aria-pressed={doc.starred}
+                className={`inline-flex h-6 w-6 items-center justify-center rounded transition-colors ${
+                  doc.starred
+                    ? 'text-[var(--xd-sketch)]'
+                    : 'text-[var(--xd-ink-muted)] opacity-0 hover:bg-[var(--xd-surface-hover)] hover:text-[var(--xd-ink)] group-hover:opacity-100'
+                }`}
+              >
+                <Star
+                  className={`h-3.5 w-3.5 ${doc.starred ? 'fill-current' : ''}`}
+                />
+              </button>
+            )}
+            <CompactActionMenu
+              label={`Actions for ${doc.title}`}
+              items={menuItems}
+            />
+          </div>
         </div>
 
-        <div
-          className="flex shrink-0 items-center gap-0.5"
-          onClick={(e) => e.stopPropagation()}
-        >
-          {onToggleStar && (
-            <button
-              type="button"
-              onClick={() => onToggleStar(doc)}
-              aria-label={doc.starred ? 'Remove star' : 'Star file'}
-              aria-pressed={doc.starred}
-              className={`inline-flex h-6 w-6 items-center justify-center rounded transition-colors ${
-                doc.starred
-                  ? 'text-[var(--xd-sketch)]'
-                  : 'text-[var(--xd-ink-muted)] opacity-0 hover:bg-[var(--xd-surface-hover)] hover:text-[var(--xd-ink)] group-hover:opacity-100'
-              }`}
-            >
-              <Star
-                className={`h-3.5 w-3.5 ${doc.starred ? 'fill-current' : ''}`}
-              />
-            </button>
-          )}
-          <CompactActionMenu
-            label={`Actions for ${doc.title}`}
-            items={menuItems}
-          />
+        {/* Center Preview Window */}
+        <div className="px-2.5">
+          <div className="aspect-[16/10] w-full overflow-hidden rounded border border-[var(--xd-border)] bg-[var(--xd-canvas)]">
+            <DriveDocumentThumbnail doc={doc} />
+          </div>
         </div>
-      </div>
 
-      {/* Center Preview Window */}
-      <div className="px-2.5">
-        <div className="aspect-[16/10] w-full overflow-hidden rounded border border-[var(--xd-border)] bg-[var(--xd-canvas)]">
-          <DriveDocumentThumbnail doc={doc} />
+        {/* Quiet Footer */}
+        <div className="flex items-center justify-between gap-2 px-3 py-2 text-[11px] text-[var(--xd-ink-muted)]">
+          <div className="flex min-w-0 items-center gap-1.5">
+            <span className="inline-flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-[var(--xd-surface-active)] text-[9px] font-semibold text-[var(--xd-ink)]">
+              {doc.lastEditedBy.initials}
+            </span>
+            <span className="truncate text-[var(--xd-ink-secondary)]">
+              {folderLabel && folderLabel !== 'My Drive'
+                ? folderLabel
+                : doc.lastEditedBy.name}
+            </span>
+          </div>
+          <span className="xd-tabular shrink-0">{doc.updatedAt}</span>
         </div>
-      </div>
+      </article>
 
-      {/* Quiet Footer */}
-      <div className="flex items-center justify-between gap-2 px-3 py-2 text-[11px] text-[var(--xd-ink-muted)]">
-        <div className="flex min-w-0 items-center gap-1.5">
-          <span className="inline-flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-[var(--xd-surface-active)] text-[9px] font-semibold text-[var(--xd-ink)]">
-            {doc.lastEditedBy.initials}
-          </span>
-          <span className="truncate text-[var(--xd-ink-secondary)]">
-            {folderLabel && folderLabel !== 'My Drive'
-              ? folderLabel
-              : doc.lastEditedBy.name}
-          </span>
-        </div>
-        <span className="xd-tabular shrink-0">{doc.updatedAt}</span>
-      </div>
-    </article>
+      <AppContextMenu
+        open={contextMenu.open}
+        x={contextMenu.x}
+        y={contextMenu.y}
+        items={toContextMenuItems(menuItems)}
+        onClose={() => setContextMenu((prev) => ({ ...prev, open: false }))}
+        ariaLabel={`Actions for ${doc.title}`}
+      />
+    </>
   )
 }
 
@@ -1058,53 +1096,70 @@ export function DriveFilePreviewCard(props: DriveFileCardProps) {
 export function DriveFileIconTile(props: DriveFileCardProps) {
   const { doc, onOpen, onToggleStar } = props
   const menuItems = buildFileMenuItems(props)
+  const [contextMenu, setContextMenu] = useState({ open: false, x: 0, y: 0 })
 
   return (
-    <article
-      draggable
-      onDragStart={(e) => setDraggedDoc(e, doc.id)}
-      onClick={() => onOpen?.(doc)}
-      className="group relative flex cursor-pointer flex-col items-center rounded-lg border border-transparent px-3 py-3.5 text-center transition-colors hover:border-[var(--xd-border)] hover:bg-[var(--xd-rail)]"
-    >
-      <div className="absolute right-1.5 top-1.5 flex items-center gap-0.5">
-        {doc.starred && onToggleStar && (
-          <button
-            type="button"
-            onClick={(e) => {
-              e.stopPropagation()
-              onToggleStar(doc)
-            }}
-            aria-label="Remove star"
-            className="inline-flex h-5 w-5 items-center justify-center rounded text-[var(--xd-sketch)]"
-          >
-            <Star className="h-3 w-3 fill-current" />
-          </button>
-        )}
-        <CompactActionMenu
-          label={`Actions for ${doc.title}`}
-          items={menuItems}
-          triggerClassName="inline-flex h-6 w-6 items-center justify-center rounded text-[var(--xd-ink-muted)] opacity-0 transition-opacity hover:bg-[var(--xd-surface-hover)] hover:text-[var(--xd-ink)] group-hover:opacity-100 focus:opacity-100"
-        />
-      </div>
+    <>
+      <article
+        draggable
+        onDragStart={(e) => setDraggedDoc(e, doc.id)}
+        onClick={() => onOpen?.(doc)}
+        onContextMenu={(event) => {
+          event.preventDefault()
+          event.stopPropagation()
+          setContextMenu({ open: true, x: event.clientX, y: event.clientY })
+        }}
+        className="group relative flex cursor-pointer flex-col items-center rounded-lg border border-transparent px-3 py-3.5 text-center transition-colors hover:border-[var(--xd-border)] hover:bg-[var(--xd-rail)]"
+      >
+        <div className="absolute right-1.5 top-1.5 flex items-center gap-0.5">
+          {doc.starred && onToggleStar && (
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation()
+                onToggleStar(doc)
+              }}
+              aria-label="Remove star"
+              className="inline-flex h-5 w-5 items-center justify-center rounded text-[var(--xd-sketch)]"
+            >
+              <Star className="h-3 w-3 fill-current" />
+            </button>
+          )}
+          <CompactActionMenu
+            label={`Actions for ${doc.title}`}
+            items={menuItems}
+            triggerClassName="inline-flex h-6 w-6 items-center justify-center rounded text-[var(--xd-ink-muted)] opacity-0 transition-opacity hover:bg-[var(--xd-surface-hover)] hover:text-[var(--xd-ink)] group-hover:opacity-100 focus:opacity-100"
+          />
+        </div>
 
-      {/* Geometric Document Sheet Glyph */}
-      <div className="relative flex h-14 w-12 items-center justify-center rounded-md border border-[var(--xd-border-strong)] bg-[var(--xd-canvas)] transition-colors group-hover:border-[var(--xd-accent-border)]">
-        <span
-          aria-hidden="true"
-          className="absolute right-0 top-0 h-3 w-3 border-b border-l border-[var(--xd-border)] bg-[var(--xd-rail)]"
-        />
-        <span className="text-[var(--xd-accent)]">
-          {getCategoryIcon(doc.category, 'h-5 w-5')}
+        {/* Geometric Document Sheet Glyph */}
+        <div className="relative flex h-14 w-12 items-center justify-center rounded-md border border-[var(--xd-border-strong)] bg-[var(--xd-canvas)] transition-colors group-hover:border-[var(--xd-accent-border)]">
+          <span
+            aria-hidden="true"
+            className="absolute right-0 top-0 h-3 w-3 border-b border-l border-[var(--xd-border)] bg-[var(--xd-rail)]"
+          />
+          <span className="text-[var(--xd-accent)]">
+            {getCategoryIcon(doc.category, 'h-5 w-5')}
+          </span>
+        </div>
+
+        <h3 className="mt-2.5 line-clamp-2 w-full text-[12px] font-medium leading-snug text-[var(--xd-ink)]">
+          {doc.title}
+        </h3>
+        <span className="mt-0.5 text-[10.5px] text-[var(--xd-ink-muted)]">
+          {getCategoryLabel(doc.category)}
         </span>
-      </div>
+      </article>
 
-      <h3 className="mt-2.5 line-clamp-2 w-full text-[12px] font-medium leading-snug text-[var(--xd-ink)]">
-        {doc.title}
-      </h3>
-      <span className="mt-0.5 text-[10.5px] text-[var(--xd-ink-muted)]">
-        {getCategoryLabel(doc.category)}
-      </span>
-    </article>
+      <AppContextMenu
+        open={contextMenu.open}
+        x={contextMenu.x}
+        y={contextMenu.y}
+        items={toContextMenuItems(menuItems)}
+        onClose={() => setContextMenu((prev) => ({ ...prev, open: false }))}
+        ariaLabel={`Actions for ${doc.title}`}
+      />
+    </>
   )
 }
 
@@ -1114,7 +1169,10 @@ export function DriveFileIconTile(props: DriveFileCardProps) {
 
 export interface DriveFileListTableProps {
   folders: DriveFolder[]
-  folderCounts?: Map<string, { files: number; subfolders: number; total: number }>
+  folderCounts?: Map<
+    string,
+    { files: number; subfolders: number; total: number }
+  >
   docs: MarbleDocumentFile[]
   resolveFolderLabel?: (doc: MarbleDocumentFile) => string
   onOpenFolder?: (folder: DriveFolder) => void
@@ -1152,6 +1210,13 @@ export function DriveFileListTable({
   const [dragTargetFolderId, setDragTargetFolderId] = useState<string | null>(
     null,
   )
+  const [contextState, setContextState] = useState<{
+    open: boolean
+    x: number
+    y: number
+    label: string
+    items: ContextMenuItem[]
+  }>({ open: false, x: 0, y: 0, label: 'Actions', items: [] })
 
   return (
     <div className="overflow-visible rounded-md border border-[var(--xd-border)] bg-[var(--xd-canvas)]">
@@ -1219,6 +1284,17 @@ export function DriveFileListTable({
               <tr
                 key={folder.id}
                 onClick={() => onOpenFolder?.(folder)}
+                onContextMenu={(event) => {
+                  event.preventDefault()
+                  event.stopPropagation()
+                  setContextState({
+                    open: true,
+                    x: event.clientX,
+                    y: event.clientY,
+                    label: `Actions for ${folder.name}`,
+                    items: toContextMenuItems(folderMenuItems),
+                  })
+                }}
                 onDragOver={(e) => {
                   if (!onDropDocOnFolder) return
                   e.preventDefault()
@@ -1297,6 +1373,17 @@ export function DriveFileListTable({
                 draggable
                 onDragStart={(e) => setDraggedDoc(e, doc.id)}
                 onClick={() => onOpenDoc?.(doc)}
+                onContextMenu={(event) => {
+                  event.preventDefault()
+                  event.stopPropagation()
+                  setContextState({
+                    open: true,
+                    x: event.clientX,
+                    y: event.clientY,
+                    label: `Actions for ${doc.title}`,
+                    items: toContextMenuItems(menuItems),
+                  })
+                }}
                 className="group cursor-pointer transition-colors hover:bg-[var(--xd-surface-hover)]/50"
               >
                 <td className="px-3 py-2.5">
@@ -1324,7 +1411,9 @@ export function DriveFileListTable({
                 <td className="hidden px-3 py-2.5 sm:table-cell">
                   <span className="inline-flex items-center gap-1 rounded border border-[var(--xd-border)] bg-[var(--xd-rail)] px-1.5 py-0.5 text-[11px] text-[var(--xd-ink-secondary)]">
                     <Folder className="h-3 w-3 text-[var(--xd-ink-muted)]" />
-                    <span className="max-w-[140px] truncate">{folderLabel}</span>
+                    <span className="max-w-[140px] truncate">
+                      {folderLabel}
+                    </span>
                   </span>
                 </td>
                 <td className="hidden px-3 py-2.5 md:table-cell">
@@ -1374,6 +1463,15 @@ export function DriveFileListTable({
           })}
         </tbody>
       </table>
+
+      <AppContextMenu
+        open={contextState.open}
+        x={contextState.x}
+        y={contextState.y}
+        items={contextState.items}
+        onClose={() => setContextState((prev) => ({ ...prev, open: false }))}
+        ariaLabel={contextState.label}
+      />
     </div>
   )
 }
@@ -1663,6 +1761,13 @@ export function DriveTrashList({
 }: DriveTrashListProps) {
   const effectiveTotal = totalCount ?? docs.length
   const hasTrashItems = effectiveTotal > 0
+  const [contextState, setContextState] = useState<{
+    open: boolean
+    x: number
+    y: number
+    label: string
+    items: ContextMenuItem[]
+  }>({ open: false, x: 0, y: 0, label: 'Trash actions', items: [] })
 
   return (
     <div className="space-y-4">
@@ -1773,6 +1878,18 @@ export function DriveTrashList({
                 return (
                   <tr
                     key={doc.id}
+                    onContextMenu={(event) => {
+                      if (menuItems.length === 0) return
+                      event.preventDefault()
+                      event.stopPropagation()
+                      setContextState({
+                        open: true,
+                        x: event.clientX,
+                        y: event.clientY,
+                        label: `Trash actions for ${doc.title}`,
+                        items: toContextMenuItems(menuItems),
+                      })
+                    }}
                     className="group transition-colors hover:bg-[var(--xd-surface-hover)]/40"
                   >
                     <td className="px-3 py-2.5">
@@ -1859,6 +1976,15 @@ export function DriveTrashList({
           </table>
         </div>
       )}
+
+      <AppContextMenu
+        open={contextState.open}
+        x={contextState.x}
+        y={contextState.y}
+        items={contextState.items}
+        onClose={() => setContextState((prev) => ({ ...prev, open: false }))}
+        ariaLabel={contextState.label}
+      />
     </div>
   )
 }

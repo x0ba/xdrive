@@ -3,11 +3,17 @@ import {
   ChevronDown,
   ChevronLeft,
   ChevronRight,
+  ExternalLink,
   Folder,
+  FolderInput,
+  FolderOpen,
   FolderPlus,
   HardDrive,
   MessageSquare,
+  Pencil,
+  PinOff,
   Plus,
+  Share2,
   Star,
   X,
   Sun,
@@ -34,6 +40,8 @@ import {
   ShieldAlert,
   Trash2,
 } from 'lucide-react'
+import { AppContextMenu } from '#/components/apps/shared'
+import type { ContextMenuItem } from '#/components/apps/shared'
 import type {
   DriveFolder,
   DriveFolderColor,
@@ -400,6 +408,8 @@ export interface SidebarRailProps {
   activeFolderId?: string | null
   onSelectFolder?: (folderId: string | null) => void
   onCreateFolder?: (parentId: string | null) => void
+  onRenameFolder?: (folder: DriveFolder) => void
+  onDeleteFolder?: (folder: DriveFolder) => void
   onDropDocOnFolder?: (docId: string, folderId: string | null) => void
   trashCount?: number
   onDropDocOnTrash?: (docId: string) => void
@@ -409,6 +419,7 @@ export interface SidebarRailProps {
     fileName: string
     category: MarbleAppCategory
     nodeCount: number
+    starred?: boolean
   }>
   recentApps?: Array<{
     id: string
@@ -419,6 +430,12 @@ export interface SidebarRailProps {
   }>
   activeAppId?: string
   onSelectApp?: (appId: string) => void
+  onMoveApp?: (appId: string) => void
+  onDuplicateApp?: (appId: string) => void
+  onShareApp?: (appId: string) => void
+  onToggleStarApp?: (appId: string) => void
+  onUnpinApp?: (appId: string) => void
+  onDeleteApp?: (appId: string) => void
   subscriptions?: Pick<
     AISubscription,
     'providerId' | 'name' | 'connected' | 'status' | 'planName'
@@ -435,12 +452,20 @@ export function SidebarRail({
   activeFolderId = null,
   onSelectFolder,
   onCreateFolder,
+  onRenameFolder,
+  onDeleteFolder,
   onDropDocOnFolder,
   trashCount = 0,
   onDropDocOnTrash,
   pinnedApps = [],
   activeAppId,
   onSelectApp,
+  onMoveApp,
+  onDuplicateApp,
+  onShareApp,
+  onToggleStarApp,
+  onUnpinApp,
+  onDeleteApp,
 }: SidebarRailProps) {
   const [driveExpanded, setDriveExpanded] = useState(true)
   const [expandedFolderIds, setExpandedFolderIds] = useState<Set<string>>(
@@ -449,6 +474,147 @@ export function SidebarRail({
   const [dropTargetId, setDropTargetId] = useState<
     string | 'root' | 'trash' | null
   >(null)
+  const [contextState, setContextState] = useState<{
+    open: boolean
+    x: number
+    y: number
+    label: string
+    items: ContextMenuItem[]
+  }>({ open: false, x: 0, y: 0, label: 'Sidebar actions', items: [] })
+
+  const openContextMenu = (
+    event: React.MouseEvent,
+    label: string,
+    items: ContextMenuItem[],
+  ) => {
+    if (items.length === 0) return
+    event.preventDefault()
+    event.stopPropagation()
+    setContextState({
+      open: true,
+      x: event.clientX,
+      y: event.clientY,
+      label,
+      items,
+    })
+  }
+
+  const buildFolderContextItems = (folder: DriveFolder): ContextMenuItem[] => [
+    {
+      id: 'open-folder',
+      label: 'Open folder',
+      icon: <FolderOpen className="h-3.5 w-3.5" />,
+      onSelect: () => {
+        onSelectNav?.('drive')
+        onSelectFolder?.(folder.id)
+      },
+    },
+    ...(onCreateFolder
+      ? [
+          {
+            id: 'new-subfolder',
+            label: 'New subfolder',
+            icon: <FolderPlus className="h-3.5 w-3.5" />,
+            onSelect: () => onCreateFolder(folder.id),
+          },
+        ]
+      : []),
+    ...(onRenameFolder
+      ? [
+          {
+            id: 'rename-folder',
+            label: 'Rename',
+            icon: <Pencil className="h-3.5 w-3.5" />,
+            onSelect: () => onRenameFolder(folder),
+          },
+        ]
+      : []),
+    ...(onDeleteFolder
+      ? [
+          { id: 'sep-folder-delete', label: '', divider: true },
+          {
+            id: 'delete-folder',
+            label: 'Delete folder',
+            icon: <Trash2 className="h-3.5 w-3.5" />,
+            danger: true,
+            onSelect: () => onDeleteFolder(folder),
+          },
+        ]
+      : []),
+  ]
+
+  const buildPinnedAppContextItems = (
+    app: NonNullable<SidebarRailProps['pinnedApps']>[number],
+  ): ContextMenuItem[] => [
+    {
+      id: 'open-app',
+      label: 'Open',
+      icon: <ExternalLink className="h-3.5 w-3.5" />,
+      onSelect: () => onSelectApp?.(app.id),
+    },
+    ...(onMoveApp
+      ? [
+          {
+            id: 'move-app',
+            label: 'Move to folder…',
+            icon: <FolderInput className="h-3.5 w-3.5" />,
+            onSelect: () => onMoveApp(app.id),
+          },
+        ]
+      : []),
+    ...(onDuplicateApp
+      ? [
+          {
+            id: 'duplicate-app',
+            label: 'Duplicate',
+            icon: <Copy className="h-3.5 w-3.5" />,
+            onSelect: () => onDuplicateApp(app.id),
+          },
+        ]
+      : []),
+    ...(onShareApp
+      ? [
+          {
+            id: 'share-app',
+            label: 'Share',
+            icon: <Share2 className="h-3.5 w-3.5" />,
+            onSelect: () => onShareApp(app.id),
+          },
+        ]
+      : []),
+    ...(onToggleStarApp
+      ? [
+          {
+            id: 'star-app',
+            label: app.starred ? 'Remove star' : 'Add to Starred',
+            icon: <Star className="h-3.5 w-3.5" />,
+            onSelect: () => onToggleStarApp(app.id),
+          },
+        ]
+      : []),
+    ...(onUnpinApp
+      ? [
+          {
+            id: 'unpin-app',
+            label: 'Unpin from sidebar',
+            icon: <PinOff className="h-3.5 w-3.5" />,
+            onSelect: () => onUnpinApp(app.id),
+          },
+        ]
+      : []),
+    ...(onDeleteApp
+      ? [
+          { id: 'sep-app-delete', label: '', divider: true },
+          {
+            id: 'delete-app',
+            label: 'Move to trash',
+            icon: <Trash2 className="h-3.5 w-3.5" />,
+            danger: true,
+            onSelect: () => onDeleteApp(app.id),
+          },
+        ]
+      : []),
+  ]
 
   const toggleExpandFolder = (folderId: string) => {
     setExpandedFolderIds((prev) => {
@@ -515,6 +681,13 @@ export function SidebarRail({
       return (
         <div key={folder.id}>
           <div
+            onContextMenu={(e) =>
+              openContextMenu(
+                e,
+                `Actions for ${folder.name}`,
+                buildFolderContextItems(folder),
+              )
+            }
             onDragOver={(e) => handleDragOver(e, folder.id)}
             onDragLeave={() => setDropTargetId(null)}
             onDrop={(e) => handleDrop(e, folder.id)}
@@ -658,6 +831,29 @@ export function SidebarRail({
 
         <div>
           <div
+            onContextMenu={(e) =>
+              openContextMenu(e, 'Actions for My Drive', [
+                {
+                  id: 'open-root',
+                  label: 'Open My Drive',
+                  icon: <HardDrive className="h-3.5 w-3.5" />,
+                  onSelect: () => {
+                    onSelectNav?.('drive')
+                    onSelectFolder?.(null)
+                  },
+                },
+                ...(onCreateFolder
+                  ? [
+                      {
+                        id: 'new-root-folder',
+                        label: 'New folder',
+                        icon: <FolderPlus className="h-3.5 w-3.5" />,
+                        onSelect: () => onCreateFolder(null),
+                      },
+                    ]
+                  : []),
+              ])
+            }
             onDragOver={(e) => handleDragOver(e, 'root')}
             onDragLeave={() => setDropTargetId(null)}
             onDrop={(e) => handleDrop(e, null)}
@@ -725,7 +921,9 @@ export function SidebarRail({
           </div>
 
           {folders.length > 0 && driveExpanded && (
-            <div className="mt-0.5 space-y-0.5">{renderFolderTree(null, 0)}</div>
+            <div className="mt-0.5 space-y-0.5">
+              {renderFolderTree(null, 0)}
+            </div>
           )}
         </div>
 
@@ -788,6 +986,13 @@ export function SidebarRail({
                   key={app.id}
                   type="button"
                   onClick={() => onSelectApp?.(app.id)}
+                  onContextMenu={(e) =>
+                    openContextMenu(
+                      e,
+                      `Actions for ${app.title}`,
+                      buildPinnedAppContextItems(app),
+                    )
+                  }
                   className={`flex w-full items-center gap-2 rounded px-2 py-1 text-left text-[12px] transition-colors ${
                     isSelected
                       ? 'bg-[var(--xd-surface-active)] font-medium text-[var(--xd-ink)]'
@@ -804,6 +1009,15 @@ export function SidebarRail({
           </div>
         </div>
       )}
+
+      <AppContextMenu
+        open={contextState.open}
+        x={contextState.x}
+        y={contextState.y}
+        items={contextState.items}
+        onClose={() => setContextState((prev) => ({ ...prev, open: false }))}
+        ariaLabel={contextState.label}
+      />
     </aside>
   )
 }

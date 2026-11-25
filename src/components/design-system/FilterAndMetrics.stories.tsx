@@ -17,7 +17,7 @@ import type {
   MarbleTemplateBlueprint,
   SortOption,
 } from './FilterAndMetrics'
-import type { MarbleAppCategory, MarbleDocumentFile } from '#/lib/types'
+import type { MarbleDocumentFile } from '#/lib/types'
 
 const MOCK_RESEARCH_DOCUMENTS: MarbleDocumentFile[] = [
   {
@@ -245,14 +245,12 @@ const MOCK_TEMPLATE_BLUEPRINTS: MarbleTemplateBlueprint[] = [
 ]
 
 function DriveFileIndexDemo() {
-  const [category, setCategory] = useState<MarbleAppCategory | 'all'>('all')
   const [sortBy, setSortBy] = useState<SortOption>('updated')
   const [viewMode, setViewMode] = useState<DriveViewMode>('preview')
   const [searchQuery, setSearchQuery] = useState('')
   const [docs, setDocs] = useState(MOCK_RESEARCH_DOCUMENTS)
 
   const filteredDocs = docs.filter((d) => {
-    if (category !== 'all' && d.category !== category) return false
     if (
       searchQuery.trim() &&
       !`${d.title} ${d.fileName} ${d.description}`
@@ -277,8 +275,6 @@ function DriveFileIndexDemo() {
       <AgentHeroComposer />
 
       <FilterPillBar
-        selectedCategory={category}
-        onSelectCategory={setCategory}
         sortBy={sortBy}
         onSelectSort={setSortBy}
         viewMode={viewMode}

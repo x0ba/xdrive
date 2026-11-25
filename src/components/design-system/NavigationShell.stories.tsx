@@ -107,10 +107,18 @@ function LeftNavigationRailDemo() {
           setActiveFolderId(folderId)
         }}
         onCreateFolder={() => {}}
+        onRenameFolder={() => {}}
+        onDeleteFolder={() => {}}
         trashCount={2}
         pinnedApps={MOCK_PINNED_APPS}
         activeAppId={activeAppId}
         onSelectApp={setActiveAppId}
+        onMoveApp={() => {}}
+        onDuplicateApp={() => {}}
+        onShareApp={() => {}}
+        onToggleStarApp={() => {}}
+        onUnpinApp={() => {}}
+        onDeleteApp={() => {}}
       />
       <div className="flex flex-1 items-center justify-center p-8 text-[13px] text-[var(--xd-ink-secondary)]">
         {activeAppId
