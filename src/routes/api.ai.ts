@@ -15,6 +15,15 @@ import {
   toXDriveOpenCodeGoModelId,
 } from '#/lib/ai/opencode-go-types'
 import {
+  GrokBuildAcpError,
+  getGrokBuildStatus,
+  runGrokBuildPrompt,
+} from '#/lib/ai/grok-build-acp.server'
+import {
+  isGrokBuildModelId,
+  toXDriveGrokBuildModelId,
+} from '#/lib/ai/grok-build-types'
+import {
   buildMarbleAcpPrompt,
   parseMarbleAcpResponse,
 } from '#/lib/ai/marble-prompt.server'
@@ -68,6 +77,19 @@ function errorResponse(error: unknown) {
       error.httpStatus,
     )
   }
+  if (error instanceof GrokBuildAcpError) {
+    return json(
+      {
+        ok: false,
+        providerId: 'grok-build',
+        code: error.code,
+        authRequired: error.code === 'AUTH_REQUIRED',
+        binaryMissing: error.code === 'BINARY_MISSING',
+        error: error.message,
+      },
+      error.httpStatus,
+    )
+  }
   const message =
     error instanceof Error ? error.message : 'AI collaborator request failed'
   return json({ ok: false, code: 'AI_ERROR', error: message }, 500)
@@ -78,6 +100,7 @@ function resolveProviderId(body: Record<string, unknown>): string {
     return body.providerId.trim()
   }
   if (typeof body.modelId === 'string') {
+    if (isGrokBuildModelId(body.modelId)) return 'grok-build'
     if (isOpenCodeModelId(body.modelId)) return 'opencode-go'
     if (body.modelId.startsWith('antigravity/')) return 'antigravity'
   }
@@ -90,6 +113,10 @@ export async function GET({ request }: { request: Request }) {
   const refresh = url.searchParams.get('refresh') === '1'
 
   try {
+    if (provider === 'grok-build') {
+      const status = await getGrokBuildStatus(refresh)
+      return json(status)
+    }
     if (provider === 'opencode-go') {
       const status = await getOpenCodeStatus(refresh)
       return json(status)
@@ -99,15 +126,18 @@ export async function GET({ request }: { request: Request }) {
       return json(status)
     }
 
-    const [antigravityStatus, openCodeGoStatus] = await Promise.all([
-      getAntigravityAcpManager().getStatus(),
-      getOpenCodeStatus(refresh),
-    ])
+    const [antigravityStatus, openCodeGoStatus, grokBuildStatus] =
+      await Promise.all([
+        getAntigravityAcpManager().getStatus(),
+        getOpenCodeStatus(refresh),
+        getGrokBuildStatus(refresh),
+      ])
     return json({
       ...antigravityStatus,
       providers: {
         antigravity: antigravityStatus,
         'opencode-go': openCodeGoStatus,
+        'grok-build': grokBuildStatus,
       },
     })
   } catch (error) {
@@ -136,6 +166,10 @@ export async function POST({ request }: { request: Request }) {
 
   try {
     if (action === 'status') {
+      if (providerId === 'grok-build') {
+        const status = await getGrokBuildStatus(Boolean(body.refresh))
+        return json(status)
+      }
       if (providerId === 'opencode-go') {
         const status = await getOpenCodeStatus(Boolean(body.refresh))
         return json(status)
@@ -151,6 +185,19 @@ export async function POST({ request }: { request: Request }) {
 
     if (action === 'authenticate') {
       const apiKey = typeof body.apiKey === 'string' ? body.apiKey : undefined
+      if (providerId === 'grok-build') {
+        return json(
+          {
+            ok: false,
+            providerId: 'grok-build',
+            code: 'AUTH_REQUIRED',
+            authRequired: true,
+            error:
+              'xDrive uses the local Grok CLI over ACP and does not accept or store xAI API keys. Run `grok login` in your terminal (or set `XAI_API_KEY` in `.env.local`), then refresh status.',
+          },
+          400,
+        )
+      }
       if (providerId === 'opencode-go') {
         return json(
           {
@@ -173,6 +220,18 @@ export async function POST({ request }: { request: Request }) {
     }
 
     if (action === 'logout') {
+      if (providerId === 'grok-build') {
+        return json(
+          {
+            ok: false,
+            providerId: 'grok-build',
+            code: 'AUTH_REQUIRED',
+            error:
+              'Manage Grok Build credentials directly with `grok logout` in your terminal, then refresh status.',
+          },
+          400,
+        )
+      }
       if (providerId === 'opencode-go') {
         return json(
           {
@@ -196,21 +255,27 @@ export async function POST({ request }: { request: Request }) {
         return json({ ok: false, error: 'instruction is required' }, 400)
       }
 
-      if (providerId !== 'antigravity' && providerId !== 'opencode-go') {
+      if (
+        providerId !== 'antigravity' &&
+        providerId !== 'opencode-go' &&
+        providerId !== 'grok-build'
+      ) {
         return json(
           {
             ok: false,
             code: 'PROVIDER_UNAVAILABLE',
-            error: `Provider "${providerId}" is not integrated on this server. Select a Google Antigravity or OpenCode Go model in Models & Providers.`,
+            error: `Provider "${providerId}" is not integrated on this server. Select a Google Antigravity, OpenCode Go, or Grok Build model in Models & Providers.`,
           },
           400,
         )
       }
 
       const defaultModel =
-        providerId === 'opencode-go'
-          ? 'opencode-go/glm-5.3'
-          : 'antigravity/default'
+        providerId === 'grok-build'
+          ? 'grok-build/grok-4.7'
+          : providerId === 'opencode-go'
+            ? 'opencode-go/glm-5.3'
+            : 'antigravity/default'
 
       const collaborateInput: ServerCollaborateInput = {
         source: typeof body.source === 'string' ? body.source : '',
@@ -246,6 +311,39 @@ export async function POST({ request }: { request: Request }) {
         typeof body.sketchDataUrl === 'string' && body.sketchDataUrl
           ? [body.sketchDataUrl]
           : undefined
+
+      if (providerId === 'grok-build') {
+        const grokResult = await runGrokBuildPrompt({
+          prompt,
+          modelId: collaborateInput.modelId,
+          imageDataUrls,
+          signal: request.signal,
+        })
+
+        const resolvedModelId = toXDriveGrokBuildModelId(grokResult.modelId)
+        const parsed = parseMarbleAcpResponse(
+          grokResult.text,
+          collaborateInput,
+          resolvedModelId,
+        )
+
+        return json({
+          ok: true,
+          source: 'grok-build-acp',
+          proposal: parsed.proposal,
+          stages: parsed.stages,
+          newDocument: parsed.newDocument,
+          thoughts: grokResult.thoughts,
+          runtime: {
+            protocol: 'acp',
+            agentName: grokResult.agentName,
+            agentVersion: grokResult.agentVersion,
+            modelId: resolvedModelId,
+            acpModelId: grokResult.modelId,
+            stopReason: grokResult.stopReason,
+          },
+        })
+      }
 
       if (providerId === 'opencode-go') {
         const sessionId =

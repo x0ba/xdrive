@@ -34,6 +34,7 @@ const VALID_ROLES = new Set(['user', 'assistant', 'system'])
 const VALID_PROVIDERS = new Set<AIProviderId>([
   'antigravity',
   'opencode-go',
+  'grok-build',
   'xai',
   'claude',
   'openai',
@@ -461,6 +462,7 @@ function sanitizeAIMessage(raw: unknown): AIMessage | null {
     rec.runtimeSource === 'antigravity-acp' ||
     rec.runtimeSource === 'opencode-acp' ||
     rec.runtimeSource === 'opencode-go' ||
+    rec.runtimeSource === 'grok-build-acp' ||
     rec.runtimeSource === 'api' ||
     rec.runtimeSource === 'synthesizer'
   ) {

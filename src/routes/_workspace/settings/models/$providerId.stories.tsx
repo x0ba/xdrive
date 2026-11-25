@@ -23,7 +23,7 @@ const meta = {
 } satisfies Meta
 
 export default meta
-type Story = StoryObj<typeof meta>
+type Story = StoryObj<typeof Route>
 
 /**
  * Models & Providers settings page focused on OpenCode Go.
@@ -31,3 +31,21 @@ type Story = StoryObj<typeof meta>
  * @summary OpenCode Go provider settings route
  */
 export const OpenCodeGoProvider: Story = {}
+
+/**
+ * Models & Providers settings page focused on Grok Build.
+ *
+ * @summary Grok Build provider settings route
+ */
+export const GrokBuildProvider: Story = {
+  parameters: {
+    tanstack: {
+      router: {
+        route: Route,
+        params: {
+          providerId: 'grok-build',
+        },
+      },
+    },
+  },
+}

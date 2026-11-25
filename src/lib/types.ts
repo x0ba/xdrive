@@ -160,7 +160,7 @@ export interface MarbleDocumentFile {
 }
 
 export type AIProviderId =
-  'antigravity' | 'opencode-go' | 'xai' | 'claude' | 'openai'
+  'antigravity' | 'opencode-go' | 'grok-build' | 'xai' | 'claude' | 'openai'
 
 export interface AIModelSpec {
   id: string
@@ -184,6 +184,7 @@ export interface AISubscription {
   authMethod:
     | 'antigravity_acp'
     | 'opencode_acp'
+    | 'grok_build_acp'
     | 'subscription_oauth'
     | 'api_key'
     | 'cli_bridge'
@@ -240,7 +241,12 @@ export interface AIMessage {
   modelId?: string
   providerId?: AIProviderId
   runtimeSource?:
-    'antigravity-acp' | 'opencode-acp' | 'opencode-go' | 'api' | 'synthesizer'
+    | 'antigravity-acp'
+    | 'opencode-acp'
+    | 'opencode-go'
+    | 'grok-build-acp'
+    | 'api'
+    | 'synthesizer'
   thoughts?: string[]
   attachedElements?: SelectedMarbleElement[]
   attachedSketches?: SketchAnnotation[]

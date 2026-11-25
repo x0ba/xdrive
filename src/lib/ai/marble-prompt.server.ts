@@ -9,6 +9,7 @@ import * as marbleGuard from '@bdhmin/marble/guard'
 import * as marblePatcher from '@bdhmin/marble/patcher'
 import type {
   AIMessage,
+  AIProviderId,
   EvergreenDocRef,
   MarbleAppCategory,
   MarbleDocumentFile,
@@ -59,7 +60,7 @@ export interface ServerCollaborateInput {
   source: string
   instruction: string
   modelId: string
-  providerId: 'antigravity' | 'opencode-go' | 'xai' | 'claude' | 'openai'
+  providerId: AIProviderId
   action?: MarbleActionKind
   selectedElements?: SelectedMarbleElement[]
   sketchAnnotations?: SketchAnnotation[]
@@ -130,6 +131,15 @@ function providerMeta(providerId: ServerCollaborateInput['providerId']): {
   tag: string
   defaultSlug: string
 } {
+  if (providerId === 'grok-build') {
+    return {
+      name: 'Grok Build',
+      runtimeLabel: 'Grok Build ACP',
+      initials: 'GB',
+      tag: 'grok-build',
+      defaultSlug: 'grok-build-app',
+    }
+  }
   if (providerId === 'opencode-go') {
     return {
       name: 'OpenCode Go',
@@ -150,14 +160,12 @@ function providerMeta(providerId: ServerCollaborateInput['providerId']): {
 
 export function buildMarbleAcpPrompt(input: ServerCollaborateInput): string {
   const fallbackContext = resolveEvergreenDesignContext()
-  const designContracts =
-    input.designContracts?.length
-      ? input.designContracts
-      : fallbackContext.designSystem.contracts
-  const dontsGuardrails =
-    input.dontsGuardrails?.length
-      ? input.dontsGuardrails
-      : fallbackContext.dontsSystem.guardrails
+  const designContracts = input.designContracts?.length
+    ? input.designContracts
+    : fallbackContext.designSystem.contracts
+  const dontsGuardrails = input.dontsGuardrails?.length
+    ? input.dontsGuardrails
+    : fallbackContext.dontsSystem.guardrails
 
   const buildingNewApp = isNewAppRequest(input)
   const selected = input.selectedElements ?? []
@@ -172,8 +180,12 @@ export function buildMarbleAcpPrompt(input: ServerCollaborateInput): string {
     '2. Respond ONLY with a single valid JSON object (no markdown fences, no commentary before or after the JSON).',
     '3. Every element you create or insert MUST have a unique `data-marble-id` attribute and use xDrive CSS variables (`var(--paper)`, `var(--panel)`, `var(--ink)`, `var(--muted)`, `var(--line)`, `var(--accent)`, `var(--commit)`, `var(--danger)`, `var(--radius)`).',
     '4. Strictly follow xDrive design-system contracts and anti-slop guardrails:',
-    ...designContracts.slice(0, 10).map((rule) => `   - Design contract: ${rule}`),
-    ...dontsGuardrails.slice(0, 8).map((rule) => `   - Anti-slop guardrail: ${rule}`),
+    ...designContracts
+      .slice(0, 10)
+      .map((rule) => `   - Design contract: ${rule}`),
+    ...dontsGuardrails
+      .slice(0, 8)
+      .map((rule) => `   - Anti-slop guardrail: ${rule}`),
   ]
 
   if (buildingNewApp) {
@@ -292,12 +304,16 @@ function coerceMarbleOp(raw: unknown): MarbleOp | null {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null
   const record = raw as Record<string, unknown>
   const type = record.type
-  if (typeof type !== 'string' || !VALID_OP_TYPES.has(type as MarbleOp['type'])) {
+  if (
+    typeof type !== 'string' ||
+    !VALID_OP_TYPES.has(type as MarbleOp['type'])
+  ) {
     return null
   }
   const op: MarbleOp = { type: type as MarbleOp['type'] }
   if (typeof record.id === 'string') op.id = record.id
-  if (typeof record.text === 'string') op.text = sanitizeTextWithDonts(record.text)
+  if (typeof record.text === 'string')
+    op.text = sanitizeTextWithDonts(record.text)
   if (typeof record.html === 'string') {
     op.html = sanitizeHtmlWithEvergreenRules(record.html)
   }
@@ -423,7 +439,9 @@ function buildDocumentFromAi(
     pinned: false,
     tags:
       Array.isArray(docPayload.tags) && docPayload.tags.length > 0
-        ? docPayload.tags.filter((t): t is string => typeof t === 'string').slice(0, 6)
+        ? docPayload.tags
+            .filter((t): t is string => typeof t === 'string')
+            .slice(0, 6)
         : [provider.tag, category],
     folder: 'My Drive',
     folderId: null,

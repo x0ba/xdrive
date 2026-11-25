@@ -6,7 +6,9 @@ import type {
   DriveChatThread,
 } from '#/lib/ai/drive-chat-types'
 
-const seeded = seedDriveFolders(INITIAL_WORKSPACE_DOCS.map((doc) => ({ ...doc })))
+const seeded = seedDriveFolders(
+  INITIAL_WORKSPACE_DOCS.map((doc) => ({ ...doc })),
+)
 
 export const CHAT_DEMO_DOCS = seeded.docs
 export const CHAT_DEMO_FOLDERS = seeded.folders
@@ -86,6 +88,36 @@ export const CHAT_DEMO_MODELS: DriveChatModelOption[] = [
     reasoningEfforts: ['off', 'low', 'high', 'max'],
     description: 'Fast reasoning and cross-Drive lookup via Go',
     badge: 'OpenCode Go',
+  },
+  {
+    id: 'grok-build/grok-4.7',
+    name: 'Grok 4.7',
+    providerId: 'grok-build',
+    providerName: 'Grok Build',
+    connected: true,
+    status: 'active',
+    contextWindow: '256K',
+    speedTier: 'deep',
+    supportsVision: true,
+    supportsReasoning: true,
+    reasoningEfforts: ['low', 'medium', 'high', 'max'],
+    description: "SpaceXAI's latest frontier model via Grok Build ACP",
+    badge: 'Grok Build',
+  },
+  {
+    id: 'grok-build/grok-4.7-build-fast',
+    name: 'Grok 4.7 Fast',
+    providerId: 'grok-build',
+    providerName: 'Grok Build',
+    connected: true,
+    status: 'active',
+    contextWindow: '256K',
+    speedTier: 'fast',
+    supportsVision: true,
+    supportsReasoning: true,
+    reasoningEfforts: ['low', 'medium', 'high', 'max'],
+    description: 'Fast variant via Grok Build ACP',
+    badge: 'Grok Build',
   },
   {
     id: 'claude-opus-5-5',

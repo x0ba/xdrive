@@ -630,6 +630,12 @@ class OpenCodeAcpManager {
   }
 
   async getStatus(forceRefresh = false): Promise<OpenCodeGoRuntimeStatus> {
+    if (forceRefresh) {
+      // Non-disruptively retire the shared connection so in-flight prompts
+      // finish on their existing process while refresh probes a fresh one.
+      this.runtime.retireConnection()
+    }
+
     const binary = await resolveOpenCodeBinary()
     const catalogModels = await getOpenCodeGoManager()
       .getModels(forceRefresh)

@@ -17,6 +17,14 @@ import {
   toXDriveOpenCodeGoModelId,
 } from '#/lib/ai/opencode-go-types'
 import {
+  GrokBuildAcpError,
+  runGrokBuildPrompt,
+} from '#/lib/ai/grok-build-acp.server'
+import {
+  isGrokBuildModelId,
+  toXDriveGrokBuildModelId,
+} from '#/lib/ai/grok-build-types'
+import {
   buildDriveChatSystemPrompt,
   buildSingleTurnPromptForAcp,
   parseDriveChatResponse,
@@ -30,6 +38,7 @@ import type { AIProviderId } from '#/lib/types'
 function resolveProviderId(body: Partial<DriveChatApiRequest>): AIProviderId {
   if (body.providerId) return body.providerId
   const modelId = body.modelId ?? ''
+  if (isGrokBuildModelId(modelId)) return 'grok-build'
   if (isOpenCodeModelId(modelId)) return 'opencode-go'
   if (modelId.startsWith('antigravity/')) return 'antigravity'
   if (modelId.startsWith('claude')) return 'claude'
@@ -76,6 +85,15 @@ function extractStreamError(
       authRequired: error.code === 'AUTH_REQUIRED',
       entitlementRequired: error.code === 'ENTITLEMENT_REQUIRED',
       rateLimited: error.code === 'RATE_LIMITED',
+      error: error.message,
+    }
+  }
+  if (error instanceof GrokBuildAcpError) {
+    return {
+      type: 'error',
+      providerId: 'grok-build',
+      code: error.code,
+      authRequired: error.code === 'AUTH_REQUIRED',
       error: error.message,
     }
   }
@@ -312,6 +330,25 @@ export async function POST({ request }: { request: Request }) {
           resolvedModelId = toXDriveOpenCodeGoModelId(result.modelId)
           protocol = result.protocol
           stopReason = result.stopReason
+        } else if (providerId === 'grok-build') {
+          const acpPrompt = buildSingleTurnPromptForAcp({
+            ...body,
+            drive,
+            providerId,
+          })
+          const result = await runGrokBuildPrompt({
+            prompt: acpPrompt,
+            modelId: body.modelId,
+            reasoningEffort: body.reasoningEffort,
+            signal: request.signal,
+            onTextDelta: handleTextDelta,
+            onThoughtDelta: handleThoughtDelta,
+          })
+          rawText = result.text
+          thoughts = result.thoughts
+          resolvedModelId = toXDriveGrokBuildModelId(result.modelId)
+          protocol = 'acp'
+          stopReason = result.stopReason
         } else if (providerId === 'openai' || providerId === 'claude') {
           const result = await runTanStackDirectProvider({
             providerId,
@@ -331,7 +368,7 @@ export async function POST({ request }: { request: Request }) {
             type: 'error',
             providerId,
             code: 'PROVIDER_UNAVAILABLE',
-            error: `Provider "${providerId}" is not configured on this server. Connect Google Antigravity or OpenCode Go in Models & Providers.`,
+            error: `Provider "${providerId}" is not configured on this server. Connect Google Antigravity, OpenCode Go, or Grok Build in Models & Providers.`,
           })
           close()
           return

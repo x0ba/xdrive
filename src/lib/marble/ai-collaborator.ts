@@ -67,7 +67,12 @@ export interface CollaborationResult {
   newDocument?: MarbleDocumentFile
   evergreenContext: EvergreenDesignContext
   source:
-    'antigravity-acp' | 'opencode-acp' | 'opencode-go' | 'api' | 'synthesizer'
+    | 'antigravity-acp'
+    | 'opencode-acp'
+    | 'opencode-go'
+    | 'grok-build-acp'
+    | 'api'
+    | 'synthesizer'
   thoughts?: string[]
   runtime?: {
     protocol: string
@@ -281,7 +286,7 @@ export async function generateMarbleCollaboration(
   }
   throw new MarbleCollaborationError(
     'AI_ERROR',
-    'AI backend (/api/ai) is unreachable. Start the xDrive server and connect Google Antigravity or OpenCode Go in Models & Providers.',
+    'AI backend (/api/ai) is unreachable. Start the xDrive server and connect Google Antigravity, OpenCode Go, or Grok Build in Models & Providers.',
   )
 }
 
@@ -1608,7 +1613,11 @@ async function askMarbleApi(
     if (error instanceof MarbleCollaborationError) throw error
     if (error instanceof Error && error.name === 'AbortError') {
       const label =
-        request.providerId === 'opencode-go' ? 'OpenCode Go' : 'Antigravity'
+        request.providerId === 'grok-build'
+          ? 'Grok Build'
+          : request.providerId === 'opencode-go'
+            ? 'OpenCode Go'
+            : 'Antigravity'
       throw new MarbleCollaborationError(
         'AI_ERROR',
         `${label} request timed out before returning a Marble proposal.`,
@@ -1633,14 +1642,20 @@ function normalizeApi(
     ops?: MarbleOp[]
     note?: string
     source?:
-      'antigravity-acp' | 'opencode-acp' | 'opencode-go' | 'api' | 'synthesizer'
+      | 'antigravity-acp'
+      | 'opencode-acp'
+      | 'opencode-go'
+      | 'grok-build-acp'
+      | 'api'
+      | 'synthesizer'
     thoughts?: string[]
     runtime?: CollaborationResult['runtime']
   }
   const responseSource =
     record.source === 'antigravity-acp' ||
     record.source === 'opencode-acp' ||
-    record.source === 'opencode-go'
+    record.source === 'opencode-go' ||
+    record.source === 'grok-build-acp'
       ? record.source
       : 'api'
   if (

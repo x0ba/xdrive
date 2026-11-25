@@ -1,6 +1,8 @@
 import type { AISubscription } from '../types'
 import { DEFAULT_OPENCODE_GO_MODELS } from '../ai/opencode-go-types'
 import { openCodeGoModelsToSpecs } from '../ai/opencode-go-client'
+import { DEFAULT_GROK_BUILD_MODELS } from '../ai/grok-build-types'
+import { grokBuildModelsToSpecs } from '../ai/grok-build-client'
 
 // Live AI providers:
 // 1. Google Antigravity via the official Agent Client Protocol (ACP) runtime
@@ -9,6 +11,9 @@ import { openCodeGoModelsToSpecs } from '../ai/opencode-go-client'
 // 2. OpenCode Go via the local OpenCode CLI over ACP (`opencode acp`), relying
 //    on OpenCode's own credential store (`opencode auth login`) with an optional
 //    `OPENCODE_API_KEY` direct-HTTP fallback only when the CLI is not installed.
+// 3. Grok Build via SpaceXSI's local `grok` CLI over ACP
+//    (`grok --no-auto-update agent stdio`), using Grok's own credential store
+//    (`grok login` -> `cached_token`) or `XAI_API_KEY` (`xai.api_key`).
 //
 // Live connection state, usage meters, and exact available models are populated
 // from GET /api/ai. Other third-party providers start honestly disconnected.
@@ -52,6 +57,20 @@ export const INITIAL_AI_SUBSCRIPTIONS: AISubscription[] = [
     endpointUrl: 'opencode acp (JSON-RPC stdio)',
     usageThisMonth: { opsGenerated: 0, appsBuilt: 0, quotaPercent: 0 },
     models: openCodeGoModelsToSpecs(DEFAULT_OPENCODE_GO_MODELS),
+  },
+  {
+    providerId: 'grok-build',
+    name: 'Grok Build',
+    tagline:
+      'Local Grok CLI over ACP (`grok --no-auto-update agent stdio`) authenticated via `grok login` or `XAI_API_KEY` — no API key stored in xDrive.',
+    planName: 'Grok Build ACP',
+    connected: false,
+    authMethod: 'grok_build_acp',
+    status: 'disconnected',
+    defaultModelId: 'grok-build/grok-4.7',
+    endpointUrl: 'grok --no-auto-update agent stdio',
+    usageThisMonth: { opsGenerated: 0, appsBuilt: 0, quotaPercent: 0 },
+    models: grokBuildModelsToSpecs(DEFAULT_GROK_BUILD_MODELS),
   },
   {
     providerId: 'openai',

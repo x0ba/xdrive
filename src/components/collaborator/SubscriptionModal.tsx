@@ -28,6 +28,9 @@ import {
   hasOpenCodeFreeModels,
   openCodeGoModelsToSpecs,
 } from '#/lib/ai/opencode-go-client'
+import { DEFAULT_GROK_BUILD_MODELS } from '#/lib/ai/grok-build-types'
+import type { GrokBuildRuntimeStatus } from '#/lib/ai/grok-build-types'
+import { grokBuildModelsToSpecs } from '#/lib/ai/grok-build-client'
 import { Switch } from '#/components/ui/switch'
 import { WorkspaceLink } from '#/components/routing/WorkspaceLink'
 import { settingsProviderHref } from '#/lib/routing'
@@ -131,6 +134,23 @@ export const DEFAULT_SUBSCRIPTIONS: ManagedSubscription[] = [
     models: openCodeGoModelsToSpecs(DEFAULT_OPENCODE_GO_MODELS).map((spec) => ({
       ...spec,
       promptLabel: `OpenCode Go · ${spec.name}`,
+    })),
+  },
+  {
+    providerId: 'grok-build',
+    name: 'Grok Build',
+    tagline:
+      'Local Grok CLI over ACP (`grok --no-auto-update agent stdio`) authenticated via `grok login` or `XAI_API_KEY` — no API key stored in xDrive.',
+    planName: 'Grok Build ACP',
+    connected: false,
+    authMethod: 'grok_build_acp',
+    status: 'disconnected',
+    defaultModelId: 'grok-build/grok-4.7',
+    endpointUrl: 'grok --no-auto-update agent stdio',
+    usageThisMonth: { opsGenerated: 0, appsBuilt: 0, quotaPercent: 0 },
+    models: grokBuildModelsToSpecs(DEFAULT_GROK_BUILD_MODELS).map((spec) => ({
+      ...spec,
+      promptLabel: `Grok Build · ${spec.name}`,
     })),
   },
   {
@@ -292,6 +312,10 @@ export interface SubscriptionModalProps {
   openCodeGoBusy?: string | null
   openCodeGoError?: string | null
   onRefreshOpenCodeGo?: () => void
+  grokBuildStatus?: GrokBuildRuntimeStatus | null
+  grokBuildBusy?: string | null
+  grokBuildError?: string | null
+  onRefreshGrokBuild?: () => void
 }
 
 function maskSecret(value: string): string {
@@ -322,6 +346,10 @@ export function SubscriptionModal({
   openCodeGoBusy = null,
   openCodeGoError = null,
   onRefreshOpenCodeGo,
+  grokBuildStatus = null,
+  grokBuildBusy = null,
+  grokBuildError = null,
+  onRefreshGrokBuild,
 }: SubscriptionModalProps) {
   const titleId = useId()
   const [internalSubs, setInternalSubs] = useState<ManagedSubscription[]>(
@@ -440,6 +468,7 @@ export function SubscriptionModal({
   const rolePickerModels = modelPickerOptionsFromSubscriptions(subscriptions)
   const isAntigravity = active.providerId === 'antigravity'
   const isOpenCodeGo = active.providerId === 'opencode-go'
+  const isGrokBuild = active.providerId === 'grok-build'
   const binaryAvailable = antigravityStatus?.binaryAvailable ?? true
   const isAuthenticated = antigravityStatus
     ? antigravityStatus.authenticated
@@ -453,6 +482,10 @@ export function SubscriptionModal({
   const isOpenCodeUsableNow = isOpenCodeGoConnected || openCodeHasFreeModels
   const openCodeBinaryAvailable = openCodeGoStatus?.binaryAvailable ?? false
   const openCodeIsHttpFallback = openCodeGoStatus?.transport === 'http-fallback'
+  const grokBuildBinaryAvailable = grokBuildStatus?.binaryAvailable ?? false
+  const isGrokBuildConnected = grokBuildStatus
+    ? grokBuildStatus.authenticated
+    : active.connected
   const dedupedActiveModels = active.models.filter(
     (item, index, list) =>
       list.findIndex(
@@ -557,6 +590,11 @@ export function SubscriptionModal({
                     {openCodeIsHttpFallback ? 'HTTP Fallback' : 'ACP'}
                   </span>
                 )}
+                {isGrokBuild && (
+                  <span className="xd-mono rounded border border-[var(--xd-accent-border)] bg-[var(--xd-accent-soft)] px-1.5 py-0.5 text-[10px] font-medium text-[var(--xd-accent)]">
+                    ACP
+                  </span>
+                )}
               </div>
               <p className="mt-0.5 text-[12px] text-[var(--xd-ink-secondary)]">
                 {active.tagline}
@@ -594,6 +632,25 @@ export function SubscriptionModal({
                       className={cn(
                         'size-3',
                         openCodeGoBusy === 'refresh' && 'animate-spin',
+                      )}
+                    />
+                    <span>Refresh</span>
+                  </button>
+                )}
+              </div>
+            ) : isGrokBuild ? (
+              <div className="flex items-center gap-1.5">
+                {onRefreshGrokBuild && (
+                  <button
+                    type="button"
+                    disabled={Boolean(grokBuildBusy)}
+                    onClick={onRefreshGrokBuild}
+                    className="inline-flex h-7 items-center gap-1 rounded border border-[var(--xd-border)] bg-[var(--xd-rail)] px-2 text-[11px] font-medium text-[var(--xd-ink-secondary)] hover:text-[var(--xd-ink)] disabled:opacity-45"
+                  >
+                    <RefreshCw
+                      className={cn(
+                        'size-3',
+                        grokBuildBusy === 'refresh' && 'animate-spin',
                       )}
                     />
                     <span>Refresh</span>
@@ -1122,6 +1179,185 @@ export function SubscriptionModal({
                 </div>
               )}
             </div>
+          ) : isGrokBuild ? (
+            <div className="space-y-3">
+              <div className="rounded-md border border-[var(--xd-border)] bg-[var(--xd-rail)] p-3 text-[12px]">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div className="flex items-center gap-1.5 font-medium text-[var(--xd-ink)]">
+                    <ShieldCheck className="size-3.5 text-[var(--xd-commit)]" />
+                    <span>
+                      {grokBuildStatus?.agentName || 'Grok Build ACP'}
+                      {grokBuildStatus?.agentVersion
+                        ? ` v${grokBuildStatus.agentVersion}`
+                        : ''}
+                    </span>
+                  </div>
+                  <span
+                    className={cn(
+                      'inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10.5px] font-medium',
+                      isGrokBuildConnected
+                        ? 'bg-[var(--xd-commit-soft)] text-[var(--xd-commit)]'
+                        : grokBuildBinaryAvailable
+                          ? 'bg-[var(--xd-sketch-soft)] text-[var(--xd-sketch)]'
+                          : 'bg-[var(--xd-danger-soft)] text-[var(--xd-danger)]',
+                    )}
+                  >
+                    {isGrokBuildConnected ? (
+                      <>
+                        <CheckCircle2 className="size-3" />
+                        <span>
+                          Connected
+                          {grokBuildStatus?.tier
+                            ? ` · ${grokBuildStatus.tier}`
+                            : grokBuildStatus?.authSource === 'xai.api_key'
+                              ? ' · xAI API Key'
+                              : ' · Grok Build ACP'}
+                        </span>
+                      </>
+                    ) : grokBuildBinaryAvailable ? (
+                      <span>Sign in required</span>
+                    ) : (
+                      <span>Grok CLI not installed</span>
+                    )}
+                  </span>
+                </div>
+
+                <p className="mt-1.5 text-[11.5px] leading-relaxed text-[var(--xd-ink-secondary)]">
+                  Communicates directly with SpaceXSI’s local{' '}
+                  <span className="xd-mono">grok</span> CLI over Agent Client
+                  Protocol (
+                  <span className="xd-mono">
+                    grok --no-auto-update agent stdio
+                  </span>
+                  , JSON-RPC 2.0 <span className="xd-mono">stdio</span>) using
+                  Grok’s own credential store from{' '}
+                  <span className="xd-mono">grok login</span> or{' '}
+                  <span className="xd-mono">XAI_API_KEY</span>. xDrive never
+                  reads <span className="xd-mono">auth.json</span> or stores xAI
+                  credentials.
+                </p>
+
+                <div className="xd-mono mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[10.5px] text-[var(--xd-ink-muted)]">
+                  <span className="inline-flex items-center gap-1">
+                    <Terminal className="size-3" />
+                    {grokBuildStatus?.binaryPath || active.endpointUrl}
+                  </span>
+                  {grokBuildBinaryAvailable &&
+                    grokBuildStatus?.binarySource &&
+                    grokBuildStatus.binarySource !== 'none' && (
+                      <span>source: {grokBuildStatus.binarySource}</span>
+                    )}
+                  {grokBuildStatus?.authenticated &&
+                    grokBuildStatus.authSource !== 'none' && (
+                      <span>auth: {grokBuildStatus.authSource}</span>
+                    )}
+                </div>
+              </div>
+
+              {(grokBuildError || grokBuildStatus?.error) && (
+                <p className="flex items-start gap-1.5 rounded border border-[var(--xd-danger)]/35 bg-[var(--xd-danger-soft)] px-2.5 py-2 text-[11.5px] text-[var(--xd-danger)]">
+                  <AlertTriangle className="mt-0.5 size-3.5 shrink-0" />
+                  <span>{grokBuildError || grokBuildStatus?.error}</span>
+                </p>
+              )}
+
+              {!grokBuildBinaryAvailable ? (
+                <div className="space-y-2 rounded border border-[var(--xd-border)] bg-[var(--xd-rail)] p-3 text-[11.5px]">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <p className="font-medium text-[var(--xd-ink)]">
+                      Set up Grok Build CLI (ACP)
+                    </p>
+                    {onRefreshGrokBuild && (
+                      <button
+                        type="button"
+                        disabled={Boolean(grokBuildBusy)}
+                        onClick={onRefreshGrokBuild}
+                        className="inline-flex h-7 items-center gap-1.5 rounded bg-[var(--xd-accent)] px-2.5 text-[11.5px] font-medium text-white hover:bg-[var(--xd-accent-hover)] disabled:opacity-45"
+                      >
+                        <RefreshCw
+                          className={cn(
+                            'size-3',
+                            grokBuildBusy === 'refresh' && 'animate-spin',
+                          )}
+                        />
+                        <span>Detect CLI</span>
+                      </button>
+                    )}
+                  </div>
+                  <ol className="list-decimal space-y-1.5 pl-4 text-[var(--xd-ink-secondary)]">
+                    <li>
+                      Install the <span className="xd-mono">grok</span> CLI (or
+                      set <span className="xd-mono">XDRIVE_GROK_BIN</span> in{' '}
+                      <span className="xd-mono">.env.local</span>).
+                    </li>
+                    <li>
+                      Sign in with your Grok account (stored in Grok’s own
+                      credential store):
+                      <pre className="xd-mono mt-1 overflow-x-auto rounded border border-[var(--xd-border)] bg-[var(--xd-canvas)] px-2 py-1 text-[11px] text-[var(--xd-ink)]">
+                        grok login
+                      </pre>
+                    </li>
+                    <li>
+                      Click{' '}
+                      <span className="font-medium text-[var(--xd-ink)]">
+                        Detect CLI
+                      </span>{' '}
+                      to connect over ACP. You can also set{' '}
+                      <span className="xd-mono">XAI_API_KEY</span> in{' '}
+                      <span className="xd-mono">.env.local</span> for API key
+                      authentication.
+                    </li>
+                  </ol>
+                </div>
+              ) : !isGrokBuildConnected ? (
+                <div className="space-y-2 rounded border border-[var(--xd-border)] bg-[var(--xd-rail)] p-3 text-[11.5px]">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <p className="font-medium text-[var(--xd-ink)]">
+                      Sign in via Grok CLI
+                    </p>
+                    {onRefreshGrokBuild && (
+                      <button
+                        type="button"
+                        disabled={Boolean(grokBuildBusy)}
+                        onClick={onRefreshGrokBuild}
+                        className="inline-flex h-7 items-center gap-1.5 rounded bg-[var(--xd-accent)] px-2.5 text-[11.5px] font-medium text-white hover:bg-[var(--xd-accent-hover)] disabled:opacity-45"
+                      >
+                        <RefreshCw
+                          className={cn(
+                            'size-3',
+                            grokBuildBusy === 'refresh' && 'animate-spin',
+                          )}
+                        />
+                        <span>Check login</span>
+                      </button>
+                    )}
+                  </div>
+                  <p className="text-[var(--xd-ink-secondary)]">
+                    Grok CLI was detected, but no cached sign-in or{' '}
+                    <span className="xd-mono">XAI_API_KEY</span> was found. Run
+                    the command below in your terminal, then click{' '}
+                    <span className="font-medium text-[var(--xd-ink)]">
+                      Check login
+                    </span>
+                    :
+                  </p>
+                  <pre className="xd-mono overflow-x-auto rounded border border-[var(--xd-border)] bg-[var(--xd-canvas)] px-2.5 py-1.5 text-[11px] text-[var(--xd-ink)]">
+                    grok login
+                  </pre>
+                </div>
+              ) : (
+                <div className="rounded border border-[var(--xd-border)] bg-[var(--xd-rail)] px-3 py-2 text-[11.5px] text-[var(--xd-ink-secondary)]">
+                  Credentials are managed by the Grok CLI. Run{' '}
+                  <span className="xd-mono">grok login</span> or{' '}
+                  <span className="xd-mono">grok logout</span> in your terminal
+                  to manage accounts, then click{' '}
+                  <span className="font-medium text-[var(--xd-ink)]">
+                    Refresh
+                  </span>
+                  .
+                </div>
+              )}
+            </div>
           ) : (
             <div className="space-y-2">
               <div className="flex flex-wrap items-center gap-1">
@@ -1244,7 +1480,11 @@ export function SubscriptionModal({
                       ? `OpenCode Go models (${standardActiveModels.length})`
                       : isOpenCodeGo
                         ? `OpenCode Go catalog (${standardActiveModels.length})`
-                        : 'Available models'}
+                        : isGrokBuild && isGrokBuildConnected
+                          ? `Grok Build ACP models (${standardActiveModels.length})`
+                          : isGrokBuild
+                            ? `Grok Build catalog (${standardActiveModels.length})`
+                            : 'Available models'}
                 </h4>
                 <ul className="divide-y divide-[var(--xd-border)] rounded border border-[var(--xd-border)]">
                   {standardActiveModels.map((item) => (

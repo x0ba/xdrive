@@ -485,7 +485,7 @@ class AntigravityAcpManager {
         const key = options?.apiKey?.trim()
         if (key) {
           this.ephemeralApiKey = key
-          await this.shutdown()
+          this.runtime.retireConnection()
         } else if (!this.ephemeralApiKey && !process.env.GEMINI_API_KEY) {
           throw new AntigravityAcpError(
             'AUTH_REQUIRED',
@@ -496,7 +496,7 @@ class AntigravityAcpManager {
       } else if (this.ephemeralApiKey) {
         // Clear any temporary API key override when signing in with Google OAuth / Enterprise.
         this.ephemeralApiKey = null
-        await this.shutdown()
+        this.runtime.retireConnection()
       }
 
       const { connection } = await this.runtime.ensureConnected()
