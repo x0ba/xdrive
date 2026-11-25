@@ -88,62 +88,6 @@ function formatThreadTime(iso: string): string {
   })
 }
 
-function buildStarterPrompts(
-  docs: MarbleDocumentFile[],
-  folders: DriveFolder[],
-): Array<{ label: string; prompt: string }> {
-  const nonEvergreen = docs.filter((doc) => !doc.isEvergreen)
-  const firstDoc = nonEvergreen.at(0)
-  const secondDoc = nonEvergreen.at(1)
-  const firstFolder = folders.at(0)
-
-  if (nonEvergreen.length === 0) {
-    return [
-      {
-        label: 'Create a new document',
-        prompt:
-          'Create a new .mrbl document titled "Project Notes" with an overview, key questions, and next steps.',
-      },
-      {
-        label: 'Set up Drive folders',
-        prompt:
-          'Create a clean starter folder structure in my Drive for Notes, Docs, and Slides.',
-      },
-      {
-        label: 'Draft a slide deck',
-        prompt:
-          'Create a new 5-slide .mrbl presentation outlining a project proposal and timeline.',
-      },
-    ]
-  }
-
-  return [
-    {
-      label:
-        firstDoc && secondDoc
-          ? `Compare ${firstDoc.title} & ${secondDoc.title}`
-          : 'Summarize findings across my Drive',
-      prompt:
-        firstDoc && secondDoc
-          ? `Compare the key claims, numbers, and open questions across "${firstDoc.title}" and "${secondDoc.title}", and flag any inconsistencies.`
-          : 'Summarize the key findings, metrics, and open questions across all files in my Drive.',
-    },
-    {
-      label: firstFolder
-        ? `Organize ${firstFolder.name} & tags`
-        : 'Organize Drive folders & tags',
-      prompt: firstFolder
-        ? `Review the files across my Drive and organize related documents with cleaner tags and folder placement around "${firstFolder.name}".`
-        : 'Review every file in my Drive, propose clear folders and consistent tags, and organize them for me.',
-    },
-    {
-      label: 'Create an executive brief',
-      prompt:
-        'Create a new .mrbl document titled "Drive Research Brief" that synthesizes the latest results, metrics, and next steps from all files in my Drive.',
-    },
-  ]
-}
-
 export function DriveChatView({
   threads,
   activeThreadId,
@@ -292,11 +236,6 @@ export function DriveChatView({
         return Date.parse(b.updatedAt) - Date.parse(a.updatedAt)
       })
   }, [threads, threadSearch])
-
-  const starterPrompts = useMemo(
-    () => buildStarterPrompts(docs, folders),
-    [docs, folders],
-  )
 
   const messages = activeThread?.messages ?? []
   const lastMessage = messages.at(-1)
@@ -777,20 +716,6 @@ export function DriveChatView({
                 onRemoveContextRef={handleRemoveContextRef}
                 onOpenProviders={onOpenProviders}
               />
-
-              {/* Compact quiet prompt pills underneath the ContextStrip */}
-              <div className="mt-5 flex flex-wrap items-center justify-center gap-1.5">
-                {starterPrompts.map((item) => (
-                  <button
-                    key={item.label}
-                    type="button"
-                    onClick={() => setDraft(item.prompt)}
-                    className="rounded-full border border-[var(--xd-border)] bg-[var(--xd-rail)]/60 px-3 py-1 text-[12px] text-[var(--xd-ink-secondary)] transition-colors hover:border-[var(--xd-border-strong)] hover:bg-[var(--xd-surface-hover)] hover:text-[var(--xd-ink)]"
-                  >
-                    {item.label}
-                  </button>
-                ))}
-              </div>
             </div>
           ) : (
             <div className="mx-auto flex w-full max-w-[46rem] flex-col gap-6 px-5 pt-4 pb-10">

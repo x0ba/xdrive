@@ -33,12 +33,6 @@ import { WorkspaceLink } from '#/components/routing/WorkspaceLink'
 import type { AiSidebarTab } from '#/lib/routing'
 import { cn } from '#/lib/utils'
 
-export const QUICK_PROMPTS = [
-  'Add an interactive chart section',
-  'Create <marble-alt> variations for selected heading',
-  'Wire selected table to filter cards',
-] as const
-
 const STAGE_PLANS: Record<MarbleIntentKind, string[]> = {
   instruct: [
     'Insert theorem container stub',
@@ -494,7 +488,6 @@ export function CursorAISidebar({
   activeTab: activeTabProp,
   onTabChange,
   tabHrefs,
-  evergreenHrefs,
   messages = DEMO_MESSAGES,
   checkpoints = DEMO_CHECKPOINTS,
   proposals = DEMO_PROPOSALS,
@@ -506,8 +499,6 @@ export function CursorAISidebar({
   favoriteModelIds,
   onFavoriteModelIdsChange,
   permission = 'edit_with_ai_shared',
-  evergreenRefs = DEFAULT_EVERGREEN_REFS,
-  onOpenEvergreenDoc,
   onRemoveElement,
   onRemoveSketch,
   onSend,
@@ -742,7 +733,6 @@ export function CursorAISidebar({
   const canKeep = spec.ai === 'byok' || spec.ai === 'shared'
   const canDiscard = !blocked
   const hasContext = visibleElements.length > 0 || visibleSketches.length > 0
-  const hasUserMessages = thread.some((m) => m.role === 'user')
 
   const tabs: Array<{ id: TabId; label: string }> = [
     { id: 'chat', label: 'Chat' },
@@ -811,29 +801,6 @@ export function CursorAISidebar({
           disabled={blocked}
         />
       </header>
-
-      <div
-        data-component="evergreen-ai-references"
-        className="flex flex-wrap items-center gap-1 border-b border-[var(--xd-border)] bg-[var(--xd-canvas)]/60 px-2.5 py-1.5 text-[10.5px]"
-      >
-        <span className="text-[var(--xd-ink-muted)]">Always referenced:</span>
-        {evergreenRefs.map((ref) => (
-          <WorkspaceLink
-            key={ref.slug}
-            href={evergreenHrefs?.[ref.slug] ?? `/d/${ref.slug}`}
-            title={`${ref.title} (${ref.ruleCount} rules active)`}
-            onNavigate={
-              onOpenEvergreenDoc
-                ? () => onOpenEvergreenDoc(ref.slug)
-                : undefined
-            }
-            className="xd-mono inline-flex items-center gap-1 rounded border border-[var(--xd-border)] bg-[var(--xd-rail)] px-1.5 py-0.5 text-[10px] text-[var(--xd-ink-secondary)] transition-colors hover:border-[var(--xd-accent-border)] hover:text-[var(--xd-ink)]"
-          >
-            <span className="size-1.5 rounded-full bg-[var(--xd-commit)]" />
-            <span>{ref.fileName}</span>
-          </WorkspaceLink>
-        ))}
-      </div>
 
       {hasContext && (
         <div className="flex flex-wrap gap-1 border-b border-[var(--xd-border)] px-2.5 py-1.5">
@@ -994,21 +961,6 @@ export function CursorAISidebar({
 
       {tab === 'chat' && (
         <div className="border-t border-[var(--xd-border)] bg-[var(--xd-canvas)] p-2.5">
-          {!hasUserMessages && (
-            <div className="mb-2 flex flex-wrap gap-1">
-              {QUICK_PROMPTS.map((prompt) => (
-                <button
-                  key={prompt}
-                  type="button"
-                  disabled={blocked}
-                  onClick={() => sendText(prompt)}
-                  className="rounded border border-[var(--xd-border)] px-2 py-0.5 text-left text-[11px] text-[var(--xd-ink-secondary)] hover:bg-[var(--xd-surface-hover)] disabled:opacity-40"
-                >
-                  {prompt}
-                </button>
-              ))}
-            </div>
-          )}
           <form
             className="flex items-end gap-1.5"
             onSubmit={(event) => {

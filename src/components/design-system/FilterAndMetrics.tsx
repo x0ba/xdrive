@@ -471,36 +471,6 @@ export const DEFAULT_COMPOSER_MODELS: Pick<
   },
 ]
 
-const QUICK_STARTERS: Array<{
-  category: MarbleAppCategory
-  label: string
-  prompt: string
-}> = [
-  {
-    category: 'latex',
-    label: 'LaTeX paper',
-    prompt:
-      'Build a two-column LaTeX quantum error correction manuscript with interactive theorem proofs.',
-  },
-  {
-    category: 'notebook',
-    label: 'Lab notebook',
-    prompt:
-      'Create an interactive mechanistic interpretability lab notebook with sortable activation runs.',
-  },
-  {
-    category: 'slides',
-    label: 'Slide deck',
-    prompt:
-      'Generate a 6-slide aerothermal heatshield review deck with trajectory sliders.',
-  },
-  {
-    category: 'matrix',
-    label: 'Literature matrix',
-    prompt: 'Synthesize a sortable transformer scaling law comparison matrix.',
-  },
-]
-
 export function AgentHeroComposer({
   models = DEFAULT_COMPOSER_MODELS,
   selectedModelId = 'grok-4.7',
@@ -509,7 +479,6 @@ export function AgentHeroComposer({
   onFavoriteModelIdsChange,
   onOpenProviders,
   onSubmitPrompt,
-  onQuickStartTemplate,
 }: AgentHeroComposerProps) {
   const [prompt, setPrompt] = useState('')
   const [currentModelId, setCurrentModelId] = useState(selectedModelId)
@@ -550,24 +519,7 @@ export function AgentHeroComposer({
           className="w-full resize-none bg-transparent px-3.5 pt-2.5 pb-1.5 text-[13px] leading-relaxed text-[var(--xd-ink)] placeholder:text-[var(--xd-ink-muted)] focus:outline-none"
         />
 
-        <div className="flex flex-wrap items-center justify-between gap-2 px-3 pb-2">
-          <div className="flex flex-wrap items-center gap-1">
-            {QUICK_STARTERS.map((starter) => (
-              <button
-                key={starter.label}
-                type="button"
-                onClick={() => {
-                  setPrompt(starter.prompt)
-                  onQuickStartTemplate?.(starter.category, starter.prompt)
-                }}
-                className="inline-flex items-center gap-1 rounded px-2 py-0.5 text-[11.5px] text-[var(--xd-ink-muted)] transition-colors hover:bg-[var(--xd-surface-hover)] hover:text-[var(--xd-ink)]"
-              >
-                {getCategoryIcon(starter.category, 'h-3 w-3')}
-                <span>{starter.label}</span>
-              </button>
-            ))}
-          </div>
-
+        <div className="flex flex-wrap items-center justify-end gap-2 px-3 pb-2">
           <div className="flex items-center gap-1.5">
             <ModelPicker
               models={models}

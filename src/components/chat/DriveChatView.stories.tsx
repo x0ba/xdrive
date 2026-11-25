@@ -242,8 +242,7 @@ export const ActiveConversation: Story = {
 }
 
 /**
- * Clean centered empty state with Newsreader greeting, real Drive starter prompts,
- * and integrated T3-Code-inspired composer dock.
+ * Clean centered empty state with Newsreader greeting and integrated T3-Code-inspired composer dock.
  *
  * @summary Empty Drive Chat landing state
  */
@@ -268,6 +267,15 @@ export const EmptyState: Story = {
         initialActiveId={emptyThread.id}
       />
     )
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    await expect(
+      canvas.queryByRole('button', { name: /Create an executive brief/i }),
+    ).toBeNull()
+    await expect(
+      canvas.queryByRole('button', { name: /Create a new document/i }),
+    ).toBeNull()
   },
 }
 

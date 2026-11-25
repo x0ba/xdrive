@@ -239,6 +239,7 @@ export const CreateWithAIAgentModal: Story = {
     await expect(
       within(dialog).getByText('Build a new app with an AI agent'),
     ).toBeVisible()
+    await expect(within(dialog).queryByText('Starter prompts')).toBeNull()
     // Ensure no native <select> is used for choosing the AI model
     await expect(
       dialog.querySelector('select[aria-label="Select AI model"]'),

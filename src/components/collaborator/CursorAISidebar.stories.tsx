@@ -100,7 +100,7 @@ function CollaboratorDeskDemo() {
 }
 
 /**
- * Right-hand AI collaborator rail showing staged `.mrbl` operation proposals, checkpoints, attached selections, and evergreen design-system rules.
+ * Right-hand AI collaborator rail showing staged `.mrbl` operation proposals, checkpoints, and attached selections.
  *
  * @summary AI collaborator sidebar with staged op proposals and checkpoint timeline
  */
@@ -135,6 +135,51 @@ export const Default: Story = {
     const canvas = within(canvasElement)
     const opsTab = canvas.getByRole('tab', { name: 'Diff' })
     await expect(opsTab).toHaveAttribute('href', '?ai=ops')
+    await expect(canvas.queryByText(/Always referenced:/i)).toBeNull()
+    await expect(
+      canvasElement.querySelector('[data-component="evergreen-ai-references"]'),
+    ).toBeNull()
+    await expect(
+      canvas.queryByRole('button', {
+        name: /Add an interactive chart section/i,
+      }),
+    ).toBeNull()
+  },
+}
+
+/**
+ * Fresh collaborator sidebar with an empty thread, showing only tabs, model picker, and composer without clutter chips.
+ *
+ * @summary Empty AI collaborator sidebar without starter or reference chips
+ */
+export const EmptyChat: Story = {
+  args: {
+    permission: 'edit_with_ai_shared',
+    messages: [],
+    proposals: [],
+    selectedElements: [],
+  },
+  decorators: [
+    (Story) => (
+      <div className="flex h-[680px] justify-end bg-[var(--xd-canvas)]">
+        <Story />
+      </div>
+    ),
+  ],
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    await expect(canvas.getByRole('tab', { name: 'Chat' })).toBeVisible()
+    await expect(canvas.getByRole('tab', { name: 'Diff' })).toBeVisible()
+    await expect(canvas.getByRole('tab', { name: 'History' })).toBeVisible()
+    await expect(canvas.queryByText(/Always referenced:/i)).toBeNull()
+    await expect(
+      canvas.queryByRole('button', {
+        name: /Add an interactive chart section/i,
+      }),
+    ).toBeNull()
+    await expect(
+      canvas.getByPlaceholderText('Ask for a change...'),
+    ).toBeVisible()
   },
 }
 

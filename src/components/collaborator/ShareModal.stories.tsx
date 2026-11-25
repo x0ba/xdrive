@@ -1,12 +1,23 @@
 import { useState } from 'react'
 import type { Meta, StoryObj } from '@storybook/tanstack-react'
-import { ShareModal } from './ShareModal'
-import type { SharePermissionLevel } from '#/lib/types'
+import { expect, within } from 'storybook/test'
+import { DEMO_SHARE_CONFIG, ShareModal } from './ShareModal'
+import type { ShareConfig, SharePermissionLevel } from '#/lib/types'
 
-function ShareStoryDemo({ variant }: { variant: 'modal' | 'inline' }) {
+function ShareStoryDemo({
+  variant,
+  initialConfig = DEMO_SHARE_CONFIG,
+  initialSimulatedPermission = 'comment_annotate',
+}: {
+  variant: 'modal' | 'inline'
+  initialConfig?: ShareConfig
+  initialSimulatedPermission?: SharePermissionLevel
+}) {
   const [open, setOpen] = useState(true)
-  const [permission, setPermission] =
-    useState<SharePermissionLevel>('comment_annotate')
+  const [config, setConfig] = useState<ShareConfig>(initialConfig)
+  const [permission, setPermission] = useState<SharePermissionLevel>(
+    initialSimulatedPermission,
+  )
   return (
     <div className="min-h-screen bg-[var(--xd-canvas)] p-6 text-[var(--xd-ink)]">
       {variant === 'modal' && (
@@ -27,6 +38,8 @@ function ShareStoryDemo({ variant }: { variant: 'modal' | 'inline' }) {
           onOpenChange={setOpen}
           fileName="quantum-error-correction.mrbl"
           title="Fault-Tolerant Floquet Surface Codes"
+          config={config}
+          onConfigChange={setConfig}
           simulatedPermission={permission}
           onSimulatePermission={setPermission}
         />
@@ -36,9 +49,9 @@ function ShareStoryDemo({ variant }: { variant: 'modal' | 'inline' }) {
 }
 
 /**
- * Document sharing and AI-quota permission controller supporting modal dialog and inline panel variants.
+ * Public-link document sharing and visitor role preview controller supporting modal dialog and inline panel variants.
  *
- * @summary Sharing dialog with collaborator invite list, public link controls, and AI quota tiers
+ * @summary Sharing dialog with public link controls, AI quota slider, and visitor role preview
  */
 const meta = {
   title: 'xDrive Collaborator/Share Modal',
@@ -57,13 +70,54 @@ export default meta
 type Story = StoryObj<typeof meta>
 
 /**
- * Interactive share modal overlay with simulated collaborator role switcher.
+ * Interactive share modal overlay with public-link sharing and visitor role preview select.
  *
  * @summary Share dialog in modal overlay mode
  */
 export const ShareDialog: Story = {
   name: 'Share modal',
   render: () => <ShareStoryDemo variant="modal" />,
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    const dialog = canvas.getByRole('dialog')
+    await expect(
+      within(dialog).queryByPlaceholderText('Invite by email...'),
+    ).toBeNull()
+    await expect(
+      within(dialog).queryByRole('button', { name: /Invite/i }),
+    ).toBeNull()
+    await expect(
+      within(dialog).queryByText('Enter a valid email address.'),
+    ).toBeNull()
+    await expect(within(dialog).queryByText('Owner')).toBeNull()
+    await expect(dialog.querySelector('select')).toBeNull()
+    await expect(
+      within(dialog).getByRole('combobox', { name: 'Public link permission' }),
+    ).toBeVisible()
+    await expect(
+      within(dialog).getByRole('combobox', { name: 'Preview as visitor role' }),
+    ).toBeVisible()
+  },
+}
+
+/**
+ * Share modal configured with shared AI quota to showcase the daily op limit slider alongside public link controls.
+ *
+ * @summary Share dialog with shared AI quota slider
+ */
+export const ShareWithSharedAiQuota: Story = {
+  name: 'Share modal · Shared AI quota',
+  render: () => (
+    <ShareStoryDemo
+      variant="modal"
+      initialConfig={{
+        ...DEMO_SHARE_CONFIG,
+        publicPermission: 'edit_with_ai_shared',
+        allowDuplication: true,
+      }}
+      initialSimulatedPermission="edit_with_ai_shared"
+    />
+  ),
 }
 
 /**

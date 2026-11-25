@@ -24,7 +24,6 @@ export {
   DEMO_MESSAGES,
   DEMO_PROPOSALS,
   DEMO_CHECKPOINTS,
-  QUICK_PROMPTS,
   type CursorAISidebarProps,
 } from './CursorAISidebar'
 
