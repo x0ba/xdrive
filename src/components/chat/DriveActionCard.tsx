@@ -69,14 +69,12 @@ function statusMeta(status: DriveChatAction['status']): {
     case 'applied':
       return {
         label: 'Applied',
-        className:
-          'bg-[var(--xd-commit-soft)] text-[var(--xd-commit)]',
+        className: 'bg-[var(--xd-commit-soft)] text-[var(--xd-commit)]',
       }
     case 'discarded':
       return {
         label: 'Discarded',
-        className:
-          'bg-[var(--xd-surface-hover)] text-[var(--xd-ink-muted)]',
+        className: 'bg-[var(--xd-surface-hover)] text-[var(--xd-ink-muted)]',
       }
     case 'undone':
       return {
@@ -87,15 +85,13 @@ function statusMeta(status: DriveChatAction['status']): {
     case 'failed':
       return {
         label: 'Failed',
-        className:
-          'bg-[var(--xd-danger-soft)] text-[var(--xd-danger)]',
+        className: 'bg-[var(--xd-danger-soft)] text-[var(--xd-danger)]',
       }
     case 'proposed':
     default:
       return {
-        label: 'Pending review',
-        className:
-          'bg-[var(--xd-sketch-soft)] text-[var(--xd-sketch)]',
+        label: 'Pending',
+        className: 'bg-[var(--xd-sketch-soft)] text-[var(--xd-sketch)]',
       }
   }
 }
@@ -159,11 +155,11 @@ export function DriveActionCard({
     <div
       data-component="drive-action-card"
       className={cn(
-        'overflow-hidden rounded-lg border bg-[var(--xd-rail)] text-[12.5px] transition-colors',
+        'overflow-hidden rounded-xl border bg-[var(--xd-rail)]/80 text-[12.5px] transition-colors',
         action.status === 'proposed'
           ? 'border-[var(--xd-border-strong)]'
           : 'border-[var(--xd-border)]',
-        action.status === 'discarded' && 'opacity-65',
+        action.status === 'discarded' && 'opacity-60',
       )}
     >
       <div className="flex flex-wrap items-center justify-between gap-2 px-3 py-2">
@@ -190,17 +186,17 @@ export function DriveActionCard({
                 ? 'text-[var(--xd-danger)]'
                 : action.status === 'applied'
                   ? 'text-[var(--xd-commit)]'
-                  : 'text-[var(--xd-accent)]',
+                  : 'text-[var(--xd-ink-secondary)]',
             )}
           >
             <ActionIcon action={action} />
           </span>
 
-          <span className="min-w-0 flex-1">
+          <span className="min-w-0 flex-1 truncate">
             <span className="font-medium text-[var(--xd-ink)]">
               {action.label}
             </span>
-            <span className="ml-2 text-[11.5px] text-[var(--xd-ink-muted)]">
+            <span className="ml-2 text-[12px] text-[var(--xd-ink-muted)]">
               {action.summary}
             </span>
           </span>
@@ -209,7 +205,7 @@ export function DriveActionCard({
         <div className="flex shrink-0 items-center gap-1.5">
           <span
             className={cn(
-              'inline-flex items-center rounded px-1.5 py-0.5 text-[10.5px] font-medium',
+              'inline-flex items-center rounded-md px-1.5 py-0.5 text-[10.5px] font-medium',
               badge.className,
             )}
           >
@@ -223,10 +219,10 @@ export function DriveActionCard({
                   type="button"
                   onClick={() => onApply(action.id)}
                   className={cn(
-                    'inline-flex h-6 items-center gap-1 rounded px-2 text-[11.5px] font-medium text-white transition-colors',
+                    'inline-flex h-6 items-center gap-1 rounded-md px-2 text-[11.5px] font-medium transition-colors',
                     isDestructive
-                      ? 'bg-[var(--xd-danger)] hover:opacity-90'
-                      : 'bg-[var(--xd-accent)] hover:bg-[var(--xd-accent-hover)]',
+                      ? 'bg-[var(--xd-danger)] text-white hover:opacity-90'
+                      : 'bg-[var(--xd-ink)] text-[var(--xd-canvas)] hover:opacity-90',
                   )}
                 >
                   <Check className="size-3" />
@@ -238,7 +234,7 @@ export function DriveActionCard({
                   type="button"
                   onClick={() => onDiscard(action.id)}
                   aria-label={`Discard ${action.label}`}
-                  className="inline-flex h-6 items-center gap-1 rounded border border-[var(--xd-border)] px-2 text-[11.5px] text-[var(--xd-ink-secondary)] transition-colors hover:bg-[var(--xd-surface-hover)] hover:text-[var(--xd-ink)]"
+                  className="inline-flex h-6 items-center gap-1 rounded-md px-2 text-[11.5px] text-[var(--xd-ink-muted)] transition-colors hover:bg-[var(--xd-surface-hover)] hover:text-[var(--xd-ink)]"
                 >
                   <X className="size-3" />
                   <span>Discard</span>
@@ -251,7 +247,7 @@ export function DriveActionCard({
             <button
               type="button"
               onClick={() => onUndo(action.id)}
-              className="inline-flex h-6 items-center gap-1 rounded border border-[var(--xd-border)] px-2 text-[11.5px] text-[var(--xd-ink-secondary)] transition-colors hover:bg-[var(--xd-surface-hover)] hover:text-[var(--xd-ink)]"
+              className="inline-flex h-6 items-center gap-1 rounded-md px-2 text-[11.5px] text-[var(--xd-ink-secondary)] transition-colors hover:bg-[var(--xd-surface-hover)] hover:text-[var(--xd-ink)]"
             >
               <Undo2 className="size-3" />
               <span>Undo</span>
@@ -263,7 +259,7 @@ export function DriveActionCard({
               type="button"
               onClick={() => onOpenDocument(docId)}
               title="Open document in tab"
-              className="inline-flex h-6 items-center gap-1 rounded border border-[var(--xd-border)] px-2 text-[11.5px] text-[var(--xd-ink-secondary)] transition-colors hover:bg-[var(--xd-surface-hover)] hover:text-[var(--xd-ink)]"
+              className="inline-flex h-6 items-center gap-1 rounded-md px-2 text-[11.5px] text-[var(--xd-ink-secondary)] transition-colors hover:bg-[var(--xd-surface-hover)] hover:text-[var(--xd-ink)]"
             >
               <ExternalLink className="size-3" />
               <span>Open</span>
@@ -277,7 +273,7 @@ export function DriveActionCard({
               <button
                 type="button"
                 onClick={() => onOpenFolder(folderTarget.folderId)}
-                className="inline-flex h-6 items-center gap-1 rounded border border-[var(--xd-border)] px-2 text-[11.5px] text-[var(--xd-ink-secondary)] transition-colors hover:bg-[var(--xd-surface-hover)] hover:text-[var(--xd-ink)]"
+                className="inline-flex h-6 items-center gap-1 rounded-md px-2 text-[11.5px] text-[var(--xd-ink-secondary)] transition-colors hover:bg-[var(--xd-surface-hover)] hover:text-[var(--xd-ink)]"
               >
                 <ExternalLink className="size-3" />
                 <span>Folder</span>
@@ -287,7 +283,7 @@ export function DriveActionCard({
       </div>
 
       {expanded && hasDetails && (
-        <div className="border-t border-[var(--xd-border)] bg-[var(--xd-canvas)] px-3 py-2.5 text-[11.5px]">
+        <div className="border-t border-[var(--xd-border)] bg-[var(--xd-canvas)]/70 px-3.5 py-2.5 text-[11.5px]">
           {action.error && (
             <p className="mb-2 flex items-center gap-1.5 text-[var(--xd-danger)]">
               <AlertCircle className="size-3.5 shrink-0" />
@@ -306,7 +302,7 @@ export function DriveActionCard({
                 </span>
               </div>
               {action.diffPreview && action.diffPreview.length > 0 && (
-                <ul className="xd-mono space-y-1 rounded-md border border-[var(--xd-border)] bg-[var(--xd-rail)] p-2 text-[11px] text-[var(--xd-ink-secondary)]">
+                <ul className="xd-mono space-y-1 rounded-lg border border-[var(--xd-border)] bg-[var(--xd-rail)] p-2.5 text-[11px] text-[var(--xd-ink-secondary)]">
                   {action.diffPreview.map((line, index) => (
                     <li key={index} className="truncate">
                       {line}

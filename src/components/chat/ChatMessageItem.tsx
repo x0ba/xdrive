@@ -6,6 +6,7 @@ import {
   ChevronDown,
   ChevronRight,
   Copy,
+  FileSearch,
   Folder,
   KeyRound,
   Loader2,
@@ -40,6 +41,15 @@ function formatDuration(ms?: number): string {
   return `${Math.round(seconds)}s`
 }
 
+function formatClock(iso: string): string {
+  const ms = Date.parse(iso)
+  if (Number.isNaN(ms)) return ''
+  return new Date(ms).toLocaleTimeString(undefined, {
+    hour: 'numeric',
+    minute: '2-digit',
+  })
+}
+
 export function ChatMessageItem({
   message,
   docsById,
@@ -54,13 +64,26 @@ export function ChatMessageItem({
   onOpenProviders,
 }: ChatMessageItemProps) {
   const [thoughtsOpen, setThoughtsOpen] = useState(false)
+  const [sourcesOpen, setSourcesOpen] = useState(false)
   const [copied, setCopied] = useState(false)
 
+  async function handleCopy() {
+    if (!message.content.trim()) return
+    try {
+      await navigator.clipboard.writeText(message.content)
+      setCopied(true)
+      window.setTimeout(() => setCopied(false), 1600)
+    } catch {
+      // ignore clipboard restrictions
+    }
+  }
+
+  // T3 Code TimelineUserMessageRow — soft borderless rounded-2xl right-aligned bubble
   if (message.role === 'user') {
     return (
       <div
         data-component="chat-message-user"
-        className="flex flex-col items-end gap-1.5"
+        className="group flex flex-col items-end gap-1.5"
       >
         {message.contextRefs && message.contextRefs.length > 0 && (
           <div className="flex max-w-[85%] flex-wrap justify-end gap-1">
@@ -72,7 +95,7 @@ export function ChatMessageItem({
                   if (ref.kind === 'doc') onOpenDocument?.(ref.id)
                   else onOpenFolder?.(ref.id)
                 }}
-                className="inline-flex items-center gap-1 rounded-md border border-[var(--xd-border)] bg-[var(--xd-rail)] px-2 py-0.5 text-[11px] text-[var(--xd-ink-secondary)] transition-colors hover:border-[var(--xd-border-strong)] hover:text-[var(--xd-ink)]"
+                className="inline-flex items-center gap-1.5 rounded-lg bg-[var(--xd-elevated)] px-2 py-0.5 text-[11.5px] text-[var(--xd-ink-secondary)] transition-colors hover:bg-[var(--xd-surface-hover)] hover:text-[var(--xd-ink)]"
               >
                 {ref.kind === 'folder' ? (
                   <Folder className="size-3 text-[var(--xd-ink-muted)]" />
@@ -88,8 +111,25 @@ export function ChatMessageItem({
             ))}
           </div>
         )}
-        <div className="max-w-[82%] rounded-2xl border border-[var(--xd-border)] bg-[var(--xd-elevated)] px-4 py-2.5 text-[14px] leading-relaxed text-[var(--xd-ink)] whitespace-pre-wrap">
+
+        <div className="max-w-[80%] rounded-2xl bg-[var(--xd-elevated)] px-4 py-2.5 text-[14px] leading-relaxed text-[var(--xd-ink)] whitespace-pre-wrap">
           {message.content}
+        </div>
+
+        <div className="flex items-center gap-1.5 pr-1 text-[11px] text-[var(--xd-ink-muted)] opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100">
+          <span>{formatClock(message.createdAt)}</span>
+          <button
+            type="button"
+            onClick={() => void handleCopy()}
+            aria-label="Copy message"
+            className="inline-flex size-5 items-center justify-center rounded hover:bg-[var(--xd-surface-hover)] hover:text-[var(--xd-ink)]"
+          >
+            {copied ? (
+              <Check className="size-3 text-[var(--xd-commit)]" />
+            ) : (
+              <Copy className="size-3" />
+            )}
+          </button>
         </div>
       </div>
     )
@@ -99,7 +139,7 @@ export function ChatMessageItem({
     return (
       <div
         data-component="chat-message-system"
-        className="flex items-start justify-between gap-3 rounded-lg border border-[var(--xd-danger)]/35 bg-[var(--xd-danger-soft)] px-3.5 py-2.5 text-[12.5px] text-[var(--xd-danger)]"
+        className="flex items-start justify-between gap-3 rounded-xl border border-[var(--xd-danger)]/35 bg-[var(--xd-danger-soft)] px-3.5 py-2.5 text-[12.5px] text-[var(--xd-danger)]"
       >
         <div className="flex items-start gap-2">
           <AlertTriangle className="mt-0.5 size-4 shrink-0" />
@@ -109,7 +149,7 @@ export function ChatMessageItem({
           <button
             type="button"
             onClick={onOpenProviders}
-            className="inline-flex h-7 shrink-0 items-center gap-1.5 rounded-md border border-[var(--xd-danger)]/40 bg-[var(--xd-canvas)] px-2.5 text-[11.5px] font-medium text-[var(--xd-ink)] hover:bg-[var(--xd-surface-hover)]"
+            className="inline-flex h-7 shrink-0 items-center gap-1.5 rounded-lg border border-[var(--xd-danger)]/40 bg-[var(--xd-canvas)] px-2.5 text-[11.5px] font-medium text-[var(--xd-ink)] hover:bg-[var(--xd-surface-hover)]"
           >
             <KeyRound className="size-3" />
             <span>Models</span>
@@ -133,67 +173,108 @@ export function ChatMessageItem({
     .map((id) => docsById.get(id))
     .filter((doc): doc is MarbleDocumentFile => Boolean(doc))
 
-  async function handleCopy() {
-    if (!message.content.trim()) return
-    try {
-      await navigator.clipboard.writeText(message.content)
-      setCopied(true)
-      window.setTimeout(() => setCopied(false), 1600)
-    } catch {
-      // ignore clipboard restrictions
-    }
-  }
-
   return (
     <article
       data-component="chat-message-assistant"
-      className="group space-y-3"
+      className="group space-y-2.5"
     >
-      {/* 1. Reasoning / Thinking trace disclosure */}
-      {(hasThoughts || isThinkingPhase) && (
-        <div className="text-[12px]">
-          <button
-            type="button"
-            disabled={!hasThoughts}
-            onClick={() => setThoughtsOpen((prev) => !prev)}
-            className="inline-flex items-center gap-1.5 rounded-md py-1 text-[var(--xd-ink-muted)] transition-colors hover:text-[var(--xd-ink-secondary)] disabled:cursor-default"
-          >
-            {isThinkingPhase ? (
-              <Loader2 className="size-3.5 animate-spin text-[var(--xd-accent)]" />
-            ) : (
-              <Brain className="size-3.5 text-[var(--xd-ink-muted)]" />
-            )}
-            <span className="font-medium">
-              {isThinkingPhase
-                ? 'Thinking across your Drive…'
-                : `Thought for ${formatDuration(message.thinkingDurationMs)}`}
-            </span>
-            {hasThoughts &&
-              (thoughtsOpen ? (
-                <ChevronDown className="size-3.5" />
-              ) : (
-                <ChevronRight className="size-3.5" />
-              ))}
-          </button>
+      {/* 1. T3 Code WorkLog-style quiet single-line activity rows (Reasoning + Drive Sources) */}
+      {(hasThoughts || isThinkingPhase || referencedDocs.length > 0) && (
+        <div className="space-y-0.5">
+          {(hasThoughts || isThinkingPhase) && (
+            <div>
+              <button
+                type="button"
+                disabled={!hasThoughts}
+                onClick={() => setThoughtsOpen((prev) => !prev)}
+                className="group/row flex w-full items-center justify-between gap-2 rounded-md px-0.5 py-0.5 text-left text-[12.5px] text-[var(--xd-ink-muted)] transition-colors hover:text-[var(--xd-ink-secondary)] disabled:cursor-default"
+              >
+                <span className="flex min-w-0 items-center gap-2">
+                  <span className="inline-flex size-5 shrink-0 items-center justify-center">
+                    {isThinkingPhase ? (
+                      <Loader2 className="size-3.5 animate-spin text-[var(--xd-ink-secondary)]" />
+                    ) : (
+                      <Brain className="size-3.5 text-[var(--xd-ink-muted)]" />
+                    )}
+                  </span>
+                  <span className="truncate">
+                    {isThinkingPhase
+                      ? 'Thinking across your Drive…'
+                      : `Thought for ${formatDuration(message.thinkingDurationMs)}`}
+                  </span>
+                  {hasThoughts &&
+                    (thoughtsOpen ? (
+                      <ChevronDown className="size-3 shrink-0 opacity-60" />
+                    ) : (
+                      <ChevronRight className="size-3 shrink-0 opacity-0 transition-opacity group-hover/row:opacity-70" />
+                    ))}
+                </span>
+              </button>
 
-          {hasThoughts && thoughtsOpen && (
-            <div className="mt-1.5 border-l-2 border-[var(--xd-border-strong)] pl-3.5 text-[12.5px] leading-relaxed text-[var(--xd-ink-muted)] whitespace-pre-wrap">
-              {thoughtsText}
+              {hasThoughts && thoughtsOpen && (
+                <div className="ms-7 my-1 border-l border-[var(--xd-border-strong)] pl-3 text-[12.5px] leading-relaxed text-[var(--xd-ink-muted)] whitespace-pre-wrap">
+                  {thoughtsText}
+                </div>
+              )}
+            </div>
+          )}
+
+          {referencedDocs.length > 0 && !message.isStreaming && (
+            <div>
+              <button
+                type="button"
+                onClick={() => setSourcesOpen((prev) => !prev)}
+                className="group/row flex w-full items-center justify-between gap-2 rounded-md px-0.5 py-0.5 text-left text-[12.5px] text-[var(--xd-ink-muted)] transition-colors hover:text-[var(--xd-ink-secondary)]"
+              >
+                <span className="flex min-w-0 items-center gap-2">
+                  <span className="inline-flex size-5 shrink-0 items-center justify-center">
+                    <FileSearch className="size-3.5 text-[var(--xd-ink-muted)]" />
+                  </span>
+                  <span className="truncate">
+                    Read {referencedDocs.length}{' '}
+                    {referencedDocs.length === 1 ? 'Drive file' : 'Drive files'}
+                  </span>
+                  {sourcesOpen ? (
+                    <ChevronDown className="size-3 shrink-0 opacity-60" />
+                  ) : (
+                    <ChevronRight className="size-3 shrink-0 opacity-0 transition-opacity group-hover/row:opacity-70" />
+                  )}
+                </span>
+              </button>
+
+              {sourcesOpen && (
+                <div className="ms-7 my-1.5 flex flex-wrap gap-1.5">
+                  {referencedDocs.map((doc) => (
+                    <button
+                      key={doc.id}
+                      type="button"
+                      onClick={() => onOpenDocument?.(doc.id)}
+                      title={`Open ${doc.fileName}`}
+                      className="inline-flex items-center gap-1.5 rounded-lg border border-[var(--xd-border)] bg-[var(--xd-rail)] px-2 py-0.5 text-[11.5px] text-[var(--xd-ink-secondary)] transition-colors hover:border-[var(--xd-border-strong)] hover:text-[var(--xd-ink)]"
+                    >
+                      <span className="text-[var(--xd-ink-muted)]">
+                        {getCategoryIcon(doc.category, 'size-3')}
+                      </span>
+                      <span className="max-w-[200px] truncate">{doc.title}</span>
+                    </button>
+                  ))}
+                </div>
+              )}
             </div>
           )}
         </div>
       )}
 
-      {/* 2. Markdown answer via Streamdown */}
+      {/* 2. Markdown answer via Streamdown (T3 Code editorial reading column) */}
       {message.content.trim().length > 0 && (
         <div
           className={cn(
-            'prose prose-sm max-w-[72ch] text-[14px] leading-[1.68] text-[var(--xd-ink)] dark:prose-invert',
+            'prose prose-sm max-w-none text-[14px] leading-[1.68] text-[var(--xd-ink)] dark:prose-invert',
             'prose-headings:font-semibold prose-headings:tracking-tight prose-headings:text-[var(--xd-ink)]',
             'prose-p:my-2.5 prose-p:text-[var(--xd-ink)]',
             'prose-strong:font-semibold prose-strong:text-[var(--xd-ink)]',
-            'prose-code:rounded prose-code:bg-[var(--xd-elevated)] prose-code:px-1.5 prose-code:py-0.5 prose-code:font-mono prose-code:text-[12.5px] prose-code:font-normal prose-code:text-[var(--xd-ink)] prose-code:before:content-none prose-code:after:content-none',
-            'prose-pre:rounded-lg prose-pre:border prose-pre:border-[var(--xd-border)] prose-pre:bg-[var(--xd-rail)]',
+            'prose-code:rounded-md prose-code:bg-[var(--xd-elevated)] prose-code:px-1.5 prose-code:py-0.5 prose-code:font-mono prose-code:text-[12.5px] prose-code:font-normal prose-code:text-[var(--xd-ink)] prose-code:before:content-none prose-code:after:content-none',
+            'prose-pre:rounded-xl prose-pre:border prose-pre:border-[var(--xd-border)] prose-pre:bg-[var(--xd-rail)]',
             'prose-a:text-[var(--xd-accent)] prose-a:no-underline hover:prose-a:underline',
             'prose-blockquote:border-l-[var(--xd-border-strong)] prose-blockquote:text-[var(--xd-ink-secondary)]',
             'prose-th:border-[var(--xd-border)] prose-td:border-[var(--xd-border)]',
@@ -207,9 +288,9 @@ export function ChatMessageItem({
 
       {/* Streaming actions indicator */}
       {isPreparingActions && (
-        <div className="inline-flex items-center gap-2 rounded-md border border-[var(--xd-border)] bg-[var(--xd-rail)] px-2.5 py-1.5 text-[12px] text-[var(--xd-ink-secondary)]">
-          <Loader2 className="size-3.5 animate-spin text-[var(--xd-accent)]" />
-          <span>Validating Drive changes…</span>
+        <div className="inline-flex items-center gap-2 rounded-lg px-0.5 py-1 text-[12.5px] text-[var(--xd-ink-muted)]">
+          <Loader2 className="size-3.5 animate-spin" />
+          <span>Preparing Drive changes…</span>
         </div>
       )}
 
@@ -217,16 +298,16 @@ export function ChatMessageItem({
       {actions.length > 0 && (
         <div className="space-y-2 pt-1">
           {proposedActions.length > 1 && (
-            <div className="flex items-center justify-between rounded-lg border border-[var(--xd-border)] bg-[var(--xd-elevated)]/60 px-3 py-1.5 text-[12px]">
+            <div className="flex items-center justify-between rounded-xl border border-[var(--xd-border)] bg-[var(--xd-rail)] px-3 py-2 text-[12px]">
               <span className="font-medium text-[var(--xd-ink-secondary)]">
-                {proposedActions.length} Drive changes ready to review
+                {proposedActions.length} Drive changes pending approval
               </span>
               <div className="flex items-center gap-1.5">
                 {onApplyAllActions && (
                   <button
                     type="button"
                     onClick={() => onApplyAllActions(message.id)}
-                    className="inline-flex h-6 items-center gap-1 rounded bg-[var(--xd-accent)] px-2.5 text-[11.5px] font-medium text-white hover:bg-[var(--xd-accent-hover)]"
+                    className="inline-flex h-6 items-center gap-1 rounded-md bg-[var(--xd-ink)] px-2.5 text-[11.5px] font-medium text-[var(--xd-canvas)] hover:opacity-90"
                   >
                     <Check className="size-3" />
                     <span>Apply all</span>
@@ -236,7 +317,7 @@ export function ChatMessageItem({
                   <button
                     type="button"
                     onClick={() => onDiscardAllActions(message.id)}
-                    className="inline-flex h-6 items-center rounded border border-[var(--xd-border)] px-2 text-[11.5px] text-[var(--xd-ink-secondary)] hover:bg-[var(--xd-surface-hover)] hover:text-[var(--xd-ink)]"
+                    className="inline-flex h-6 items-center rounded-md px-2 text-[11.5px] text-[var(--xd-ink-muted)] hover:bg-[var(--xd-surface-hover)] hover:text-[var(--xd-ink)]"
                   >
                     Discard all
                   </button>
@@ -271,32 +352,9 @@ export function ChatMessageItem({
         </div>
       )}
 
-      {/* 4. Referenced Drive Files Strip */}
-      {referencedDocs.length > 0 && !message.isStreaming && (
-        <div className="flex flex-wrap items-center gap-1.5 pt-0.5">
-          <span className="text-[11px] text-[var(--xd-ink-muted)]">
-            Sources
-          </span>
-          {referencedDocs.map((doc) => (
-            <button
-              key={doc.id}
-              type="button"
-              onClick={() => onOpenDocument?.(doc.id)}
-              title={`Open ${doc.fileName}`}
-              className="inline-flex items-center gap-1.5 rounded-md border border-[var(--xd-border)] bg-[var(--xd-rail)] px-2 py-0.5 text-[11.5px] text-[var(--xd-ink-secondary)] transition-colors hover:border-[var(--xd-accent-border)] hover:text-[var(--xd-ink)]"
-            >
-              <span className="text-[var(--xd-ink-muted)]">
-                {getCategoryIcon(doc.category, 'size-3')}
-              </span>
-              <span className="max-w-[180px] truncate">{doc.title}</span>
-            </button>
-          ))}
-        </div>
-      )}
-
-      {/* 5. Error banner attached to assistant turn */}
+      {/* 4. Error banner */}
       {message.error && (
-        <div className="flex items-start justify-between gap-3 rounded-lg border border-[var(--xd-danger)]/35 bg-[var(--xd-danger-soft)] px-3 py-2 text-[12px] text-[var(--xd-danger)]">
+        <div className="flex items-start justify-between gap-3 rounded-xl border border-[var(--xd-danger)]/35 bg-[var(--xd-danger-soft)] px-3.5 py-2.5 text-[12.5px] text-[var(--xd-danger)]">
           <div className="flex items-start gap-2">
             <AlertTriangle className="mt-0.5 size-3.5 shrink-0" />
             <span>{message.error}</span>
@@ -305,7 +363,7 @@ export function ChatMessageItem({
             <button
               type="button"
               onClick={onOpenProviders}
-              className="inline-flex h-6 shrink-0 items-center gap-1 rounded border border-[var(--xd-danger)]/35 bg-[var(--xd-canvas)] px-2 text-[11px] font-medium text-[var(--xd-ink)] hover:bg-[var(--xd-surface-hover)]"
+              className="inline-flex h-6 shrink-0 items-center gap-1 rounded-md border border-[var(--xd-danger)]/35 bg-[var(--xd-canvas)] px-2 text-[11px] font-medium text-[var(--xd-ink)] hover:bg-[var(--xd-surface-hover)]"
             >
               <KeyRound className="size-3" />
               <span>Providers</span>
@@ -314,21 +372,15 @@ export function ChatMessageItem({
         </div>
       )}
 
-      {/* 6. Quiet message footer */}
+      {/* 5. Quiet T3 Code assistant footer */}
       {!message.isStreaming && message.content.trim().length > 0 && (
-        <div className="flex items-center gap-2 pt-0.5 text-[11px] text-[var(--xd-ink-muted)]">
-          {message.modelName && <span>{message.modelName}</span>}
-          {message.reasoningEffort && message.reasoningEffort !== 'off' && (
-            <span>
-              {REASONING_EFFORT_META[message.reasoningEffort].label} reasoning
-            </span>
-          )}
-          <div className="ml-1 flex items-center gap-0.5 opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100">
+        <div className="flex items-center gap-2 pt-0.5 text-[11.5px] text-[var(--xd-ink-muted)]">
+          <div className="flex items-center gap-0.5 opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100">
             <button
               type="button"
               onClick={() => void handleCopy()}
               aria-label="Copy response"
-              className="inline-flex h-6 items-center gap-1 rounded px-1.5 text-[11px] text-[var(--xd-ink-muted)] hover:bg-[var(--xd-surface-hover)] hover:text-[var(--xd-ink)]"
+              className="inline-flex h-6 items-center gap-1 rounded-md px-1.5 text-[11.5px] text-[var(--xd-ink-muted)] hover:bg-[var(--xd-surface-hover)] hover:text-[var(--xd-ink)]"
             >
               {copied ? (
                 <>
@@ -347,13 +399,22 @@ export function ChatMessageItem({
                 type="button"
                 onClick={() => onRegenerate(message.id)}
                 aria-label="Regenerate response"
-                className="inline-flex h-6 items-center gap-1 rounded px-1.5 text-[11px] text-[var(--xd-ink-muted)] hover:bg-[var(--xd-surface-hover)] hover:text-[var(--xd-ink)]"
+                className="inline-flex h-6 items-center gap-1 rounded-md px-1.5 text-[11.5px] text-[var(--xd-ink-muted)] hover:bg-[var(--xd-surface-hover)] hover:text-[var(--xd-ink)]"
               >
                 <RefreshCw className="size-3" />
                 <span>Retry</span>
               </button>
             )}
           </div>
+          <span className="ml-auto flex items-center gap-2 text-[11px] text-[var(--xd-ink-muted)]/80">
+            {message.modelName && <span>{message.modelName}</span>}
+            {message.reasoningEffort && message.reasoningEffort !== 'off' && (
+              <span>
+                {REASONING_EFFORT_META[message.reasoningEffort].label}
+              </span>
+            )}
+            <span>{formatClock(message.createdAt)}</span>
+          </span>
         </div>
       )}
     </article>

@@ -477,11 +477,27 @@ export function parseDriveChatResponse(
         const rawSource =
           typeof item.source === 'string' ? item.source.trim() : ''
         if (!rawSource) continue
-        const source = sanitizeHtmlWithEvergreenRules(
+        const folder = findFolderByRef(
+          drive.folders,
+          item.folderId,
+          item.folderName,
+        )
+        const folderName =
+          folder?.name ??
+          (typeof item.folderName === 'string' && item.folderName.trim()
+            ? item.folderName.trim()
+            : 'My Drive')
+        const baseSource = sanitizeHtmlWithEvergreenRules(
           rawSource.startsWith('<!') || rawSource.startsWith('<html')
             ? rawSource
-            : `<!DOCTYPE html>\n<html lang="en">\n<head><meta charset="utf-8" /><title>${title}</title></head>\n<body data-marble-id="doc-root">${rawSource}</body>\n</html>`,
+            : `<!DOCTYPE html>\n<html lang="en">\n<head><meta charset="utf-8" /><meta name="xdrive:folder" content="${folderName.replace(/"/g, '&quot;')}" /><title>${title}</title></head>\n<body data-marble-id="doc-root"><article data-marble-id="doc-body">${rawSource}</article></body>\n</html>`,
         )
+        const source = baseSource.includes('name="xdrive:folder"')
+          ? baseSource
+          : baseSource.replace(
+              /<\/head>/i,
+              `<meta name="xdrive:folder" content="${folderName.replace(/"/g, '&quot;')}" />\n</head>`,
+            )
         const rawCategory = (
           typeof item.category === 'string' ? item.category : 'document'
         ) as MarbleAppCategory
@@ -493,16 +509,6 @@ export function parseDriveChatResponse(
             ? item.slug.trim()
             : title,
         )
-        const folder = findFolderByRef(
-          drive.folders,
-          item.folderId,
-          item.folderName,
-        )
-        const folderName =
-          folder?.name ??
-          (typeof item.folderName === 'string' && item.folderName.trim()
-            ? item.folderName.trim()
-            : 'My Drive')
         const tags = Array.isArray(item.tags)
           ? item.tags
               .filter((t): t is string => typeof t === 'string' && Boolean(t.trim()))

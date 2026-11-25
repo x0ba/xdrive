@@ -2,6 +2,7 @@ export { ChatComposer, type ChatComposerProps } from './ChatComposer'
 export { DriveActionCard, type DriveActionCardProps } from './DriveActionCard'
 export { ChatMessageItem, type ChatMessageItemProps } from './ChatMessageItem'
 export { DriveChatView, type DriveChatViewProps } from './DriveChatView'
+export { EffortGlyph, ProviderGlyph } from './ProviderGlyph'
 export {
   CHAT_DEMO_ACTIONS,
   CHAT_DEMO_DOCS,

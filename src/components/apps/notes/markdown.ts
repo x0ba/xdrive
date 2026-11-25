@@ -517,6 +517,98 @@ export function parseNotesFromMarbleSource(source: string): {
         notes,
       }
     }
+
+    // General .mrbl HTML5 fallback (e.g. AI-generated notebooks from Drive Chat)
+    const noteArticles = doc.querySelectorAll('article')
+    const root =
+      doc.querySelector('main') ??
+      (noteArticles.length === 1 ? noteArticles[0] : null) ??
+      doc.body
+    const cloned = root.cloneNode(true) as HTMLElement
+    cloned
+      .querySelectorAll('script, style, template')
+      .forEach((node) => node.remove())
+    const plainText = (cloned.textContent || '').trim()
+    if (plainText.length > 0) {
+      const resolvedTitle =
+        cloned.querySelector('h1')?.textContent.trim() ||
+        doc.querySelector('title')?.textContent.trim() ||
+        notebookTitle ||
+        'Untitled Note'
+      const toMarkdown = (container: Element): string => {
+        const lines: string[] = []
+        for (const child of Array.from(container.children)) {
+          const tag = child.tagName.toLowerCase()
+          const text = (child.textContent || '').trim()
+          if (!text && tag !== 'hr') continue
+          if (tag === 'h1') lines.push(`# ${text}`)
+          else if (tag === 'h2') lines.push(`## ${text}`)
+          else if (tag === 'h3' || tag === 'h4') lines.push(`### ${text}`)
+          else if (tag === 'hr') lines.push('---')
+          else if (tag === 'blockquote') lines.push(`> ${text}`)
+          else if (tag === 'pre') lines.push(`\`\`\`\n${text}\n\`\`\``)
+          else if (tag === 'ul') {
+            const lis = Array.from(child.querySelectorAll(':scope > li')).map(
+              (li) => `- ${(li.textContent || '').trim()}`,
+            )
+            if (lis.length) lines.push(lis.join('\n'))
+          } else if (tag === 'ol') {
+            const lis = Array.from(child.querySelectorAll(':scope > li')).map(
+              (li, i) => `${i + 1}. ${(li.textContent || '').trim()}`,
+            )
+            if (lis.length) lines.push(lis.join('\n'))
+          } else if (tag === 'section' || tag === 'article' || tag === 'div') {
+            const nested = toMarkdown(child)
+            if (nested) lines.push(nested)
+          } else {
+            lines.push(text)
+          }
+        }
+        return lines.join('\n\n') || plainText
+      }
+
+      const now = new Date().toISOString()
+      const sections = Array.from(
+        cloned.querySelectorAll(':scope > section, :scope > article'),
+      )
+      const noteItems: NoteItem[] =
+        sections.length > 1
+          ? sections.map((sec, idx) => {
+              const secTitle =
+                sec.querySelector('h1, h2, h3')?.textContent.trim() ||
+                `Note ${idx + 1}`
+              return {
+                id: sec.getAttribute('data-marble-id') || `note-${idx + 1}`,
+                title: secTitle,
+                body: toMarkdown(sec),
+                folder: 'My Drive',
+                tags: [],
+                pinned: idx === 0,
+                locked: false,
+                createdAt: now,
+                updatedAt: now,
+              }
+            })
+          : [
+              {
+                id: 'note-1',
+                title: resolvedTitle,
+                body: toMarkdown(cloned),
+                folder: 'My Drive',
+                tags: [],
+                pinned: true,
+                locked: false,
+                createdAt: now,
+                updatedAt: now,
+              },
+            ]
+
+      return {
+        notebookTitle: resolvedTitle,
+        activeNoteId: noteItems[0].id,
+        notes: noteItems,
+      }
+    }
   } catch {
     // Fallback to seed below
   }

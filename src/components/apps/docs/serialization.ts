@@ -93,14 +93,17 @@ export function parseDocsFromMarbleSource(source: string): DocsState {
     const doc = new DOMParser().parseFromString(source, 'text/html')
 
     const embedded = doc.querySelector('script[data-marble-docs-state="1"]')
+    const liveDocBody = doc.querySelector('[data-marble-id="doc-body"]')
     if (embedded?.textContent) {
       const parsed = JSON.parse(embedded.textContent) as Partial<DocsState>
       if (typeof parsed.html === 'string') {
+        // Prefer live [data-marble-id="doc-body"] HTML when Marble ops edited the DOM directly.
+        const liveHtml = liveDocBody?.innerHTML.trim()
         return {
           title: parsed.title || 'Untitled document',
           starred: Boolean(parsed.starred),
           folder: parsed.folder || 'Workspace',
-          html: parsed.html,
+          html: liveHtml || parsed.html,
           pageSetup: {
             ...DEFAULT_DOCS_PAGE_SETUP,
             ...(parsed.pageSetup ?? {}),
@@ -111,12 +114,14 @@ export function parseDocsFromMarbleSource(source: string): DocsState {
     }
 
     // Legacy rich-document.mrbl DOM conversion
-    const titleEl = doc.querySelector('[data-marble-id="doc-title"]')
+    const titleEl =
+      doc.querySelector('[data-marble-id="doc-title"]') ??
+      doc.querySelector('h1')
     const headTitleEl = doc.querySelector('title')
     const title =
       titleEl?.textContent.trim() ||
       headTitleEl?.textContent.trim() ||
-      'Collaborative Research Document'
+      'Untitled document'
 
     const sections = Array.from(doc.querySelectorAll('.doc-section'))
     if (sections.length > 0) {
@@ -176,6 +181,38 @@ export function parseDocsFromMarbleSource(source: string): DocsState {
         html: htmlParts.join('\n'),
         pageSetup: { ...DEFAULT_DOCS_PAGE_SETUP },
         comments,
+      }
+    }
+
+    // General .mrbl HTML5 document conversion (e.g. AI-generated documents from Drive Chat)
+    const articles = doc.querySelectorAll('article')
+    const contentRoot =
+      liveDocBody ??
+      doc.querySelector('main') ??
+      (articles.length === 1 ? articles[0] : null) ??
+      doc.body
+    const cloned = contentRoot.cloneNode(true) as HTMLElement
+    cloned
+      .querySelectorAll('script, style, template, link, meta')
+      .forEach((node) => node.remove())
+    const cleanedHtml = cloned.innerHTML.trim()
+    const plainText = (cloned.textContent || '').trim()
+    if (cleanedHtml && plainText.length > 0) {
+      const hasHeading = Boolean(cloned.querySelector('h1'))
+      const finalHtml = hasHeading
+        ? cleanedHtml
+        : `<h1 id="heading-title" data-marble-id="doc-title">${escapeText(title)}</h1>\n${cleanedHtml}`
+      const folderMeta = doc
+        .querySelector('meta[name="xdrive:folder"]')
+        ?.getAttribute('content')
+        ?.trim()
+      return {
+        title,
+        starred: false,
+        folder: folderMeta || 'My Drive',
+        html: finalHtml,
+        pageSetup: { ...DEFAULT_DOCS_PAGE_SETUP },
+        comments: [],
       }
     }
   } catch {
