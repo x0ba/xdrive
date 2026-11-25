@@ -181,7 +181,7 @@ export function DriveChatView({
   onHistoryOpenChange,
   threadSearch: threadSearchProp,
   onThreadSearchChange,
-  initialScopeFolderId = null,
+  initialScopeFolderId,
   onScopeFolderChange,
   className,
 }: DriveChatViewProps) {
@@ -221,6 +221,36 @@ export function DriveChatView({
   const [editingTitle, setEditingTitle] = useState(false)
   const [titleDraft, setTitleDraft] = useState('')
   const [showScrollBottom, setShowScrollBottom] = useState(false)
+
+  useEffect(() => {
+    if (initialScopeFolderId === undefined) return
+    setContextRefs((prev) => {
+      const nonFolderRefs = prev.filter((item) => item.kind !== 'folder')
+      const existingFolderRef = prev.find((item) => item.kind === 'folder')
+      if (!initialScopeFolderId) {
+        return existingFolderRef ? nonFolderRefs : prev
+      }
+      const folder = folders.find((item) => item.id === initialScopeFolderId)
+      if (!folder) {
+        return existingFolderRef ? nonFolderRefs : prev
+      }
+      const nextName = getFolderPathLabel(folders, folder.id)
+      if (
+        existingFolderRef?.id === folder.id &&
+        existingFolderRef.name === nextName
+      ) {
+        return prev
+      }
+      return [
+        ...nonFolderRefs,
+        {
+          kind: 'folder',
+          id: folder.id,
+          name: nextName,
+        },
+      ]
+    })
+  }, [initialScopeFolderId, folders])
 
   const scrollRef = useRef<HTMLDivElement>(null)
   const heroScopeRef = useRef<HTMLDivElement>(null)
@@ -328,17 +358,27 @@ export function DriveChatView({
   }
 
   function handleAddContextRef(ref: DriveContextRef) {
-    setContextRefs((prev) =>
-      prev.some((item) => item.kind === ref.kind && item.id === ref.id)
+    setContextRefs((prev) => {
+      if (ref.kind === 'folder') {
+        const withoutFolder = prev.filter((item) => item.kind !== 'folder')
+        return [...withoutFolder, ref]
+      }
+      return prev.some((item) => item.kind === ref.kind && item.id === ref.id)
         ? prev
-        : [...prev, ref],
-    )
+        : [...prev, ref]
+    })
+    if (ref.kind === 'folder') {
+      onScopeFolderChange?.(ref.id)
+    }
   }
 
   function handleRemoveContextRef(ref: DriveContextRef) {
     setContextRefs((prev) =>
       prev.filter((item) => !(item.kind === ref.kind && item.id === ref.id)),
     )
+    if (ref.kind === 'folder') {
+      onScopeFolderChange?.(null)
+    }
   }
 
   const pinnedFolderRef = contextRefs.find((ref) => ref.kind === 'folder')

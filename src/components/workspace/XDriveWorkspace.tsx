@@ -739,7 +739,10 @@ export function XDriveWorkspace({
   const isRouted = Boolean(workspaceRoute?.routed)
   const routeMatch = workspaceRoute?.match
   const routeSearch: CombinedWorkspaceSearch = workspaceRoute?.search ?? {}
-  const [forwardDepth, setForwardDepth] = useState(0)
+  const [routerCanGoForward, setRouterCanGoForward] = useState(false)
+  const maxHistoryIndexRef = useRef<number>(
+    router.history.location.state.__TSR_index,
+  )
   const [chatsLoaded, setChatsLoaded] = useState(!syncWithServer)
   const [localAiSidebarTab, setLocalAiSidebarTab] =
     useState<AiSidebarTab>('chat')
@@ -1356,7 +1359,7 @@ export function XDriveWorkspace({
     if (!activeDoc) return []
     const localSelected = selection[activeDoc.id] ?? []
     if (!isRouted) return localSelected
-    if (urlNodeIds.length === 0) return localSelected
+    if (urlNodeIds.length === 0) return []
     const localIds = localSelected.map((el) => el.id)
     if (
       localIds.length === urlNodeIds.length &&
@@ -1387,16 +1390,58 @@ export function XDriveWorkspace({
     return cleaned
   }
 
+  const latestLocationRef = useRef<{
+    pathname: string
+    search: CombinedWorkspaceSearch
+  }>({
+    pathname: workspaceRoute?.pathname ?? '/drive',
+    search: routeSearch,
+  })
+  latestLocationRef.current = {
+    pathname: workspaceRoute?.pathname ?? '/drive',
+    search: routeSearch,
+  }
+
+  useEffect(() => {
+    if (!isRouted) return
+    const initialIndex = router.history.location.state.__TSR_index
+    if (initialIndex > maxHistoryIndexRef.current) {
+      maxHistoryIndexRef.current = initialIndex
+    }
+    setRouterCanGoForward(maxHistoryIndexRef.current > initialIndex)
+
+    return router.history.subscribe(({ location, action }) => {
+      const idx = location.state.__TSR_index
+      if (action.type === 'PUSH') {
+        maxHistoryIndexRef.current = idx
+      } else if (idx > maxHistoryIndexRef.current) {
+        maxHistoryIndexRef.current = idx
+      }
+      setRouterCanGoForward(maxHistoryIndexRef.current > idx)
+    })
+  }, [isRouted, router])
+
   function updateRouteSearch(
     updater: (prev: CombinedWorkspaceSearch) => CombinedWorkspaceSearch,
     options?: { replace?: boolean },
   ) {
     if (!isRouted) return
-    const next = cleanRouteSearch(
-      updater(routeSearch) as Record<string, unknown>,
+    const current = latestLocationRef.current
+    const prevCleaned = cleanRouteSearch(
+      current.search as Record<string, unknown>,
     )
+    const nextCleaned = cleanRouteSearch(
+      updater(current.search) as Record<string, unknown>,
+    )
+    const prevHref = appendQueryParams(current.pathname, prevCleaned)
+    const nextHref = appendQueryParams(current.pathname, nextCleaned)
+    if (nextHref === prevHref) return
+    latestLocationRef.current = {
+      pathname: current.pathname,
+      search: nextCleaned,
+    }
     void router.navigate({
-      href: appendQueryParams(workspaceRoute?.pathname ?? '/drive', next),
+      href: nextHref,
       replace: options?.replace ?? false,
     })
   }
@@ -1908,11 +1953,15 @@ export function XDriveWorkspace({
     extraSearch?: Record<string, string | undefined>,
     options?: { replace?: boolean },
   ) {
-    const nextSearch: Record<string, string | undefined> = {
-      ...(routeSearch.ai ? { ai: routeSearch.ai } : {}),
+    const currentAi = latestLocationRef.current.search.ai
+    const nextSearch = cleanRouteSearch({
+      ...(currentAi ? { ai: currentAi } : {}),
       ...extraSearch,
+    })
+    latestLocationRef.current = {
+      pathname,
+      search: nextSearch,
     }
-    setForwardDepth(0)
     void router.navigate({
       href: appendQueryParams(pathname, nextSearch),
       replace: options?.replace ?? false,
@@ -1976,10 +2025,8 @@ export function XDriveWorkspace({
   function go(delta: -1 | 1) {
     if (isRouted) {
       if (delta === -1) {
-        setForwardDepth((d) => d + 1)
         router.history.back()
       } else {
-        setForwardDepth((d) => Math.max(0, d - 1))
         router.history.forward()
       }
       return
@@ -2290,12 +2337,29 @@ export function XDriveWorkspace({
     persist(id, meta.slug, prior, [op], applied.source, nextDoc)
   }
 
+  function selectNodeAndOpenAi(id: string, element: SelectedMarbleElement) {
+    setSelection((prev) => ({ ...prev, [id]: [element] }))
+    if (!isRouted) {
+      setLocalAiSidebarOpen(true)
+      return
+    }
+    if (activeTabRef.current === id) {
+      updateRouteSearch((prev) => ({
+        ...prev,
+        node: serializeSelectedNodeIds([element.id]),
+        ai: prev.ai ?? 'chat',
+      }))
+    }
+  }
+
   selectRef.current = (element) => {
     const id = activeTabRef.current
     if (!id || id === 'home') return
-    setDocSelection(id, [element])
-    setAiSidebarOpen(true)
+    selectNodeAndOpenAi(id, element)
   }
+
+  const setModeRef = useRef(setMode)
+  setModeRef.current = setMode
 
   useEffect(() => {
     function onMessage(event: MessageEvent) {
@@ -2338,7 +2402,7 @@ export function XDriveWorkspace({
       const modeKey = modeFromShortcut(event.key)
       if (!modeKey) return
       event.preventDefault()
-      setMode(id, modeKey)
+      setModeRef.current(id, modeKey)
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
@@ -4600,7 +4664,7 @@ export function XDriveWorkspace({
         onNewTab={() => navigateToFolder(null)}
         canGoBack={isRouted ? routerCanGoBack : trail.cursor > 0}
         canGoForward={
-          isRouted ? forwardDepth > 0 : trail.cursor < trail.places.length - 1
+          isRouted ? routerCanGoForward : trail.cursor < trail.places.length - 1
         }
         onBack={() => go(-1)}
         onForward={() => go(1)}
@@ -4767,8 +4831,7 @@ export function XDriveWorkspace({
                       source={activeDoc.source}
                       selectedId={selectedIds[0] ?? null}
                       onSelectNode={(element) => {
-                        setDocSelection(activeDoc.id, [element])
-                        setAiSidebarOpen(true)
+                        selectNodeAndOpenAi(activeDoc.id, element)
                       }}
                       onApplySource={(nextSource, ops) => {
                         const prior = activeDoc.source
@@ -4983,7 +5046,7 @@ export function XDriveWorkspace({
                     : undefined
                 }
                 initialScopeFolderId={
-                  isRouted ? (routeSearch.scope ?? null) : null
+                  isRouted ? (routeSearch.scope ?? null) : undefined
                 }
                 onScopeFolderChange={
                   isRouted
