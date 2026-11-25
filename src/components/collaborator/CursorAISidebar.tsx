@@ -1052,6 +1052,17 @@ function MessageBubble({ message }: { message: AIMessage }) {
             </span>
           </div>
         )}
+        {message.runtimeSource === 'grok-build-acp' && (
+          <div className="xd-mono mb-1 flex items-center gap-1 text-[9.5px] text-[var(--xd-commit)]">
+            <ShieldCheck className="size-2.5 shrink-0" />
+            <span>
+              Grok Build ACP
+              {message.modelId
+                ? ` · ${message.modelId.replace(/^grok-build\//, '')}`
+                : ''}
+            </span>
+          </div>
+        )}
         <div>{message.content}</div>
       </div>
     </div>

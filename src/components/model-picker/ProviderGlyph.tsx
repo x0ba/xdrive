@@ -103,6 +103,29 @@ export function ProviderGlyph({
           />
         </svg>
       )
+    case 'grok-build':
+      // Orbital slash mark for SpaceXSI Grok Build CLI
+      return (
+        <svg
+          viewBox="0 0 16 16"
+          fill="none"
+          aria-hidden="true"
+          className={cn('shrink-0', className)}
+        >
+          <path
+            d="M12.3 5.2A5.3 5.3 0 1 0 13.1 9.4"
+            stroke="currentColor"
+            strokeWidth="1.45"
+            strokeLinecap="round"
+          />
+          <path
+            d="M3.2 12.8L13.2 2.8"
+            stroke="currentColor"
+            strokeWidth="1.6"
+            strokeLinecap="round"
+          />
+        </svg>
+      )
     case 'xai':
     default:
       // Diagonal xAI slash mark

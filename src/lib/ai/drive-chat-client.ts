@@ -10,6 +10,8 @@ import { inspectMarbleNodes } from '#/lib/marble/engine-client'
 import type { AntigravityRuntimeStatus } from './antigravity-types'
 import type { OpenCodeGoRuntimeStatus } from './opencode-go-types'
 import { fromXDriveOpenCodeGoModelId } from './opencode-go-types'
+import type { GrokBuildRuntimeStatus } from './grok-build-types'
+import { fromXDriveGrokBuildModelId } from './grok-build-types'
 import type {
   DriveChatApiRequest,
   DriveChatModelOption,
@@ -178,8 +180,14 @@ export function buildDriveChatModels(params: {
   subscriptions: AISubscription[]
   antigravityStatus?: AntigravityRuntimeStatus | null
   openCodeGoStatus?: OpenCodeGoRuntimeStatus | null
+  grokBuildStatus?: GrokBuildRuntimeStatus | null
 }): DriveChatModelOption[] {
-  const { subscriptions, antigravityStatus, openCodeGoStatus } = params
+  const {
+    subscriptions,
+    antigravityStatus,
+    openCodeGoStatus,
+    grokBuildStatus,
+  } = params
 
   const antigravityReasoningConfig = antigravityStatus?.configOptions?.find(
     (opt) =>
@@ -207,8 +215,24 @@ export function buildDriveChatModels(params: {
       )
     : undefined
 
+  const grokBuildReasoningConfig = grokBuildStatus?.configOptions?.find(
+    (opt) =>
+      opt.category === 'thought_level' ||
+      opt.category === 'reasoning' ||
+      /reason|think|effort/i.test(`${opt.id} ${opt.name}`),
+  )
+  const grokBuildAcpEfforts = grokBuildReasoningConfig
+    ? normalizeReasoningEfforts(
+        grokBuildReasoningConfig.options.map((choice) => choice.value),
+        true,
+      )
+    : undefined
+
   const goCatalogById = new Map(
     (openCodeGoStatus?.models ?? []).map((model) => [model.id, model]),
+  )
+  const grokBuildCatalogById = new Map(
+    (grokBuildStatus?.models ?? []).map((model) => [model.id, model]),
   )
 
   return subscriptions.flatMap((subscription) =>
@@ -228,6 +252,18 @@ export function buildDriveChatModels(params: {
               supportsReasoning,
             )
           : (openCodeAcpEfforts ??
+            normalizeReasoningEfforts(undefined, supportsReasoning))
+      } else if (subscription.providerId === 'grok-build') {
+        const rawId = fromXDriveGrokBuildModelId(model.id)
+        const grokMeta =
+          grokBuildCatalogById.get(rawId) ?? grokBuildCatalogById.get(model.id)
+        supportsReasoning = grokMeta?.reasoning ?? true
+        reasoningEfforts = grokMeta?.reasoningEfforts?.length
+          ? normalizeReasoningEfforts(
+              grokMeta.reasoningEfforts,
+              supportsReasoning,
+            )
+          : (grokBuildAcpEfforts ??
             normalizeReasoningEfforts(undefined, supportsReasoning))
       } else if (subscription.providerId === 'antigravity') {
         supportsReasoning = true

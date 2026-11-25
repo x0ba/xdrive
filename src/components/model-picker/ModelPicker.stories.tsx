@@ -125,7 +125,13 @@ function InteractiveStandardPicker({
   defaultOpen?: boolean
   defaultSearchQuery?: string
   defaultTab?:
-    'favorites' | 'antigravity' | 'opencode-go' | 'claude' | 'openai' | 'xai'
+    | 'favorites'
+    | 'antigravity'
+    | 'opencode-go'
+    | 'grok-build'
+    | 'claude'
+    | 'openai'
+    | 'xai'
   initialModelId?: string
   initialFavorites?: string[]
   variant?: 'ghost' | 'field'
@@ -284,6 +290,30 @@ export const OpenCodeFreeOnly: Story = {
     await expect(body.getByText('Big Pickle')).toBeVisible()
     await expect(body.queryByText('DeepSeek V4.1 Flash Free')).toBeNull()
     await expect(body.getByText('DeepSeek V4.1 Flash')).toBeVisible()
+  },
+}
+
+/**
+ * Open popover filtered to the Grok Build ACP provider tab, verifying the Grok Build
+ * rail icon, label, and live model list.
+ *
+ * @summary Open popover on Grok Build tab
+ */
+export const GrokBuildTab: Story = {
+  args: { ...Default.args },
+  render: () => (
+    <InteractiveStandardPicker
+      defaultOpen
+      defaultTab="grok-build"
+      initialModelId="grok-build/grok-4.7"
+    />
+  ),
+  play: async () => {
+    const body = within(document.body)
+    const search = await body.findByPlaceholderText('Search models...')
+    await expect(search).toBeVisible()
+    await expect(body.getByText('Grok 4.7')).toBeVisible()
+    await expect(body.getByText('Grok 4.7 Fast')).toBeVisible()
   },
 }
 

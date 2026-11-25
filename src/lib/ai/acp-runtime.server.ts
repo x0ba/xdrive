@@ -642,7 +642,16 @@ export class AcpProcessRuntime<TSource extends string = string> {
                     `${choice.value} ${choice.name}`,
                   ),
                 )
-              : undefined)
+              : desired === 'max'
+                ? (reasoningConfig.options.find((choice) =>
+                    /xhigh|extra[\s_-]*high|max/i.test(
+                      `${choice.value} ${choice.name}`,
+                    ),
+                  ) ??
+                  reasoningConfig.options.find(
+                    (choice) => choice.value.toLowerCase() === 'high',
+                  ))
+                : undefined)
           if (match && match.value !== reasoningConfig.currentValue) {
             try {
               await connection.agent.request('session/set_config_option', {
@@ -675,13 +684,18 @@ export class AcpProcessRuntime<TSource extends string = string> {
       }
 
       const promptTimeoutMs = this.options.promptTimeoutMs ?? 120_000
+      const promptSignal = input.signal
+        ? AbortSignal.any([input.signal, AbortSignal.timeout(promptTimeoutMs)])
+        : AbortSignal.timeout(promptTimeoutMs)
+      const sendSessionCancel = () => {
+        void connection.agent
+          .notify('session/cancel', { sessionId: activeSession.sessionId })
+          .catch(() => {})
+      }
+      promptSignal.addEventListener('abort', sendSessionCancel, { once: true })
+
       const promptPromise = activeSession.prompt(blocks, {
-        cancellationSignal: input.signal
-          ? AbortSignal.any([
-              input.signal,
-              AbortSignal.timeout(promptTimeoutMs),
-            ])
-          : AbortSignal.timeout(promptTimeoutMs),
+        cancellationSignal: promptSignal,
         stopWaitingOnCancel: true,
       })
       // Avoid unhandled rejection if the update loop exits early.
@@ -692,31 +706,42 @@ export class AcpProcessRuntime<TSource extends string = string> {
       const thoughts: string[] = []
       let stopReason = 'end_turn'
 
-      let msg = await activeSession.nextUpdate()
-      while (msg.kind !== 'stop') {
-        const update = msg.update
-        if (
-          update.sessionUpdate === 'agent_message_chunk' &&
-          update.content.type === 'text'
-        ) {
-          text += update.content.text
-          input.onTextDelta?.(update.content.text)
-        } else if (
-          update.sessionUpdate === 'agent_thought_chunk' &&
-          update.content.type === 'text'
-        ) {
-          currentThought += update.content.text
-          input.onThoughtDelta?.(update.content.text)
+      try {
+        let msg = await activeSession.nextUpdate()
+        while (msg.kind !== 'stop') {
+          const update = msg.update
+          if (
+            update.sessionUpdate === 'agent_message_chunk' &&
+            update.content.type === 'text'
+          ) {
+            text += update.content.text
+            input.onTextDelta?.(update.content.text)
+          } else if (
+            update.sessionUpdate === 'agent_thought_chunk' &&
+            update.content.type === 'text'
+          ) {
+            currentThought += update.content.text
+            input.onThoughtDelta?.(update.content.text)
+          }
+          msg = await activeSession.nextUpdate()
         }
-        msg = await activeSession.nextUpdate()
-      }
-      stopReason = msg.stopReason
+        stopReason = msg.stopReason
 
-      await promptPromise
+        await promptPromise
+      } finally {
+        promptSignal.removeEventListener('abort', sendSessionCancel)
+      }
 
       if (currentThought.trim()) {
         thoughts.push(currentThought.trim())
       }
+
+      const initMeta = init._meta as Record<string, unknown> | undefined
+      const metaVersion =
+        typeof initMeta?.agentVersion === 'string' &&
+        initMeta.agentVersion.trim()
+          ? initMeta.agentVersion.trim()
+          : undefined
 
       return {
         text: text.trim(),
@@ -724,7 +749,7 @@ export class AcpProcessRuntime<TSource extends string = string> {
         stopReason,
         modelId: activeModelId,
         agentName: init.agentInfo?.name ?? this.options.defaultAgentName,
-        agentVersion: init.agentInfo?.version ?? 'unknown',
+        agentVersion: init.agentInfo?.version ?? metaVersion ?? 'unknown',
       }
     } catch (error) {
       if (isAcpAuthRequiredError(error)) {
