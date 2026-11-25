@@ -397,13 +397,17 @@ export function NewAppModal({
     if (!open) return
     setMode(initialMode)
     setFolderId(initialFolderId)
-    if (selectedModelId) setCurrentModelId(selectedModelId)
     if (templates.length > 0) {
       const first = templates[0]
       setSelectedTemplateId(first.id)
       setCustomTitle(`${first.title} copy`)
     }
-  }, [open, initialMode, initialFolderId, selectedModelId, templates])
+  }, [open, initialMode, initialFolderId, templates])
+
+  useEffect(() => {
+    if (!open || !selectedModelId) return
+    setCurrentModelId(selectedModelId)
+  }, [open, selectedModelId])
 
   useEffect(() => {
     if (!open) return
