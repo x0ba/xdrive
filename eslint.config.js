@@ -23,6 +23,7 @@ export default [
       'prettier.config.js',
       '.output/**',
       'storybook-static/**',
+      'public/design/**',
       '.storybook/**',
     ],
   },
