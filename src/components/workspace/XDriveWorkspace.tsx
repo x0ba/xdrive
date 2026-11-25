@@ -116,6 +116,7 @@ import type {
   CanvasInteractionMode,
   DriveFolder,
   DriveFolderColor,
+  DriveSettings,
   MarbleAppCategory,
   MarbleCheckpoint,
   MarbleDocumentFile,
@@ -129,6 +130,8 @@ import type {
 import { cn } from '#/lib/utils'
 
 const CHAT_STORAGE_KEY = 'xdrive.drive-chat.threads.v1'
+const LEGACY_FAVORITE_MODELS_STORAGE_KEY =
+  'xdrive.drive-chat.favorite-models.v1'
 
 function createBlankChatThread(
   modelId: string,
@@ -775,6 +778,11 @@ export function XDriveWorkspace({
   } | null>(null)
   const [sortBy, setSortBy] = useState<SortOption>('updated')
   const [viewMode, setViewMode] = useState<DriveViewMode>('preview')
+  const [effectiveTrashRetentionDays, setEffectiveTrashRetentionDays] =
+    useState(trashRetentionDays)
+  const [favoriteModelIds, setFavoriteModelIds] = useState<
+    string[] | undefined
+  >(undefined)
   const [searchQuery, setSearchQuery] = useState('')
   const [shareId, setShareId] = useState<string | null>(null)
   const [namer, setNamer] = useState<NamerState | null>(null)
@@ -881,15 +889,15 @@ export function XDriveWorkspace({
   async function reloadWorkspaceFromServer() {
     if (!syncWithServer) return
     try {
-      const response = await fetch(
-        `/api/marble?action=workspace&retentionDays=${encodeURIComponent(String(trashRetentionDays))}`,
-        { cache: 'no-store' },
-      )
+      const response = await fetch('/api/marble?action=workspace', {
+        cache: 'no-store',
+      })
       if (!response.ok) return
       const data = (await response.json()) as {
         ok?: boolean
         folders?: DriveFolder[]
         docs?: MarbleDocumentFile[]
+        settings?: DriveSettings
       }
       if (
         !data.ok ||
@@ -901,6 +909,52 @@ export function XDriveWorkspace({
       foldersRef.current = data.folders
       setFolders(data.folders)
       setDocs(data.docs)
+
+      if (data.settings) {
+        if (
+          typeof data.settings.trashRetentionDays === 'number' &&
+          data.settings.trashRetentionDays > 0
+        ) {
+          setEffectiveTrashRetentionDays(data.settings.trashRetentionDays)
+        }
+        if (data.settings.defaultModelId) {
+          setModelId(data.settings.defaultModelId)
+        }
+        if (data.settings.roleAssignments) {
+          setRoles(data.settings.roleAssignments)
+        }
+        if (data.settings.viewMode) {
+          setViewMode(data.settings.viewMode)
+        }
+        if (data.settings.sortBy) {
+          setSortBy(data.settings.sortBy)
+        }
+        if (Array.isArray(data.settings.favoriteModelIds)) {
+          setFavoriteModelIds(data.settings.favoriteModelIds)
+        } else if (typeof window !== 'undefined') {
+          try {
+            const rawLegacy = window.localStorage.getItem(
+              LEGACY_FAVORITE_MODELS_STORAGE_KEY,
+            )
+            if (rawLegacy) {
+              const parsed: unknown = JSON.parse(rawLegacy)
+              if (Array.isArray(parsed)) {
+                const migrated = parsed.filter(
+                  (item): item is string => typeof item === 'string',
+                )
+                setFavoriteModelIds(migrated)
+                void syncDriveApi({
+                  action: 'update_settings',
+                  settings: { favoriteModelIds: migrated },
+                })
+              }
+              window.localStorage.removeItem(LEGACY_FAVORITE_MODELS_STORAGE_KEY)
+            }
+          } catch {
+            // Ignore legacy localStorage migration failures.
+          }
+        }
+      }
     } catch {
       // Static/Storybook environments do not expose /api/marble.
     } finally {
@@ -911,7 +965,7 @@ export function XDriveWorkspace({
   useEffect(() => {
     if (!syncWithServer) return
     void reloadWorkspaceFromServer()
-  }, [syncWithServer, trashRetentionDays])
+  }, [syncWithServer])
 
   const findDoc = (id: string | null | undefined) =>
     library.find((doc) => doc.id === id) ?? null
@@ -1390,6 +1444,34 @@ export function XDriveWorkspace({
     })
   }
 
+  function persistDriveSettings(patch: Partial<DriveSettings>) {
+    if (!syncWithServer) return
+    void syncDriveApi({
+      action: 'update_settings',
+      settings: patch,
+    })
+  }
+
+  function handleSelectModel(nextModelId: string) {
+    setModelId(nextModelId)
+    persistDriveSettings({ defaultModelId: nextModelId })
+  }
+
+  function handleSelectSort(nextSort: SortOption) {
+    setSortBy(nextSort)
+    persistDriveSettings({ sortBy: nextSort })
+  }
+
+  function handleChangeViewMode(nextViewMode: DriveViewMode) {
+    setViewMode(nextViewMode)
+    persistDriveSettings({ viewMode: nextViewMode })
+  }
+
+  function handleFavoriteModelIdsChange(nextIds: string[]) {
+    setFavoriteModelIds(nextIds)
+    persistDriveSettings({ favoriteModelIds: nextIds })
+  }
+
   function persist(
     id: string,
     slug: string,
@@ -1398,9 +1480,10 @@ export function XDriveWorkspace({
     nextSource: string,
     docOverride?: MarbleDocumentFile,
   ) {
+    const doc = docOverride ?? allDocsRef.current.find((item) => item.id === id)
+    if (doc?.isTemplate) return
     const token = (saveTokens.current.get(id) ?? 0) + 1
     saveTokens.current.set(id, token)
-    const doc = docOverride ?? allDocsRef.current.find((item) => item.id === id)
     const folderPath = folderDiskPath(foldersRef.current, doc?.folderId ?? null)
     const meta = doc
       ? serializeDocMeta({
@@ -1410,10 +1493,29 @@ export function XDriveWorkspace({
           byteSize: byteSizeOf(nextSource),
         })
       : undefined
+    const checkpoints = doc?.checkpoints
+    const intentHistory = doc?.intentHistory
     const body =
       ops.length > 0
-        ? { action: 'apply_ops', slug, folderPath, source: prior, ops, meta }
-        : { action: 'save', slug, folderPath, source: nextSource, meta }
+        ? {
+            action: 'apply_ops',
+            slug,
+            folderPath,
+            source: prior,
+            ops,
+            meta,
+            checkpoints,
+            intentHistory,
+          }
+        : {
+            action: 'save',
+            slug,
+            folderPath,
+            source: nextSource,
+            meta,
+            checkpoints,
+            intentHistory,
+          }
     void enqueueDriveMutation(async () => {
       const response = await fetch('/api/marble', {
         method: 'POST',
@@ -1435,6 +1537,13 @@ export function XDriveWorkspace({
   }
 
   function rememberProposal(id: string, proposal: MarbleOpProposal) {
+    const targetDoc = allDocsRef.current.find((doc) => doc.id === id)
+    const nextHistory = targetDoc
+      ? [
+          proposal,
+          ...targetDoc.intentHistory.filter((item) => item.id !== proposal.id),
+        ].slice(0, 20)
+      : [proposal]
     patchFile(id, (doc) => ({
       ...doc,
       intentHistory: [
@@ -1442,6 +1551,14 @@ export function XDriveWorkspace({
         ...doc.intentHistory.filter((item) => item.id !== proposal.id),
       ].slice(0, 20),
     }))
+    if (targetDoc && !targetDoc.isTemplate) {
+      void syncDriveApi({
+        action: 'update_document_meta',
+        slug: targetDoc.slug,
+        folderPath: folderDiskPath(foldersRef.current, targetDoc.folderId),
+        intentHistory: nextHistory,
+      })
+    }
   }
 
   function upsertThreadMessage(docId: string, message: AIMessage) {
@@ -1485,18 +1602,19 @@ export function XDriveWorkspace({
       source: applied.source,
       note: options?.look ? 'Look gesture persisted with the file.' : undefined,
     }
-    patchFile(id, (doc) => ({
-      ...doc,
+    const nextDoc: MarbleDocumentFile = {
+      ...meta,
       source: applied.source,
       nodeCount: countMarbleNodes(applied.source),
       byteSize: byteSizeOf(applied.source),
-      version: doc.version + 1,
+      version: meta.version + 1,
       updatedAt: new Date().toISOString(),
       syncState: 'saving',
       lastEditedBy: YOU,
-      checkpoints: coalesceCheckpoint(doc.checkpoints, checkpoint, op),
-    }))
-    persist(id, meta.slug, prior, [op], applied.source)
+      checkpoints: coalesceCheckpoint(meta.checkpoints, checkpoint, op),
+    }
+    patchFile(id, () => nextDoc)
+    persist(id, meta.slug, prior, [op], applied.source, nextDoc)
   }
 
   selectRef.current = (element) => {
@@ -1753,10 +1871,15 @@ export function XDriveWorkspace({
         const targetFolder = resolvedFolderId
           ? folders.find((f) => f.id === resolvedFolderId)
           : null
+        const committedProposal: MarbleOpProposal = {
+          ...result.proposal,
+          status: 'committed',
+        }
         const created: MarbleDocumentFile = {
           ...adopted,
           folderId: targetFolder ? targetFolder.id : null,
           folder: targetFolder ? targetFolder.name : 'My Drive',
+          intentHistory: [committedProposal],
         }
         setDocs((prev) => [created, ...prev])
         setOpenTabIds((prev) =>
@@ -1772,17 +1895,13 @@ export function XDriveWorkspace({
           providerId: input.providerId,
           runtimeSource: result.source,
           thoughts: result.thoughts,
-          proposal: { ...result.proposal, status: 'committed' },
+          proposal: committedProposal,
           stages: result.stages.map((stage) => ({ ...stage, completed: true })),
         }
         setThreads((prev) => ({
           ...prev,
           [created.id]: [user, assistant],
         }))
-        rememberProposal(created.id, {
-          ...result.proposal,
-          status: 'committed',
-        })
         persist(
           created.id,
           created.slug,
@@ -1953,7 +2072,9 @@ export function XDriveWorkspace({
     const message = (threads[activeDoc.id] ?? []).find(
       (item) => item.proposal?.id === proposalId,
     )
-    const proposal = message?.proposal
+    const proposal =
+      message?.proposal ??
+      activeDoc.intentHistory.find((item) => item.id === proposalId)
     if (
       !proposal ||
       proposal.status === 'committed' ||
@@ -1987,12 +2108,19 @@ export function XDriveWorkspace({
     }
     sourceRef.current.set(activeDoc.id, applied.source)
     setLivePreview(null)
-    patchFile(activeDoc.id, (doc) => ({
-      ...doc,
+    const nextIntentHistory = activeDoc.intentHistory.some(
+      (item) => item.id === committed.id,
+    )
+      ? activeDoc.intentHistory.map((item) =>
+          item.id === committed.id ? committed : item,
+        )
+      : [committed, ...activeDoc.intentHistory].slice(0, 20)
+    const updatedDoc: MarbleDocumentFile = {
+      ...activeDoc,
       source: applied.source,
       nodeCount: countMarbleNodes(applied.source),
       byteSize: byteSizeOf(applied.source),
-      version: doc.version + 1,
+      version: activeDoc.version + 1,
       updatedAt: new Date().toISOString(),
       syncState: 'saving',
       lastEditedBy: {
@@ -2001,11 +2129,10 @@ export function XDriveWorkspace({
         isAi: true,
         modelBadge: committed.modelId,
       },
-      checkpoints: [checkpoint, ...doc.checkpoints].slice(0, 40),
-      intentHistory: doc.intentHistory.map((item) =>
-        item.id === committed.id ? committed : item,
-      ),
-    }))
+      checkpoints: [checkpoint, ...activeDoc.checkpoints].slice(0, 40),
+      intentHistory: nextIntentHistory,
+    }
+    patchFile(activeDoc.id, () => updatedDoc)
     setThreads((prev) => ({
       ...prev,
       [activeDoc.id]: (prev[activeDoc.id] ?? []).map((item) =>
@@ -2020,6 +2147,7 @@ export function XDriveWorkspace({
       activeDoc.source,
       committed.ops,
       applied.source,
+      updatedDoc,
     )
   }
 
@@ -2027,9 +2155,11 @@ export function XDriveWorkspace({
     if (!activeDoc) return
     previewRun.current += 1
     setLivePreview(null)
-    const discardedAt = (threads[activeDoc.id] ?? []).find(
-      (item) => item.proposal?.id === proposalId,
-    )?.proposal
+    const discardedAt =
+      (threads[activeDoc.id] ?? []).find(
+        (item) => item.proposal?.id === proposalId,
+      )?.proposal ??
+      activeDoc.intentHistory.find((item) => item.id === proposalId)
     if (!discardedAt) return
     const discarded: MarbleOpProposal = { ...discardedAt, status: 'discarded' }
     setThreads((prev) => ({
@@ -2171,9 +2301,7 @@ export function XDriveWorkspace({
         Array.isArray(moved) &&
         moved.some((item) => {
           const rec = item as { from?: string; to?: string }
-          return (
-            rec.from?.split('/').pop() !== rec.to?.split('/').pop()
-          )
+          return rec.from?.split('/').pop() !== rec.to?.split('/').pop()
         })
       ) {
         void reloadWorkspaceFromServer()
@@ -2303,7 +2431,10 @@ export function XDriveWorkspace({
       slug: target.slug,
       folderPath: folderDiskPath(foldersRef.current, target.folderId),
       trashedAt,
+      retentionDays: effectiveTrashRetentionDays,
       meta: serializeDocMeta(target),
+      checkpoints: target.checkpoints,
+      intentHistory: target.intentHistory,
     })
   }
 
@@ -2376,7 +2507,7 @@ export function XDriveWorkspace({
         const result = purgeExpiredTrashedDocs(
           prev,
           Date.now(),
-          trashRetentionDays,
+          effectiveTrashRetentionDays,
         )
         if (result.purged.length === 0) return prev
         purgedDocs = result.purged
@@ -2385,14 +2516,14 @@ export function XDriveWorkspace({
       if (purgedDocs.length > 0) {
         syncTrashApi({
           action: 'purge_expired',
-          retentionDays: trashRetentionDays,
+          retentionDays: effectiveTrashRetentionDays,
         })
       }
     }
     purgeNow()
     const timer = window.setInterval(purgeNow, 60 * 60 * 1000)
     return () => window.clearInterval(timer)
-  }, [trashRetentionDays])
+  }, [effectiveTrashRetentionDays])
 
   function updateChatMessage(
     threadId: string,
@@ -2459,30 +2590,46 @@ export function XDriveWorkspace({
           opsCount: Math.max(action.ops.length, 1),
           source: nextSource,
         }
-        patchFile(target.id, (doc) => ({
-          ...doc,
+        const updatedDoc: MarbleDocumentFile = {
+          ...target,
           source: nextSource,
           nodeCount: countMarbleNodes(nextSource),
           byteSize: byteSizeOf(nextSource),
-          version: doc.version + 1,
+          version: target.version + 1,
           updatedAt: now,
           syncState: 'saving',
           lastEditedBy: { name: 'Drive Chat', initials: 'AI', isAi: true },
-          checkpoints: [checkpoint, ...doc.checkpoints].slice(0, 40),
-        }))
-        persist(target.id, target.slug, priorSource, action.ops, nextSource)
+          checkpoints: [checkpoint, ...target.checkpoints].slice(0, 40),
+        }
+        patchFile(target.id, () => updatedDoc)
+        persist(
+          target.id,
+          target.slug,
+          priorSource,
+          action.ops,
+          nextSource,
+          updatedDoc,
+        )
         chatUndoMapRef.current.set(action.id, () => {
           sourceRef.current.set(target.id, priorSource)
-          patchFile(target.id, (doc) => ({
-            ...doc,
+          const revertedDoc: MarbleDocumentFile = {
+            ...updatedDoc,
             source: priorSource,
             nodeCount: countMarbleNodes(priorSource),
             byteSize: byteSizeOf(priorSource),
-            version: doc.version + 1,
+            version: updatedDoc.version + 1,
             updatedAt: new Date().toISOString(),
             syncState: 'saving',
-          }))
-          persist(target.id, target.slug, nextSource, [], priorSource)
+          }
+          patchFile(target.id, () => revertedDoc)
+          persist(
+            target.id,
+            target.slug,
+            nextSource,
+            [],
+            priorSource,
+            revertedDoc,
+          )
         })
         updateChatAction(threadId, msgId, action.id, (act) => ({
           ...act,
@@ -2892,9 +3039,7 @@ export function XDriveWorkspace({
         chatUndoMapRef.current.set(action.id, () => {
           const currentPath = folderDiskPath(foldersRef.current, target.id)
           const revertedFolders = foldersRef.current.map((f) =>
-            f.id === target.id
-              ? { ...f, name: prevName, color: prevColor }
-              : f,
+            f.id === target.id ? { ...f, name: prevName, color: prevColor } : f,
           )
           foldersRef.current = revertedFolders
           setFolders(revertedFolders)
@@ -3404,8 +3549,8 @@ export function XDriveWorkspace({
         label: 'Trash',
         hint:
           trashedDocs.length > 0
-            ? `${trashedDocs.length} trashed · clears after ${trashRetentionDays}d`
-            : `Auto-clears after ${trashRetentionDays} days`,
+            ? `${trashedDocs.length} trashed · clears after ${effectiveTrashRetentionDays}d`
+            : `Auto-clears after ${effectiveTrashRetentionDays} days`,
         run: () => visit('home', 'trash'),
       },
       {
@@ -3484,20 +3629,21 @@ export function XDriveWorkspace({
       opsCount: 1,
       source: nextSource,
     }
-    patchFile(id, (doc) => ({
-      ...doc,
+    const updatedDoc: MarbleDocumentFile = {
+      ...activeDoc,
       source: nextSource,
       nodeCount: countMarbleNodes(nextSource),
       byteSize: byteSizeOf(nextSource),
-      version: doc.version + 1,
+      version: activeDoc.version + 1,
       updatedAt: new Date().toISOString(),
       syncState: 'saving',
       lastEditedBy: YOU,
-      checkpoints: coalesceCheckpoint(doc.checkpoints, checkpoint, {
+      checkpoints: coalesceCheckpoint(activeDoc.checkpoints, checkpoint, {
         type: 'setText',
       }),
-    }))
-    persist(id, activeDoc.slug, prior, [], nextSource)
+    }
+    patchFile(id, () => updatedDoc)
+    persist(id, activeDoc.slug, prior, [], nextSource, updatedDoc)
   }
 
   useEffect(() => {
@@ -3722,26 +3868,28 @@ export function XDriveWorkspace({
                           source: nextSource,
                           note: 'Applied from the source inspector.',
                         }
-                        patchFile(activeDoc.id, (doc) => ({
-                          ...doc,
+                        const updatedDoc: MarbleDocumentFile = {
+                          ...activeDoc,
                           source: nextSource,
                           nodeCount: countMarbleNodes(nextSource),
                           byteSize: byteSizeOf(nextSource),
-                          version: doc.version + 1,
+                          version: activeDoc.version + 1,
                           updatedAt: new Date().toISOString(),
                           syncState: 'saving',
                           lastEditedBy: YOU,
-                          checkpoints: [checkpoint, ...doc.checkpoints].slice(
-                            0,
-                            40,
-                          ),
-                        }))
+                          checkpoints: [
+                            checkpoint,
+                            ...activeDoc.checkpoints,
+                          ].slice(0, 40),
+                        }
+                        patchFile(activeDoc.id, () => updatedDoc)
                         persist(
                           activeDoc.id,
                           activeDoc.slug,
                           prior,
                           ops,
                           nextSource,
+                          updatedDoc,
                         )
                       }}
                     />
@@ -3753,7 +3901,7 @@ export function XDriveWorkspace({
                     permission={permission}
                     models={connectedModels}
                     modelId={modelId}
-                    onModelChange={setModelId}
+                    onModelChange={handleSelectModel}
                     selectedIds={selectedIds}
                     onSelectedIdsChange={(ids) => {
                       const fromStage = new Map(
@@ -3843,7 +3991,11 @@ export function XDriveWorkspace({
                 folders={folders}
                 models={driveChatModels}
                 selectedModelId={modelId}
-                onSelectModel={setModelId}
+                onSelectModel={handleSelectModel}
+                favoriteModelIds={favoriteModelIds}
+                onFavoriteModelIdsChange={
+                  syncWithServer ? handleFavoriteModelIdsChange : undefined
+                }
                 reasoningEffort={chatReasoningEffort}
                 onSelectReasoningEffort={setChatReasoningEffort}
                 mode={chatMode}
@@ -3896,9 +4048,9 @@ export function XDriveWorkspace({
 
                   <FilterPillBar
                     sortBy={sortBy}
-                    onSelectSort={setSortBy}
+                    onSelectSort={handleSelectSort}
                     viewMode={viewMode}
-                    onChangeViewMode={setViewMode}
+                    onChangeViewMode={handleChangeViewMode}
                     searchQuery={searchQuery}
                     onChangeSearchQuery={setSearchQuery}
                   />
@@ -4121,9 +4273,9 @@ export function XDriveWorkspace({
 
                   <FilterPillBar
                     sortBy={sortBy}
-                    onSelectSort={setSortBy}
+                    onSelectSort={handleSelectSort}
                     viewMode={viewMode}
-                    onChangeViewMode={setViewMode}
+                    onChangeViewMode={handleChangeViewMode}
                     searchQuery={searchQuery}
                     onChangeSearchQuery={setSearchQuery}
                   />
@@ -4248,7 +4400,7 @@ export function XDriveWorkspace({
                   <DriveTrashList
                     docs={filteredTrashedDocs}
                     totalCount={trashedDocs.length}
-                    retentionDays={trashRetentionDays}
+                    retentionDays={effectiveTrashRetentionDays}
                     resolveFolderLabel={(doc) =>
                       getFolderPathLabel(folders, doc.folderId, doc.folder)
                     }
@@ -4361,6 +4513,7 @@ export function XDriveWorkspace({
                     onChange={(nextSubscriptions, nextRoles) => {
                       setSubscriptions(nextSubscriptions)
                       setRoles(nextRoles)
+                      persistDriveSettings({ roleAssignments: nextRoles })
                     }}
                     antigravityStatus={antigravityStatus}
                     antigravityBusy={antigravityBusy}
@@ -4402,7 +4555,7 @@ export function XDriveWorkspace({
             strokes={docStrokes}
             models={connectedModels}
             modelId={modelId}
-            onModelChange={setModelId}
+            onModelChange={handleSelectModel}
             permission={permission}
             evergreenRefs={evergreenRefs}
             onOpenEvergreenDoc={(slug) => {
@@ -4469,7 +4622,7 @@ export function XDriveWorkspace({
         initialFolderId={currentFolderId}
         models={composerModels}
         selectedModelId={modelId}
-        onSelectModel={setModelId}
+        onSelectModel={handleSelectModel}
         onClose={() => setNewAppModalMode(null)}
         onBuildWithAgent={({ prompt, modelId: chosenModel, folderId }) =>
           buildApp(prompt, chosenModel, folderId)

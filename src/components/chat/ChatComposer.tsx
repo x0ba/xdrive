@@ -43,6 +43,8 @@ export interface ChatComposerProps {
   models: DriveChatModelOption[]
   selectedModelId: string
   onSelectModel: (modelId: string) => void
+  favoriteModelIds?: string[]
+  onFavoriteModelIdsChange?: (ids: string[]) => void
   reasoningEffort: ReasoningEffort
   onSelectReasoningEffort: (effort: ReasoningEffort) => void
   mode: DriveChatMode
@@ -108,6 +110,8 @@ export function ChatComposer({
   models,
   selectedModelId,
   onSelectModel,
+  favoriteModelIds: controlledFavoriteIds,
+  onFavoriteModelIdsChange,
   reasoningEffort,
   onSelectReasoningEffort,
   mode,
@@ -125,9 +129,10 @@ export function ChatComposer({
   const [openMenu, setOpenMenu] = useState<OpenMenu>(null)
   const [modelSearch, setModelSearch] = useState('')
   const [contextSearch, setContextSearch] = useState('')
-  const [favoriteIds, setFavoriteIds] = useState<string[]>(() =>
-    loadFavoriteModels(models),
+  const [internalFavoriteIds, setInternalFavoriteIds] = useState<string[]>(
+    () => controlledFavoriteIds ?? loadFavoriteModels(models),
   )
+  const favoriteIds = controlledFavoriteIds ?? internalFavoriteIds
   const [activeProviderTab, setActiveProviderTab] =
     useState<ModelRailTab>('favorites')
 
@@ -259,10 +264,14 @@ export function ChatComposer({
   const canSend = !disabled && !isStreaming && value.trim().length > 0
 
   function toggleFavorite(modelId: string) {
-    setFavoriteIds((prev) => {
-      const next = prev.includes(modelId)
-        ? prev.filter((id) => id !== modelId)
-        : [...prev, modelId]
+    const current = favoriteIds
+    const next = current.includes(modelId)
+      ? current.filter((id) => id !== modelId)
+      : [...current, modelId]
+    if (onFavoriteModelIdsChange) {
+      onFavoriteModelIdsChange(next)
+    } else {
+      setInternalFavoriteIds(next)
       if (typeof window !== 'undefined') {
         try {
           window.localStorage.setItem(
@@ -273,8 +282,7 @@ export function ChatComposer({
           // ignore
         }
       }
-      return next
-    })
+    }
   }
 
   function handleTextareaChange(next: string) {
@@ -549,7 +557,11 @@ export function ChatComposer({
                           No matching models.
                         </p>
                       ) : (
-                        <div role="listbox" aria-label="Models" className="space-y-0.5">
+                        <div
+                          role="listbox"
+                          aria-label="Models"
+                          className="space-y-0.5"
+                        >
                           {visibleModels.map((model) => {
                             const isSelected = activeModel?.id === model.id
                             const isFav = favoriteSet.has(model.id)

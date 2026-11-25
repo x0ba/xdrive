@@ -1,13 +1,7 @@
 // Core domain models and types for xDrive — AI-Enabled Marble (.mrbl) Research Workspace
 
 export type MarbleOpType =
-  | 'setText'
-  | 'setInner'
-  | 'setAttr'
-  | 'insert'
-  | 'move'
-  | 'remove'
-  | 'assignId'
+  'setText' | 'setInner' | 'setAttr' | 'insert' | 'move' | 'remove' | 'assignId'
 
 export interface MarbleOp {
   type: MarbleOpType
@@ -47,13 +41,7 @@ export interface MarbleOpProposal {
 }
 
 export type MarbleAppCategory =
-  | 'latex'
-  | 'notebook'
-  | 'document'
-  | 'slides'
-  | 'matrix'
-  | 'sandbox'
-  | 'custom'
+  'latex' | 'notebook' | 'document' | 'slides' | 'matrix' | 'sandbox' | 'custom'
 
 export type SharePermissionLevel =
   | 'view_only' // Look & read only: data-marble-look allowed in visitor tab, no persistent edits, no AI
@@ -94,11 +82,7 @@ export interface MarbleCheckpoint {
 }
 
 export type DriveFolderColor =
-  | 'default'
-  | 'accent'
-  | 'commit'
-  | 'sketch'
-  | 'danger'
+  'default' | 'accent' | 'commit' | 'sketch' | 'danger'
 
 export interface DriveFolder {
   id: string
@@ -107,6 +91,32 @@ export interface DriveFolder {
   color?: DriveFolderColor
   createdAt: string
   updatedAt: string
+}
+
+export interface DriveRoleAssignments {
+  implementation: string
+  exploration: string
+  review: string
+  design: string
+}
+
+export type DriveViewModePreference = 'preview' | 'icon' | 'list'
+export type DriveSortPreference = 'updated' | 'title' | 'nodes' | 'size'
+
+export interface DriveSettings {
+  version: 1
+  trashRetentionDays: number
+  defaultModelId?: string
+  favoriteModelIds?: string[]
+  roleAssignments?: DriveRoleAssignments
+  viewMode?: DriveViewModePreference
+  sortBy?: DriveSortPreference
+}
+
+export interface DriveTrashState {
+  retentionDays: number
+  lastPurgedAt: string | null
+  lastPurgedSlugs?: string[]
 }
 
 export interface MarbleDocumentFile {
@@ -150,11 +160,7 @@ export interface MarbleDocumentFile {
 }
 
 export type AIProviderId =
-  | 'antigravity'
-  | 'opencode-go'
-  | 'xai'
-  | 'claude'
-  | 'openai'
+  'antigravity' | 'opencode-go' | 'xai' | 'claude' | 'openai'
 
 export interface AIModelSpec {
   id: string
@@ -174,7 +180,8 @@ export interface AISubscription {
   tagline: string
   planName: string
   connected: boolean
-  authMethod: 'antigravity_acp' | 'subscription_oauth' | 'api_key' | 'cli_bridge'
+  authMethod:
+    'antigravity_acp' | 'subscription_oauth' | 'api_key' | 'cli_bridge'
   maskedCredential?: string
   status: 'active' | 'rate_limited' | 'disconnected'
   models: AIModelSpec[]

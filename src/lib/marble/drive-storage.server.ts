@@ -11,16 +11,32 @@ import {
 import path from 'node:path'
 
 import type {
+  AIProviderId,
   DriveFolder,
   DriveFolderColor,
+  DriveRoleAssignments,
+  DriveSettings,
+  DriveSortPreference,
+  DriveTrashState,
+  DriveViewModePreference,
+  EvergreenDocRef,
   MarbleAppCategory,
+  MarbleCheckpoint,
   MarbleDocumentFile,
+  MarbleOp,
+  MarbleOpProposal,
+  ShareCollaborator,
   ShareConfig,
+  SharePermissionLevel,
+  SketchAnnotation,
 } from '../types'
 
 export const DEFAULT_TRASH_RETENTION_DAYS = 30
 const DAY_MS = 24 * 60 * 60 * 1000
+const MAX_CHECKPOINTS = 40
+const MAX_INTENT_HISTORY = 20
 export const SLUG_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/
+const SAFE_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/
 
 const VALID_FOLDER_COLORS = new Set<DriveFolderColor>([
   'default',
@@ -38,6 +54,53 @@ const VALID_CATEGORIES = new Set<MarbleAppCategory>([
   'matrix',
   'sandbox',
   'custom',
+])
+
+const VALID_SHARE_PERMISSIONS = new Set<SharePermissionLevel>([
+  'view_only',
+  'comment_annotate',
+  'edit_no_ai',
+  'edit_with_ai_byok',
+  'edit_with_ai_shared',
+])
+
+const VALID_PROVIDERS = new Set<AIProviderId>([
+  'antigravity',
+  'opencode-go',
+  'xai',
+  'claude',
+  'openai',
+])
+
+const VALID_OP_TYPES = new Set<MarbleOp['type']>([
+  'setText',
+  'setInner',
+  'setAttr',
+  'insert',
+  'move',
+  'remove',
+  'assignId',
+])
+
+const VALID_PROPOSAL_STATUSES = new Set<MarbleOpProposal['status']>([
+  'proposed',
+  'committed',
+  'discarded',
+  'thinking',
+  'failed',
+])
+
+const VALID_VIEW_MODES = new Set<DriveViewModePreference>([
+  'preview',
+  'icon',
+  'list',
+])
+
+const VALID_SORT_OPTIONS = new Set<DriveSortPreference>([
+  'updated',
+  'title',
+  'nodes',
+  'size',
 ])
 
 export class DriveStorageError extends Error {
@@ -77,14 +140,28 @@ export interface StoredDocumentMeta {
 }
 
 interface DriveMetadataFile {
-  version: 1
+  version: 2
   folders: Partial<Record<string, StoredFolderMeta>>
   documents: Partial<Record<string, StoredDocumentMeta>>
+  trash: DriveTrashState
 }
 
-interface TrashMetaRecord {
+interface StoredDocumentHistoryFile {
+  version: 1
+  docId: string
   slug: string
+  updatedAt: string
+  checkpoints: MarbleCheckpoint[]
+  intentHistory: MarbleOpProposal[]
+}
+
+export interface TrashMetaRecord {
+  version?: number
+  slug: string
+  docId?: string
   trashedAt: string
+  purgeAt?: string
+  retentionDays?: number
   originalFolderPath?: string
   meta?: StoredDocumentMeta
 }
@@ -106,12 +183,41 @@ export function getTrashDir(): string {
   return path.resolve(getDriveDir(), '.trash')
 }
 
-function getMetaDir(): string {
+export function getMetaDir(): string {
   return path.resolve(getDriveDir(), '.xdrive')
 }
 
 function getMetaFilePath(): string {
   return path.resolve(getMetaDir(), 'metadata.json')
+}
+
+function getSettingsFilePath(): string {
+  return path.resolve(getMetaDir(), 'settings.json')
+}
+
+function getHistoryDir(): string {
+  return path.resolve(getMetaDir(), 'history')
+}
+
+function safeHistoryKey(docId: string): string {
+  const trimmed = docId.trim()
+  if (SAFE_ID_PATTERN.test(trimmed) && !trimmed.includes('..')) {
+    return trimmed
+  }
+  return `doc-${createHash('sha256')
+    .update(trimmed || 'unknown')
+    .digest('hex')
+    .slice(0, 16)}`
+}
+
+function historyFilePath(docId: string): string {
+  const historyDir = getHistoryDir()
+  const key = safeHistoryKey(docId)
+  const full = path.resolve(historyDir, `${key}.json`)
+  if (path.dirname(full) !== historyDir) {
+    fail(400, 'Invalid document history id')
+  }
+  return full
 }
 
 let driveLock: Promise<void> = Promise.resolve()
@@ -269,29 +375,471 @@ function sanitizeCategory(value: unknown): MarbleAppCategory | undefined {
   return undefined
 }
 
-function emptyMetadata(): DriveMetadataFile {
-  return { version: 1, folders: {}, documents: {} }
+function sanitizePermission(value: unknown): SharePermissionLevel {
+  if (
+    typeof value === 'string' &&
+    VALID_SHARE_PERMISSIONS.has(value as SharePermissionLevel)
+  ) {
+    return value as SharePermissionLevel
+  }
+  return 'view_only'
+}
+
+function sanitizeCollaborator(raw: unknown): ShareCollaborator | null {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null
+  const rec = raw as Record<string, unknown>
+  if (typeof rec.id !== 'string' || typeof rec.email !== 'string') return null
+  return {
+    id: rec.id,
+    name: typeof rec.name === 'string' ? rec.name : rec.email,
+    email: rec.email,
+    avatarInitials:
+      typeof rec.avatarInitials === 'string' ? rec.avatarInitials : 'CO',
+    avatarColor:
+      typeof rec.avatarColor === 'string' ? rec.avatarColor : '#5e6ad2',
+    permission: sanitizePermission(rec.permission),
+    addedAt:
+      typeof rec.addedAt === 'string' ? rec.addedAt : new Date().toISOString(),
+    ...(typeof rec.lastActive === 'string'
+      ? { lastActive: rec.lastActive }
+      : {}),
+  }
+}
+
+function sanitizeShareConfig(
+  raw: unknown,
+  fallbackSlug?: string,
+): ShareConfig | undefined {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return undefined
+  const rec = raw as Record<string, unknown>
+  const collaborators = Array.isArray(rec.collaborators)
+    ? rec.collaborators
+        .map(sanitizeCollaborator)
+        .filter((item): item is ShareCollaborator => item !== null)
+    : []
+  return {
+    isPublicLinkEnabled: Boolean(rec.isPublicLinkEnabled),
+    publicLinkUrl:
+      typeof rec.publicLinkUrl === 'string' && rec.publicLinkUrl.trim()
+        ? rec.publicLinkUrl
+        : `https://xdrive.app/d/${fallbackSlug ?? 'document'}`,
+    publicPermission: sanitizePermission(rec.publicPermission),
+    allowDuplication:
+      typeof rec.allowDuplication === 'boolean' ? rec.allowDuplication : true,
+    sharedAiDailyLimit:
+      typeof rec.sharedAiDailyLimit === 'number' &&
+      Number.isFinite(rec.sharedAiDailyLimit) &&
+      rec.sharedAiDailyLimit >= 0
+        ? rec.sharedAiDailyLimit
+        : 40,
+    sharedAiUsedToday:
+      typeof rec.sharedAiUsedToday === 'number' &&
+      Number.isFinite(rec.sharedAiUsedToday) &&
+      rec.sharedAiUsedToday >= 0
+        ? rec.sharedAiUsedToday
+        : 0,
+    collaborators,
+  }
+}
+
+function sanitizeAuthor(
+  raw: unknown,
+): MarbleDocumentFile['createdBy'] | undefined {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return undefined
+  const rec = raw as Record<string, unknown>
+  if (typeof rec.name !== 'string' || !rec.name.trim()) return undefined
+  return {
+    name: rec.name,
+    initials: typeof rec.initials === 'string' ? rec.initials : 'YO',
+    ...(typeof rec.isAi === 'boolean' ? { isAi: rec.isAi } : {}),
+    ...(typeof rec.modelBadge === 'string'
+      ? { modelBadge: rec.modelBadge }
+      : {}),
+  }
+}
+
+function sanitizeMarbleOp(raw: unknown): MarbleOp | null {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null
+  const rec = raw as Record<string, unknown>
+  if (
+    typeof rec.type !== 'string' ||
+    !VALID_OP_TYPES.has(rec.type as MarbleOp['type'])
+  ) {
+    return null
+  }
+  const op: MarbleOp = { type: rec.type as MarbleOp['type'] }
+  if (typeof rec.id === 'string') op.id = rec.id
+  if (typeof rec.text === 'string') op.text = rec.text
+  if (typeof rec.html === 'string') op.html = rec.html
+  if (typeof rec.name === 'string') op.name = rec.name
+  if (typeof rec.value === 'string' || rec.value === null) op.value = rec.value
+  if (typeof rec.parentId === 'string') op.parentId = rec.parentId
+  if (typeof rec.beforeId === 'string' || rec.beforeId === null) {
+    op.beforeId = rec.beforeId
+  }
+  if (
+    Array.isArray(rec.path) &&
+    rec.path.every((n) => typeof n === 'number' && Number.isFinite(n))
+  ) {
+    op.path = rec.path
+  }
+  if (typeof rec.look === 'boolean') op.look = rec.look
+  return op
+}
+
+export function sanitizeCheckpoints(
+  raw: unknown,
+): MarbleCheckpoint[] | undefined {
+  if (!Array.isArray(raw)) return undefined
+  const out: MarbleCheckpoint[] = []
+  const seen = new Set<string>()
+  for (const item of raw) {
+    if (!item || typeof item !== 'object' || Array.isArray(item)) continue
+    const rec = item as Record<string, unknown>
+    if (
+      typeof rec.sha !== 'string' ||
+      !rec.sha.trim() ||
+      typeof rec.label !== 'string' ||
+      typeof rec.source !== 'string'
+    ) {
+      continue
+    }
+    if (seen.has(rec.sha)) continue
+    seen.add(rec.sha)
+    out.push({
+      sha: rec.sha,
+      label: rec.label,
+      timestamp:
+        typeof rec.timestamp === 'number' && Number.isFinite(rec.timestamp)
+          ? rec.timestamp
+          : Date.now(),
+      author: typeof rec.author === 'string' ? rec.author : 'You',
+      opsCount:
+        typeof rec.opsCount === 'number' && Number.isFinite(rec.opsCount)
+          ? rec.opsCount
+          : 0,
+      source: rec.source,
+      ...(typeof rec.note === 'string' ? { note: rec.note } : {}),
+    })
+    if (out.length >= MAX_CHECKPOINTS) break
+  }
+  return out
+}
+
+export function sanitizeIntentHistory(
+  raw: unknown,
+): MarbleOpProposal[] | undefined {
+  if (!Array.isArray(raw)) return undefined
+  const out: MarbleOpProposal[] = []
+  const seen = new Set<string>()
+  for (const item of raw) {
+    if (!item || typeof item !== 'object' || Array.isArray(item)) continue
+    const rec = item as Record<string, unknown>
+    if (
+      typeof rec.id !== 'string' ||
+      !rec.id.trim() ||
+      typeof rec.note !== 'string' ||
+      typeof rec.instruction !== 'string'
+    ) {
+      continue
+    }
+    if (seen.has(rec.id)) continue
+    seen.add(rec.id)
+    const ops = Array.isArray(rec.ops)
+      ? rec.ops
+          .map(sanitizeMarbleOp)
+          .filter((op): op is MarbleOp => op !== null)
+      : []
+    const inverseOps = Array.isArray(rec.inverseOps)
+      ? rec.inverseOps
+          .map(sanitizeMarbleOp)
+          .filter((op): op is MarbleOp => op !== null)
+      : undefined
+    const targetIds = Array.isArray(rec.targetIds)
+      ? rec.targetIds.filter((id): id is string => typeof id === 'string')
+      : []
+    const providerId: AIProviderId =
+      typeof rec.providerId === 'string' &&
+      VALID_PROVIDERS.has(rec.providerId as AIProviderId)
+        ? (rec.providerId as AIProviderId)
+        : 'antigravity'
+    const status: MarbleOpProposal['status'] =
+      typeof rec.status === 'string' &&
+      VALID_PROPOSAL_STATUSES.has(rec.status as MarbleOpProposal['status'])
+        ? (rec.status as MarbleOpProposal['status'])
+        : 'proposed'
+    const proposal: MarbleOpProposal = {
+      id: rec.id,
+      note: rec.note,
+      ops,
+      targetIds,
+      modelId:
+        typeof rec.modelId === 'string' ? rec.modelId : 'antigravity/default',
+      providerId,
+      createdAt:
+        typeof rec.createdAt === 'number' && Number.isFinite(rec.createdAt)
+          ? rec.createdAt
+          : Date.now(),
+      status,
+      instruction: rec.instruction,
+    }
+    if (typeof rec.stage === 'string') proposal.stage = rec.stage
+    if (inverseOps && inverseOps.length > 0) proposal.inverseOps = inverseOps
+    if (typeof rec.sketchDataUrl === 'string') {
+      proposal.sketchDataUrl = rec.sketchDataUrl
+    }
+    if (Array.isArray(rec.sketchAnnotations)) {
+      proposal.sketchAnnotations = rec.sketchAnnotations as SketchAnnotation[]
+    }
+    if (Array.isArray(rec.referencedEvergreenDocs)) {
+      proposal.referencedEvergreenDocs =
+        rec.referencedEvergreenDocs as EvergreenDocRef[]
+    }
+    out.push(proposal)
+    if (out.length >= MAX_INTENT_HISTORY) break
+  }
+  return out
+}
+
+function defaultSettings(): DriveSettings {
+  return {
+    version: 1,
+    trashRetentionDays: DEFAULT_TRASH_RETENTION_DAYS,
+  }
+}
+
+function sanitizeRoleAssignments(
+  raw: unknown,
+): DriveRoleAssignments | undefined {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return undefined
+  const rec = raw as Record<string, unknown>
+  if (
+    typeof rec.implementation !== 'string' ||
+    typeof rec.exploration !== 'string' ||
+    typeof rec.review !== 'string' ||
+    typeof rec.design !== 'string'
+  ) {
+    return undefined
+  }
+  return {
+    implementation: rec.implementation,
+    exploration: rec.exploration,
+    review: rec.review,
+    design: rec.design,
+  }
+}
+
+function sanitizeSettingsPatch(raw: unknown): Partial<DriveSettings> | null {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null
+  const rec = raw as Record<string, unknown>
+  const out: Partial<DriveSettings> = {}
+  if (
+    typeof rec.trashRetentionDays === 'number' &&
+    Number.isFinite(rec.trashRetentionDays) &&
+    rec.trashRetentionDays >= 1 &&
+    rec.trashRetentionDays <= 3650
+  ) {
+    out.trashRetentionDays = Math.round(rec.trashRetentionDays)
+  }
+  if (typeof rec.defaultModelId === 'string' && rec.defaultModelId.trim()) {
+    out.defaultModelId = rec.defaultModelId.trim()
+  }
+  if (Array.isArray(rec.favoriteModelIds)) {
+    const deduped = Array.from(
+      new Set(
+        rec.favoriteModelIds
+          .filter((item): item is string => typeof item === 'string')
+          .map((item) => item.trim())
+          .filter(Boolean),
+      ),
+    )
+    out.favoriteModelIds = deduped
+  }
+  const roleAssignments = sanitizeRoleAssignments(rec.roleAssignments)
+  if (roleAssignments) {
+    out.roleAssignments = roleAssignments
+  }
+  if (
+    typeof rec.viewMode === 'string' &&
+    VALID_VIEW_MODES.has(rec.viewMode as DriveViewModePreference)
+  ) {
+    out.viewMode = rec.viewMode as DriveViewModePreference
+  }
+  if (
+    typeof rec.sortBy === 'string' &&
+    VALID_SORT_OPTIONS.has(rec.sortBy as DriveSortPreference)
+  ) {
+    out.sortBy = rec.sortBy as DriveSortPreference
+  }
+  return out
+}
+
+export async function readDriveSettingsOnDisk(): Promise<DriveSettings> {
+  try {
+    const raw = await readFile(getSettingsFilePath(), 'utf8')
+    const parsed: unknown = JSON.parse(raw)
+    const sanitized = sanitizeSettingsPatch(parsed)
+    return {
+      ...defaultSettings(),
+      ...sanitized,
+      version: 1,
+    }
+  } catch (error) {
+    if (isEnoent(error)) return defaultSettings()
+    return defaultSettings()
+  }
+}
+
+export async function updateDriveSettingsOnDisk(
+  rawPatch: unknown,
+): Promise<DriveSettings> {
+  const patch = sanitizeSettingsPatch(rawPatch)
+  if (!patch) {
+    fail(400, 'settings object is required')
+  }
+  return await withDriveLock(async () => {
+    const current = await readDriveSettingsOnDisk()
+    const next: DriveSettings = {
+      ...current,
+      ...patch,
+      version: 1,
+    }
+    await writeAtomicText(getSettingsFilePath(), JSON.stringify(next, null, 2))
+    if (patch.trashRetentionDays !== undefined) {
+      const { meta } = await readMetadataWithMigration()
+      if (meta.trash.retentionDays !== next.trashRetentionDays) {
+        meta.trash = {
+          ...meta.trash,
+          retentionDays: next.trashRetentionDays,
+        }
+        await writeMetadata(meta)
+      }
+    }
+    return next
+  })
+}
+
+function defaultTrashState(
+  retentionDays = DEFAULT_TRASH_RETENTION_DAYS,
+): DriveTrashState {
+  return {
+    retentionDays,
+    lastPurgedAt: null,
+  }
+}
+
+function emptyMetadata(
+  retentionDays = DEFAULT_TRASH_RETENTION_DAYS,
+): DriveMetadataFile {
+  return {
+    version: 2,
+    folders: {},
+    documents: {},
+    trash: defaultTrashState(retentionDays),
+  }
+}
+
+function sanitizeTrashState(raw: unknown): DriveTrashState {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+    return defaultTrashState()
+  }
+  const rec = raw as Record<string, unknown>
+  const retentionDays =
+    typeof rec.retentionDays === 'number' &&
+    Number.isFinite(rec.retentionDays) &&
+    rec.retentionDays >= 1
+      ? Math.round(rec.retentionDays)
+      : DEFAULT_TRASH_RETENTION_DAYS
+  const lastPurgedAt =
+    typeof rec.lastPurgedAt === 'string' &&
+    !Number.isNaN(Date.parse(rec.lastPurgedAt))
+      ? rec.lastPurgedAt
+      : null
+  const lastPurgedSlugs = Array.isArray(rec.lastPurgedSlugs)
+    ? rec.lastPurgedSlugs.filter(
+        (slug): slug is string => typeof slug === 'string',
+      )
+    : undefined
+  return {
+    retentionDays,
+    lastPurgedAt,
+    ...(lastPurgedSlugs && lastPurgedSlugs.length > 0
+      ? { lastPurgedSlugs }
+      : {}),
+  }
+}
+
+async function readMetadataWithMigration(): Promise<{
+  meta: DriveMetadataFile
+  migrated: boolean
+}> {
+  try {
+    const raw = await readFile(getMetaFilePath(), 'utf8')
+    const parsed = JSON.parse(raw) as Record<string, unknown>
+    const wasOldVersion = parsed.version !== 2 || !parsed.trash
+
+    const folders: Partial<Record<string, StoredFolderMeta>> = {}
+    if (
+      parsed.folders &&
+      typeof parsed.folders === 'object' &&
+      !Array.isArray(parsed.folders)
+    ) {
+      for (const [key, value] of Object.entries(
+        parsed.folders as Record<string, unknown>,
+      )) {
+        if (!value || typeof value !== 'object' || Array.isArray(value)) {
+          continue
+        }
+        const rec = value as Record<string, unknown>
+        const now = new Date().toISOString()
+        folders[key] = {
+          id:
+            typeof rec.id === 'string' && rec.id.trim()
+              ? rec.id.trim()
+              : deterministicId('folder', key),
+          color: sanitizeColor(rec.color),
+          createdAt: typeof rec.createdAt === 'string' ? rec.createdAt : now,
+          updatedAt: typeof rec.updatedAt === 'string' ? rec.updatedAt : now,
+        }
+      }
+    }
+
+    const documents: Partial<Record<string, StoredDocumentMeta>> = {}
+    if (
+      parsed.documents &&
+      typeof parsed.documents === 'object' &&
+      !Array.isArray(parsed.documents)
+    ) {
+      for (const [key, value] of Object.entries(
+        parsed.documents as Record<string, unknown>,
+      )) {
+        const sanitized = sanitizeMetaPatch(value)
+        if (!sanitized) continue
+        if (!sanitized.id) {
+          sanitized.id = deterministicId('doc', key)
+        }
+        documents[key] = sanitized
+      }
+    }
+
+    return {
+      meta: {
+        version: 2,
+        folders,
+        documents,
+        trash: sanitizeTrashState(parsed.trash),
+      },
+      migrated: wasOldVersion,
+    }
+  } catch (error) {
+    if (isEnoent(error)) return { meta: emptyMetadata(), migrated: false }
+    return { meta: emptyMetadata(), migrated: false }
+  }
 }
 
 async function readMetadata(): Promise<DriveMetadataFile> {
-  try {
-    const raw = await readFile(getMetaFilePath(), 'utf8')
-    const parsed = JSON.parse(raw) as Partial<DriveMetadataFile>
-    return {
-      version: 1,
-      folders:
-        parsed.folders && typeof parsed.folders === 'object'
-          ? { ...parsed.folders }
-          : {},
-      documents:
-        parsed.documents && typeof parsed.documents === 'object'
-          ? { ...parsed.documents }
-          : {},
-    }
-  } catch (error) {
-    if (isEnoent(error)) return emptyMetadata()
-    return emptyMetadata()
-  }
+  const { meta } = await readMetadataWithMigration()
+  return meta
 }
 
 async function writeMetadata(meta: DriveMetadataFile): Promise<void> {
@@ -305,6 +853,57 @@ async function writeMetadata(meta: DriveMetadataFile): Promise<void> {
   } catch (error) {
     await rm(temporary, { force: true })
     throw error
+  }
+}
+
+async function readDocumentHistory(docId: string): Promise<{
+  checkpoints: MarbleCheckpoint[]
+  intentHistory: MarbleOpProposal[]
+}> {
+  try {
+    const raw = await readFile(historyFilePath(docId), 'utf8')
+    const parsed = JSON.parse(raw) as Partial<StoredDocumentHistoryFile>
+    return {
+      checkpoints: sanitizeCheckpoints(parsed.checkpoints) ?? [],
+      intentHistory: sanitizeIntentHistory(parsed.intentHistory) ?? [],
+    }
+  } catch (error) {
+    if (isEnoent(error)) {
+      return { checkpoints: [], intentHistory: [] }
+    }
+    return { checkpoints: [], intentHistory: [] }
+  }
+}
+
+async function writeDocumentHistory(
+  docId: string,
+  slug: string,
+  patch: {
+    checkpoints?: MarbleCheckpoint[]
+    intentHistory?: MarbleOpProposal[]
+  },
+): Promise<void> {
+  if (patch.checkpoints === undefined && patch.intentHistory === undefined) {
+    return
+  }
+  const existing = await readDocumentHistory(docId)
+  const record: StoredDocumentHistoryFile = {
+    version: 1,
+    docId,
+    slug,
+    updatedAt: new Date().toISOString(),
+    checkpoints: patch.checkpoints ?? existing.checkpoints,
+    intentHistory: patch.intentHistory ?? existing.intentHistory,
+  }
+  await writeAtomicText(historyFilePath(docId), JSON.stringify(record, null, 2))
+}
+
+async function deleteDocumentHistory(docId: string | undefined): Promise<void> {
+  if (!docId) return
+  try {
+    await rm(historyFilePath(docId), { force: true })
+  } catch {
+    // Ignore invalid ids or missing files during cleanup.
   }
 }
 
@@ -346,10 +945,7 @@ export function byteSizeOf(source: string): number {
   return new TextEncoder().encode(source).byteLength
 }
 
-export function inferCategory(
-  source: string,
-  slug: string,
-): MarbleAppCategory {
+export function inferCategory(source: string, slug: string): MarbleAppCategory {
   if (
     /data-marble-notes-state\s*=/.test(source) ||
     /id=["']notebook-shell["']/.test(source)
@@ -399,12 +995,16 @@ function sanitizeMetaPatch(raw: unknown): StoredDocumentMeta | undefined {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return undefined
   const record = raw as Record<string, unknown>
   const out: StoredDocumentMeta = {}
-  if (typeof record.id === 'string' && record.id.trim()) out.id = record.id.trim()
+  if (typeof record.id === 'string' && record.id.trim()) {
+    out.id = record.id.trim()
+  }
   if (typeof record.slug === 'string' && record.slug.trim()) {
     out.slug = record.slug.trim()
   }
   if (typeof record.title === 'string') out.title = record.title
-  if (typeof record.description === 'string') out.description = record.description
+  if (typeof record.description === 'string') {
+    out.description = record.description
+  }
   const category = sanitizeCategory(record.category)
   if (category) out.category = category
   if (typeof record.isEvergreen === 'boolean') {
@@ -416,20 +1016,19 @@ function sanitizeMetaPatch(raw: unknown): StoredDocumentMeta | undefined {
   }
   if (typeof record.createdAt === 'string') out.createdAt = record.createdAt
   if (typeof record.updatedAt === 'string') out.updatedAt = record.updatedAt
-  if (record.createdBy && typeof record.createdBy === 'object') {
-    out.createdBy = record.createdBy as MarbleDocumentFile['createdBy']
-  }
-  if (record.lastEditedBy && typeof record.lastEditedBy === 'object') {
-    out.lastEditedBy = record.lastEditedBy as MarbleDocumentFile['lastEditedBy']
-  }
+  const createdBy = sanitizeAuthor(record.createdBy)
+  if (createdBy) out.createdBy = createdBy
+  const lastEditedBy = sanitizeAuthor(record.lastEditedBy)
+  if (lastEditedBy) out.lastEditedBy = lastEditedBy
   if (typeof record.starred === 'boolean') out.starred = record.starred
   if (typeof record.pinned === 'boolean') out.pinned = record.pinned
   if (Array.isArray(record.tags)) {
-    out.tags = record.tags.filter((item): item is string => typeof item === 'string')
+    out.tags = record.tags.filter(
+      (item): item is string => typeof item === 'string',
+    )
   }
-  if (record.share && typeof record.share === 'object') {
-    out.share = record.share as ShareConfig
-  }
+  const share = sanitizeShareConfig(record.share, out.slug)
+  if (share) out.share = share
   return out
 }
 
@@ -498,7 +1097,10 @@ export async function findDocumentBySlug(
   return files.find((item) => item.slug === validSlug) ?? null
 }
 
-async function writeAtomicText(fullPath: string, content: string): Promise<void> {
+async function writeAtomicText(
+  fullPath: string,
+  content: string,
+): Promise<void> {
   await mkdir(path.dirname(fullPath), { recursive: true })
   const temporary = `${fullPath}.${randomBytes(8).toString('hex')}.tmp`
   try {
@@ -530,6 +1132,8 @@ export async function saveDocumentToDisk(input: {
   source: string
   folderPath?: string | null
   meta?: unknown
+  checkpoints?: unknown
+  intentHistory?: unknown
 }): Promise<DriveDocumentLocation> {
   return await withDriveLock(async () => {
     const validSlug = assertSlug(input.slug)
@@ -546,10 +1150,12 @@ export async function saveDocumentToDisk(input: {
     const patch = sanitizeMetaPatch(input.meta)
     const previous = metadata.documents[target.relPath] ?? {}
     const now = new Date().toISOString()
+    const docId =
+      patch?.id ?? previous.id ?? deterministicId('doc', target.relPath)
     metadata.documents[target.relPath] = {
       ...previous,
       ...patch,
-      id: patch?.id ?? previous.id ?? deterministicId('doc', target.relPath),
+      id: docId,
       slug: validSlug,
       title: patch?.title ?? previous.title ?? titleOf(input.source, validSlug),
       category:
@@ -560,6 +1166,16 @@ export async function saveDocumentToDisk(input: {
       updatedAt: patch?.updatedAt ?? now,
     }
     await writeMetadata(metadata)
+
+    const checkpoints = sanitizeCheckpoints(input.checkpoints)
+    const intentHistory = sanitizeIntentHistory(input.intentHistory)
+    if (checkpoints !== undefined || intentHistory !== undefined) {
+      await writeDocumentHistory(docId, validSlug, {
+        checkpoints,
+        intentHistory,
+      })
+    }
+
     return target
   })
 }
@@ -567,27 +1183,45 @@ export async function saveDocumentToDisk(input: {
 export async function updateDocumentMetaOnDisk(input: {
   slug: string
   folderPath?: string | null
-  meta: unknown
+  meta?: unknown
+  checkpoints?: unknown
+  intentHistory?: unknown
 }): Promise<{ ok: true; slug: string; relPath: string }> {
   return await withDriveLock(async () => {
     const validSlug = assertSlug(input.slug)
     const patch = sanitizeMetaPatch(input.meta)
-    if (!patch) {
-      fail(400, 'meta object is required')
+    const checkpoints = sanitizeCheckpoints(input.checkpoints)
+    const intentHistory = sanitizeIntentHistory(input.intentHistory)
+    if (!patch && checkpoints === undefined && intentHistory === undefined) {
+      fail(400, 'meta, checkpoints, or intentHistory is required')
     }
     const located =
       (await findDocumentBySlug(validSlug, input.folderPath)) ??
       resolveDocumentLocation(validSlug, input.folderPath ?? '')
     const metadata = await readMetadata()
     const previous = metadata.documents[located.relPath] ?? {}
-    metadata.documents[located.relPath] = {
-      ...previous,
-      ...patch,
-      id: patch.id ?? previous.id ?? deterministicId('doc', located.relPath),
-      slug: validSlug,
-      updatedAt: patch.updatedAt ?? new Date().toISOString(),
+    const docId =
+      patch?.id ?? previous.id ?? deterministicId('doc', located.relPath)
+
+    if (patch || !metadata.documents[located.relPath]) {
+      metadata.documents[located.relPath] = {
+        ...previous,
+        ...patch,
+        id: docId,
+        slug: validSlug,
+        updatedAt:
+          patch?.updatedAt ?? previous.updatedAt ?? new Date().toISOString(),
+      }
+      await writeMetadata(metadata)
     }
-    await writeMetadata(metadata)
+
+    if (checkpoints !== undefined || intentHistory !== undefined) {
+      await writeDocumentHistory(docId, validSlug, {
+        checkpoints,
+        intentHistory,
+      })
+    }
+
     return { ok: true, slug: validSlug, relPath: located.relPath }
   })
 }
@@ -936,14 +1570,33 @@ export async function readTrashMeta(
       typeof parsed.trashedAt === 'string' &&
       !Number.isNaN(Date.parse(parsed.trashedAt))
     ) {
+      const sanitizedMeta = sanitizeMetaPatch(parsed.meta)
+      const retentionDays =
+        typeof parsed.retentionDays === 'number' &&
+        Number.isFinite(parsed.retentionDays) &&
+        parsed.retentionDays > 0
+          ? Math.round(parsed.retentionDays)
+          : undefined
+      const purgeAt =
+        typeof parsed.purgeAt === 'string' &&
+        !Number.isNaN(Date.parse(parsed.purgeAt))
+          ? parsed.purgeAt
+          : undefined
       return {
+        version: typeof parsed.version === 'number' ? parsed.version : 1,
         slug: typeof parsed.slug === 'string' ? parsed.slug : slug,
+        docId:
+          typeof parsed.docId === 'string' && parsed.docId.trim()
+            ? parsed.docId.trim()
+            : sanitizedMeta?.id,
         trashedAt: parsed.trashedAt,
+        purgeAt,
+        retentionDays,
         originalFolderPath:
           typeof parsed.originalFolderPath === 'string'
             ? parsed.originalFolderPath
             : undefined,
-        meta: sanitizeMetaPatch(parsed.meta),
+        meta: sanitizedMeta,
       }
     }
     return null
@@ -953,21 +1606,45 @@ export async function readTrashMeta(
   }
 }
 
-export async function purgeExpiredTrashOnDisk(
-  retentionDays = DEFAULT_TRASH_RETENTION_DAYS,
-): Promise<string[]> {
+async function purgeExpiredTrashUnlocked(options?: {
+  retentionDays?: number
+  recordTimestamp?: boolean
+}): Promise<{ purged: string[]; lastPurgedAt: string | null }> {
+  const settings = await readDriveSettingsOnDisk()
+  const explicitRetention =
+    options?.retentionDays !== undefined &&
+    Number.isFinite(options.retentionDays) &&
+    options.retentionDays > 0
+      ? options.retentionDays
+      : undefined
+  const effectiveRetention = explicitRetention ?? settings.trashRetentionDays
+
   const trashDir = getTrashDir()
   let names: string[]
   try {
     names = await readdir(trashDir)
   } catch (error) {
-    if (isEnoent(error)) return []
+    if (isEnoent(error)) {
+      if (options?.recordTimestamp) {
+        const nowIso = new Date().toISOString()
+        const metadata = await readMetadata()
+        metadata.trash = {
+          ...metadata.trash,
+          retentionDays: effectiveRetention,
+          lastPurgedAt: nowIso,
+        }
+        await writeMetadata(metadata)
+        return { purged: [], lastPurgedAt: nowIso }
+      }
+      return { purged: [], lastPurgedAt: null }
+    }
     throw error
   }
 
   const now = Date.now()
-  const cutoffMs = retentionDays * DAY_MS
+  const cutoffMs = effectiveRetention * DAY_MS
   const purged: string[] = []
+  const purgedDocIds: string[] = []
 
   for (const fileName of names) {
     if (!fileName.endsWith('.mrbl')) continue
@@ -985,27 +1662,71 @@ export async function purgeExpiredTrashOnDisk(
         throw error
       }
     }
-    if (now - trashedMs >= cutoffMs) {
+    const expiresMs =
+      explicitRetention === undefined && meta?.purgeAt
+        ? Date.parse(meta.purgeAt)
+        : trashedMs + cutoffMs
+    if (now >= expiresMs) {
       await Promise.all([
         rm(full, { force: true }),
         rm(trashMetaFilePath(slug), { force: true }),
       ])
       purged.push(slug)
+      const docId = meta?.docId ?? meta?.meta?.id
+      if (docId) purgedDocIds.push(docId)
     }
   }
 
-  return purged
+  for (const docId of purgedDocIds) {
+    await deleteDocumentHistory(docId)
+  }
+
+  const hasTrashFiles = names.some((name) => name.endsWith('.mrbl'))
+  if (purged.length > 0 || options?.recordTimestamp || hasTrashFiles) {
+    const nowIso = new Date(now).toISOString()
+    const metadata = await readMetadata()
+    metadata.trash = {
+      retentionDays: effectiveRetention,
+      lastPurgedAt: nowIso,
+      ...(purged.length > 0
+        ? { lastPurgedSlugs: purged }
+        : metadata.trash.lastPurgedSlugs
+          ? { lastPurgedSlugs: metadata.trash.lastPurgedSlugs }
+          : {}),
+    }
+    await writeMetadata(metadata)
+    return { purged, lastPurgedAt: nowIso }
+  }
+
+  return { purged, lastPurgedAt: null }
+}
+
+export async function purgeExpiredTrashOnDisk(
+  retentionDays?: number,
+  options?: { recordTimestamp?: boolean },
+): Promise<string[]> {
+  return await withDriveLock(async () => {
+    const result = await purgeExpiredTrashUnlocked({
+      retentionDays,
+      recordTimestamp: options?.recordTimestamp,
+    })
+    return result.purged
+  })
 }
 
 export async function trashDocumentOnDisk(input: {
   slug: string
   folderPath?: string | null
   trashedAt?: string
+  retentionDays?: number
   meta?: unknown
+  checkpoints?: unknown
+  intentHistory?: unknown
 }): Promise<{
   ok: true
   slug: string
   trashedAt: string
+  purgeAt: string
   existedOnDisk: boolean
   retentionDays: number
 }> {
@@ -1015,6 +1736,17 @@ export async function trashDocumentOnDisk(input: {
       input.trashedAt && !Number.isNaN(Date.parse(input.trashedAt))
         ? input.trashedAt
         : new Date().toISOString()
+    const settings = await readDriveSettingsOnDisk()
+    const retentionDays =
+      typeof input.retentionDays === 'number' &&
+      Number.isFinite(input.retentionDays) &&
+      input.retentionDays > 0
+        ? Math.round(input.retentionDays)
+        : settings.trashRetentionDays
+    const purgeAt = new Date(
+      Date.parse(trashedAt) + retentionDays * DAY_MS,
+    ).toISOString()
+
     await mkdir(getTrashDir(), { recursive: true })
 
     const located =
@@ -1037,16 +1769,35 @@ export async function trashDocumentOnDisk(input: {
       await writeMetadata(metadata)
     }
 
+    const patch = sanitizeMetaPatch(input.meta)
+    const docId =
+      patch?.id ??
+      existingDocMeta?.id ??
+      deterministicId('doc', located.relPath)
     const mergedMeta: StoredDocumentMeta = {
       ...existingDocMeta,
-      ...sanitizeMetaPatch(input.meta),
+      ...patch,
+      id: docId,
       slug: validSlug,
+    }
+
+    const checkpoints = sanitizeCheckpoints(input.checkpoints)
+    const intentHistory = sanitizeIntentHistory(input.intentHistory)
+    if (checkpoints !== undefined || intentHistory !== undefined) {
+      await writeDocumentHistory(docId, validSlug, {
+        checkpoints,
+        intentHistory,
+      })
     }
 
     if (existedOnDisk) {
       const record: TrashMetaRecord = {
+        version: 2,
         slug: validSlug,
+        docId,
         trashedAt,
+        purgeAt,
+        retentionDays,
         originalFolderPath: located.folderPath,
         meta: mergedMeta,
       }
@@ -1060,8 +1811,9 @@ export async function trashDocumentOnDisk(input: {
       ok: true,
       slug: validSlug,
       trashedAt,
+      purgeAt,
       existedOnDisk,
-      retentionDays: DEFAULT_TRASH_RETENTION_DAYS,
+      retentionDays,
     }
   })
 }
@@ -1103,10 +1855,14 @@ export async function restoreDocumentOnDisk(input: {
     }
     await rm(trashMetaFilePath(validSlug), { force: true })
 
-    if (restoredOnDisk && trashMeta?.meta) {
+    if (restoredOnDisk && (trashMeta?.meta || trashMeta?.docId)) {
       const metadata = await readMetadata()
       metadata.documents[dst.relPath] = {
         ...trashMeta.meta,
+        id:
+          trashMeta.meta?.id ??
+          trashMeta.docId ??
+          deterministicId('doc', dst.relPath),
         slug: validSlug,
       }
       await writeMetadata(metadata)
@@ -1128,6 +1884,16 @@ export async function deleteDocumentPermanentlyOnDisk(input: {
   return await withDriveLock(async () => {
     const validSlug = assertSlug(input.slug)
     const located = await findDocumentBySlug(validSlug, input.folderPath)
+    const trashMeta = await readTrashMeta(validSlug)
+    const metadata = await readMetadata()
+
+    const docIdsToDelete = new Set<string>()
+    if (trashMeta?.docId) docIdsToDelete.add(trashMeta.docId)
+    if (trashMeta?.meta?.id) docIdsToDelete.add(trashMeta.meta.id)
+    if (located && metadata.documents[located.relPath]?.id) {
+      docIdsToDelete.add(metadata.documents[located.relPath]!.id!)
+    }
+
     const targets = [
       rm(trashFilePath(validSlug), { force: true }),
       rm(trashMetaFilePath(validSlug), { force: true }),
@@ -1137,16 +1903,19 @@ export async function deleteDocumentPermanentlyOnDisk(input: {
     }
     await Promise.all(targets)
 
-    const metadata = await readMetadata()
     let changed = false
     if (located && metadata.documents[located.relPath]) {
       delete metadata.documents[located.relPath]
       changed = true
     }
     for (const [key, value] of Object.entries(metadata.documents)) {
-      if (value?.slug === validSlug && key.endsWith(`/${validSlug}.mrbl`)) {
+      if (
+        value?.slug === validSlug &&
+        (key === `${validSlug}.mrbl` || key.endsWith(`/${validSlug}.mrbl`))
+      ) {
         const candidate = path.resolve(getDriveDir(), ...key.split('/'))
         if (!(await pathExists(candidate))) {
+          if (value.id) docIdsToDelete.add(value.id)
           delete metadata.documents[key]
           changed = true
         }
@@ -1154,6 +1923,10 @@ export async function deleteDocumentPermanentlyOnDisk(input: {
     }
     if (changed) {
       await writeMetadata(metadata)
+    }
+
+    for (const docId of docIdsToDelete) {
+      await deleteDocumentHistory(docId)
     }
 
     return { ok: true, slug: validSlug, deleted: true }
@@ -1173,31 +1946,69 @@ export async function emptyTrashOnDisk(): Promise<{
       if (isEnoent(error)) return { ok: true, deletedCount: 0 }
       throw error
     }
+
+    const docIdsToDelete = new Set<string>()
+    const purgedSlugs: string[] = []
+    for (const name of names) {
+      if (!name.endsWith('.mrbl')) continue
+      const slug = name.slice(0, -'.mrbl'.length)
+      if (!SLUG_PATTERN.test(slug) || slug.includes('..')) continue
+      const meta = await readTrashMeta(slug)
+      const docId = meta?.docId ?? meta?.meta?.id
+      if (docId) docIdsToDelete.add(docId)
+      purgedSlugs.push(slug)
+    }
+
     let deletedCount = 0
     for (const name of names) {
       if (!name.endsWith('.mrbl') && !name.endsWith('.meta.json')) continue
       await rm(path.resolve(trashDir, name), { force: true })
       if (name.endsWith('.mrbl')) deletedCount += 1
     }
+
+    for (const docId of docIdsToDelete) {
+      await deleteDocumentHistory(docId)
+    }
+
+    if (deletedCount > 0) {
+      const metadata = await readMetadata()
+      metadata.trash = {
+        ...metadata.trash,
+        lastPurgedAt: new Date().toISOString(),
+        lastPurgedSlugs: purgedSlugs,
+      }
+      await writeMetadata(metadata)
+    }
+
     return { ok: true, deletedCount }
   })
 }
 
 export async function loadDriveWorkspace(
   nodeCountOf: (source: string) => number,
-  retentionDays = DEFAULT_TRASH_RETENTION_DAYS,
+  retentionDays?: number,
 ): Promise<{
   folders: DriveFolder[]
   docs: MarbleDocumentFile[]
   purged: string[]
+  settings: DriveSettings
+  trash: DriveTrashState
 }> {
-  const purged = await purgeExpiredTrashOnDisk(retentionDays)
-  const metadata = await readMetadata()
+  const settings = await readDriveSettingsOnDisk()
+  const effectiveRetention =
+    retentionDays !== undefined &&
+    Number.isFinite(retentionDays) &&
+    retentionDays > 0
+      ? retentionDays
+      : settings.trashRetentionDays
+
+  const purged = await purgeExpiredTrashOnDisk(effectiveRetention)
+  const { meta: metadata, migrated } = await readMetadataWithMigration()
   const { directories, files } = await scanDriveTree()
 
   const folderByPath = new Map<string, DriveFolder>()
   const folders: DriveFolder[] = []
-  let metaDirty = false
+  let metaDirty = migrated
 
   for (const dir of directories) {
     const info = await stat(dir.fullPath)
@@ -1264,6 +2075,7 @@ export async function loadDriveWorkspace(
       const id = stored?.id ?? deterministicId('doc', file.relPath)
       const category = stored?.category ?? inferCategory(source, file.slug)
       const title = stored?.title ?? titleOf(source, file.slug)
+      const history = await readDocumentHistory(id)
 
       return {
         id,
@@ -1291,8 +2103,8 @@ export async function loadDriveWorkspace(
         folderId: folder ? folder.id : null,
         trashedAt: null,
         share: stored?.share ?? defaultShareConfig(file.slug),
-        checkpoints: [],
-        intentHistory: [],
+        checkpoints: history.checkpoints,
+        intentHistory: history.intentHistory,
       }
     }),
   )
@@ -1315,8 +2127,13 @@ export async function loadDriveWorkspace(
         ? folderByPath.get(normalizeFolderPath(trashMeta.originalFolderPath))
         : undefined
       const trashedAt = trashMeta?.trashedAt ?? info.mtime.toISOString()
+      const id =
+        stored?.id ??
+        trashMeta?.docId ??
+        deterministicId('doc', `trash/${slug}`)
+      const history = await readDocumentHistory(id)
       trashedDocs.push({
-        id: stored?.id ?? deterministicId('doc', `trash/${slug}`),
+        id,
         slug,
         fileName,
         title: stored?.title ?? titleOf(source, slug),
@@ -1341,8 +2158,8 @@ export async function loadDriveWorkspace(
         folderId: origFolder ? origFolder.id : null,
         trashedAt,
         share: stored?.share ?? defaultShareConfig(slug),
-        checkpoints: [],
-        intentHistory: [],
+        checkpoints: history.checkpoints,
+        intentHistory: history.intentHistory,
       })
     }
   } catch (error) {
@@ -1351,12 +2168,17 @@ export async function loadDriveWorkspace(
 
   if (metaDirty) {
     await withDriveLock(async () => {
-      const latest = await readMetadata()
+      const { meta: latest } = await readMetadataWithMigration()
       for (const [key, value] of Object.entries(metadata.folders)) {
         if (!latest.folders[key]) latest.folders[key] = value
       }
       for (const [key, value] of Object.entries(metadata.documents)) {
         if (!latest.documents[key]) latest.documents[key] = value
+      }
+      latest.trash = {
+        ...metadata.trash,
+        ...latest.trash,
+        retentionDays: effectiveRetention,
       }
       await writeMetadata(latest)
     })
@@ -1373,12 +2195,20 @@ export async function loadDriveWorkspace(
     folders,
     docs: [...activeDocs, ...trashedDocs],
     purged,
+    settings,
+    trash: {
+      ...metadata.trash,
+      retentionDays: effectiveRetention,
+    },
   }
 }
 
 export async function listDriveSummary(
   nodeCountOf: (source: string) => number,
-  doctorHealth: (fileName: string, source: string) => {
+  doctorHealth: (
+    fileName: string,
+    source: string,
+  ) => {
     errors: number
     warnings: number
     findings: Array<{ level: string; line: number; message: string }>
