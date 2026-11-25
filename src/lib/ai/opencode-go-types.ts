@@ -52,6 +52,7 @@ export interface OpenCodeGoModelOption {
   reasoning: boolean
   reasoningEfforts?: string[]
   featured?: boolean
+  isFree?: boolean
   apiProtocol: OpenCodeGoApiProtocol
   baseUrl: string
   monthlyUsage?: {
@@ -112,6 +113,44 @@ export function fromXDriveOpenCodeGoModelId(modelId: string): string {
   return modelId.startsWith(OPENCODE_GO_MODEL_PREFIX)
     ? modelId.slice(OPENCODE_GO_MODEL_PREFIX.length)
     : modelId
+}
+
+export function isOpenCodeModelId(modelId: string): boolean {
+  return (
+    modelId.startsWith(OPENCODE_GO_MODEL_PREFIX) ||
+    modelId.startsWith('opencode/')
+  )
+}
+
+export function stripOpenCodeFreeDisplaySuffix(name: string): string {
+  const trimmed = name.trim()
+  if (!trimmed) return trimmed
+  const stripped = trimmed
+    .replace(/\s*(?:\(\s*free\s*\)|\[\s*free\s*\]|free)$/i, '')
+    .trim()
+  return stripped || trimmed
+}
+
+export function formatOpenCodeModelDisplayName(
+  acpModelId: string,
+  rawName?: string | null,
+  isFree = false,
+): string {
+  let display = rawName?.trim() || acpModelId.trim()
+  const slashIdx = acpModelId.indexOf('/')
+  if (slashIdx > 0) {
+    const providerPrefix = acpModelId.slice(0, slashIdx + 1)
+    if (
+      display.toLowerCase().startsWith(providerPrefix.toLowerCase()) &&
+      display.length > providerPrefix.length
+    ) {
+      display = display.slice(providerPrefix.length).trim()
+    }
+  }
+  if (isFree) {
+    display = stripOpenCodeFreeDisplaySuffix(display)
+  }
+  return display || acpModelId.trim()
 }
 
 export function formatContextWindow(tokens: number): string {

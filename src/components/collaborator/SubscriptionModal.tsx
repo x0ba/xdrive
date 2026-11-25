@@ -16,12 +16,18 @@ import type {
   AntigravityAuthMethodId,
   AntigravityRuntimeStatus,
 } from '#/lib/ai/antigravity-types'
-import { DEFAULT_OPENCODE_GO_MODELS } from '#/lib/ai/opencode-go-types'
+import {
+  DEFAULT_OPENCODE_GO_MODELS,
+  stripOpenCodeFreeDisplaySuffix,
+} from '#/lib/ai/opencode-go-types'
 import type {
   OpenCodeGoRuntimeStatus,
   OpenCodeGoUsageMeter,
 } from '#/lib/ai/opencode-go-types'
-import { openCodeGoModelsToSpecs } from '#/lib/ai/opencode-go-client'
+import {
+  hasOpenCodeFreeModels,
+  openCodeGoModelsToSpecs,
+} from '#/lib/ai/opencode-go-client'
 import { Switch } from '#/components/ui/switch'
 import { WorkspaceLink } from '#/components/routing/WorkspaceLink'
 import { settingsProviderHref } from '#/lib/routing'
@@ -253,6 +259,7 @@ export function connectedModelsFromSubscriptions(
         modelName: item.name,
         rateLimited: subscription.status === 'rate_limited',
         supportsVisionSketch: item.supportsVisionSketch,
+        isFree: item.isFree,
       })),
     )
 }
@@ -440,8 +447,24 @@ export function SubscriptionModal({
   const isOpenCodeGoConnected = openCodeGoStatus
     ? openCodeGoStatus.authenticated && openCodeGoStatus.entitled
     : active.connected
+  const openCodeHasFreeModels = openCodeGoStatus
+    ? hasOpenCodeFreeModels(openCodeGoStatus)
+    : false
+  const isOpenCodeUsableNow = isOpenCodeGoConnected || openCodeHasFreeModels
   const openCodeBinaryAvailable = openCodeGoStatus?.binaryAvailable ?? false
   const openCodeIsHttpFallback = openCodeGoStatus?.transport === 'http-fallback'
+  const dedupedActiveModels = active.models.filter(
+    (item, index, list) =>
+      list.findIndex(
+        (other) => other.id.toLowerCase() === item.id.toLowerCase(),
+      ) === index,
+  )
+  const standardActiveModels = dedupedActiveModels.filter(
+    (item) => !item.isFree,
+  )
+  const freeActiveModels = dedupedActiveModels.filter((item) =>
+    Boolean(item.isFree),
+  )
   const openCodeGoUsageRows: Array<[string, OpenCodeGoUsageMeter]> =
     openCodeGoStatus?.usage
       ? (
@@ -830,7 +853,7 @@ export function SubscriptionModal({
                   <span
                     className={cn(
                       'inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10.5px] font-medium',
-                      isOpenCodeGoConnected && !openCodeGoStatus?.rateLimited
+                      isOpenCodeUsableNow && !openCodeGoStatus?.rateLimited
                         ? 'bg-[var(--xd-commit-soft)] text-[var(--xd-commit)]'
                         : openCodeGoStatus?.rateLimited
                           ? 'bg-[var(--xd-sketch-soft)] text-[var(--xd-sketch)]'
@@ -852,6 +875,11 @@ export function SubscriptionModal({
                               ? 'Connected · OPENCODE_API_KEY fallback'
                               : 'Connected · OpenCode ACP'}
                         </span>
+                      </>
+                    ) : openCodeHasFreeModels ? (
+                      <>
+                        <CheckCircle2 className="size-3" />
+                        <span>Free models · OpenCode ACP</span>
                       </>
                     ) : openCodeGoStatus?.authenticated &&
                       !openCodeGoStatus.entitled ? (
@@ -1014,7 +1042,9 @@ export function SubscriptionModal({
                 <div className="space-y-2 rounded border border-[var(--xd-border)] bg-[var(--xd-rail)] p-3 text-[11.5px]">
                   <div className="flex flex-wrap items-center justify-between gap-2">
                     <p className="font-medium text-[var(--xd-ink)]">
-                      Sign in via OpenCode CLI
+                      {openCodeHasFreeModels
+                        ? 'Free models ready — sign in for OpenCode Go'
+                        : 'Sign in via OpenCode CLI'}
                     </p>
                     {onRefreshOpenCodeGo && (
                       <button
@@ -1034,16 +1064,34 @@ export function SubscriptionModal({
                     )}
                   </div>
                   <p className="text-[var(--xd-ink-secondary)]">
-                    OpenCode CLI was detected, but no active OpenCode Go login
-                    was found. Run the command below in your terminal, choose{' '}
-                    <span className="font-medium text-[var(--xd-ink)]">
-                      OpenCode Go
-                    </span>
-                    , then click{' '}
-                    <span className="font-medium text-[var(--xd-ink)]">
-                      Check login
-                    </span>
-                    :
+                    {openCodeHasFreeModels ? (
+                      <>
+                        OpenCode free models are usable right away with no
+                        login. To also unlock{' '}
+                        <span className="font-medium text-[var(--xd-ink)]">
+                          OpenCode Go
+                        </span>{' '}
+                        models, run the command below and click{' '}
+                        <span className="font-medium text-[var(--xd-ink)]">
+                          Check login
+                        </span>
+                        :
+                      </>
+                    ) : (
+                      <>
+                        OpenCode CLI was detected, but no active OpenCode Go
+                        login was found. Run the command below in your terminal,
+                        choose{' '}
+                        <span className="font-medium text-[var(--xd-ink)]">
+                          OpenCode Go
+                        </span>
+                        , then click{' '}
+                        <span className="font-medium text-[var(--xd-ink)]">
+                          Check login
+                        </span>
+                        :
+                      </>
+                    )}
                   </p>
                   <pre className="xd-mono overflow-x-auto rounded border border-[var(--xd-border)] bg-[var(--xd-canvas)] px-2.5 py-1.5 text-[11px] text-[var(--xd-ink)]">
                     opencode auth login
@@ -1184,40 +1232,87 @@ export function SubscriptionModal({
           )}
 
           {/* Models list */}
-          <div>
-            <h4 className="mb-1.5 text-[11.5px] font-medium text-[var(--xd-ink-muted)]">
-              {isAntigravity && isAuthenticated
-                ? `Plan models from Antigravity ACP (${active.models.length})`
-                : isOpenCodeGo &&
-                    isOpenCodeGoConnected &&
-                    !openCodeIsHttpFallback
-                  ? `Models from OpenCode ACP (${active.models.length})`
-                  : isOpenCodeGo
-                    ? `OpenCode Go catalog (${active.models.length})`
-                    : 'Available models'}
-            </h4>
-            <ul className="divide-y divide-[var(--xd-border)] rounded border border-[var(--xd-border)]">
-              {active.models.map((item) => (
-                <li
-                  key={item.id}
-                  className="flex items-center justify-between gap-2 px-2.5 py-1.5 text-[12px]"
-                >
-                  <div className="min-w-0">
-                    <span className="block truncate font-medium">
-                      {item.name}
-                    </span>
-                    {item.recommendedFor && (
-                      <span className="block truncate text-[10.5px] text-[var(--xd-ink-muted)]">
-                        {item.recommendedFor}
+          <div className="space-y-3">
+            {standardActiveModels.length > 0 && (
+              <div>
+                <h4 className="mb-1.5 text-[11.5px] font-medium text-[var(--xd-ink-muted)]">
+                  {isAntigravity && isAuthenticated
+                    ? `Plan models from Antigravity ACP (${standardActiveModels.length})`
+                    : isOpenCodeGo &&
+                        isOpenCodeGoConnected &&
+                        !openCodeIsHttpFallback
+                      ? `OpenCode Go models (${standardActiveModels.length})`
+                      : isOpenCodeGo
+                        ? `OpenCode Go catalog (${standardActiveModels.length})`
+                        : 'Available models'}
+                </h4>
+                <ul className="divide-y divide-[var(--xd-border)] rounded border border-[var(--xd-border)]">
+                  {standardActiveModels.map((item) => (
+                    <li
+                      key={item.id}
+                      className="flex items-center justify-between gap-2 px-2.5 py-1.5 text-[12px]"
+                    >
+                      <div className="min-w-0">
+                        <span className="block truncate font-medium">
+                          {item.name}
+                        </span>
+                        {item.recommendedFor && (
+                          <span className="block truncate text-[10.5px] text-[var(--xd-ink-muted)]">
+                            {item.recommendedFor}
+                          </span>
+                        )}
+                      </div>
+                      <span className="xd-mono shrink-0 text-[11px] text-[var(--xd-ink-muted)]">
+                        {item.contextWindow} · {item.role}
                       </span>
-                    )}
-                  </div>
-                  <span className="xd-mono shrink-0 text-[11px] text-[var(--xd-ink-muted)]">
-                    {item.contextWindow} · {item.role}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+
+            {freeActiveModels.length > 0 && (
+              <div data-settings-models-section="free">
+                <div className="mb-1.5 flex items-center gap-2">
+                  <h4 className="text-[11.5px] font-medium text-[var(--xd-ink-muted)]">
+                    Free ({freeActiveModels.length})
+                  </h4>
+                  <span className="rounded border border-[var(--xd-commit)]/35 bg-[var(--xd-commit-soft)] px-1.5 py-px text-[10px] leading-none font-medium text-[var(--xd-commit)]">
+                    No login required
                   </span>
-                </li>
-              ))}
-            </ul>
+                </div>
+                <ul className="divide-y divide-[var(--xd-border)] rounded border border-[var(--xd-border)]">
+                  {freeActiveModels.map((item) => (
+                    <li
+                      key={item.id}
+                      className="flex items-center justify-between gap-2 px-2.5 py-1.5 text-[12px]"
+                    >
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-1.5">
+                          <span className="truncate font-medium">
+                            {stripOpenCodeFreeDisplaySuffix(item.name)}
+                          </span>
+                          <span
+                            data-model-free-badge="true"
+                            className="shrink-0 rounded border border-[var(--xd-commit)]/35 bg-[var(--xd-commit-soft)] px-1 py-px text-[10px] leading-none font-medium text-[var(--xd-commit)]"
+                          >
+                            Free
+                          </span>
+                        </div>
+                        {item.recommendedFor && (
+                          <span className="block truncate text-[10.5px] text-[var(--xd-ink-muted)]">
+                            {item.recommendedFor}
+                          </span>
+                        )}
+                      </div>
+                      <span className="xd-mono shrink-0 text-[11px] text-[var(--xd-ink-muted)]">
+                        {item.contextWindow} · {item.role}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
           </div>
         </div>
       </div>

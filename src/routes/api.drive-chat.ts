@@ -12,7 +12,10 @@ import {
   runOpenCodePrompt,
 } from '#/lib/ai/opencode-acp.server'
 import { OpenCodeGoError } from '#/lib/ai/opencode-go.server'
-import { toXDriveOpenCodeGoModelId } from '#/lib/ai/opencode-go-types'
+import {
+  isOpenCodeModelId,
+  toXDriveOpenCodeGoModelId,
+} from '#/lib/ai/opencode-go-types'
 import {
   buildDriveChatSystemPrompt,
   buildSingleTurnPromptForAcp,
@@ -27,7 +30,7 @@ import type { AIProviderId } from '#/lib/types'
 function resolveProviderId(body: Partial<DriveChatApiRequest>): AIProviderId {
   if (body.providerId) return body.providerId
   const modelId = body.modelId ?? ''
-  if (modelId.startsWith('opencode-go/')) return 'opencode-go'
+  if (isOpenCodeModelId(modelId)) return 'opencode-go'
   if (modelId.startsWith('antigravity/')) return 'antigravity'
   if (modelId.startsWith('claude')) return 'claude'
   if (modelId.includes('gpt') || modelId.startsWith('o4')) {

@@ -1,7 +1,57 @@
 import type { Meta, StoryObj } from '@storybook/tanstack-react'
 import { expect, within } from 'storybook/test'
 import { DEFAULT_OPENCODE_GO_MODELS } from '#/lib/ai/opencode-go-types'
-import { SubscriptionModal } from './SubscriptionModal'
+import type { OpenCodeGoModelOption } from '#/lib/ai/opencode-go-types'
+import { applyOpenCodeGoStatusToSubscriptions } from '#/lib/ai/opencode-go-client'
+import { DEFAULT_SUBSCRIPTIONS, SubscriptionModal } from './SubscriptionModal'
+
+const DEMO_OPENCODE_FREE_MODELS: OpenCodeGoModelOption[] = [
+  {
+    id: 'opencode/tidepool-alpha-free',
+    acpModelId: 'opencode/tidepool-alpha-free',
+    name: 'Tidepool Alpha',
+    description: 'Free model via local OpenCode ACP',
+    family: 'opencode',
+    contextWindow: 256_000,
+    outputLimit: 16_384,
+    supportsVision: true,
+    reasoning: true,
+    featured: false,
+    isFree: true,
+    apiProtocol: 'acp',
+    baseUrl: 'opencode acp',
+  },
+  {
+    id: 'opencode/big-pickle',
+    acpModelId: 'opencode/big-pickle',
+    name: 'Big Pickle',
+    description: 'Free model via local OpenCode ACP',
+    family: 'opencode',
+    contextWindow: 256_000,
+    outputLimit: 16_384,
+    supportsVision: true,
+    reasoning: true,
+    featured: false,
+    isFree: true,
+    apiProtocol: 'acp',
+    baseUrl: 'opencode acp',
+  },
+  {
+    id: 'opencode/deepseek-v4.1-flash-free',
+    acpModelId: 'opencode/deepseek-v4.1-flash-free',
+    name: 'DeepSeek V4.1 Flash',
+    description: 'Free model via local OpenCode ACP',
+    family: 'opencode',
+    contextWindow: 1_000_000,
+    outputLimit: 131_072,
+    supportsVision: true,
+    reasoning: true,
+    featured: false,
+    isFree: true,
+    apiProtocol: 'acp',
+    baseUrl: 'opencode acp',
+  },
+]
 
 /**
  * Model provider connections, API key / OAuth subscriptions, usage meters, and per-role model assignments.
@@ -18,6 +68,43 @@ const meta = {
 export default meta
 type Story = StoryObj<typeof meta>
 
+const CONNECTED_OPENCODE_STATUS = {
+  ok: true,
+  transport: 'acp' as const,
+  binaryAvailable: true,
+  binarySource: 'opencode-cli' as const,
+  binaryPath: '/usr/local/bin/opencode acp',
+  agentName: 'OpenCode',
+  agentVersion: '1.2.0',
+  protocolVersion: 1,
+  authenticated: true,
+  entitled: true,
+  authSource: 'opencode-cli' as const,
+  loggedInProviders: ['OpenCode Go'],
+  keySource: 'none' as const,
+  maskedKey: null,
+  endpointBaseUrl: '/usr/local/bin/opencode acp',
+  models: [
+    ...DEFAULT_OPENCODE_GO_MODELS.map((model) => ({
+      ...model,
+      acpModelId: `opencode-go/${model.id}`,
+      apiProtocol: 'acp' as const,
+      baseUrl: 'opencode acp',
+    })),
+    ...DEMO_OPENCODE_FREE_MODELS,
+  ],
+  currentModelId: 'glm-5.3',
+  configOptions: [],
+  supportsImagePrompt: true,
+  usage: null,
+  rateLimited: false,
+  compliance: {
+    protocol: 'ACP (JSON-RPC 2.0 over stdio)' as const,
+    cliAuthStoreOnly: true,
+    keyStoredInXDrive: false as const,
+  },
+}
+
 /**
  * Full-page model provider and role routing settings layout.
  *
@@ -27,6 +114,10 @@ export const ModelsAndProviders: Story = {
   name: 'Models & Providers',
   args: {
     variant: 'page',
+    subscriptions: applyOpenCodeGoStatusToSubscriptions(
+      DEFAULT_SUBSCRIPTIONS,
+      CONNECTED_OPENCODE_STATUS,
+    ),
     antigravityStatus: {
       ok: true,
       binaryAvailable: true,
@@ -78,39 +169,7 @@ export const ModelsAndProviders: Story = {
         tokenExtraction: false,
       },
     },
-    openCodeGoStatus: {
-      ok: true,
-      transport: 'acp',
-      binaryAvailable: true,
-      binarySource: 'opencode-cli',
-      binaryPath: '/usr/local/bin/opencode acp',
-      agentName: 'OpenCode',
-      agentVersion: '1.2.0',
-      protocolVersion: 1,
-      authenticated: true,
-      entitled: true,
-      authSource: 'opencode-cli',
-      loggedInProviders: ['OpenCode Go'],
-      keySource: 'none',
-      maskedKey: null,
-      endpointBaseUrl: '/usr/local/bin/opencode acp',
-      models: DEFAULT_OPENCODE_GO_MODELS.map((model) => ({
-        ...model,
-        acpModelId: `opencode-go/${model.id}`,
-        apiProtocol: 'acp' as const,
-        baseUrl: 'opencode acp',
-      })),
-      currentModelId: 'glm-5.3',
-      configOptions: [],
-      supportsImagePrompt: true,
-      usage: null,
-      rateLimited: false,
-      compliance: {
-        protocol: 'ACP (JSON-RPC 2.0 over stdio)',
-        cliAuthStoreOnly: true,
-        keyStoredInXDrive: false,
-      },
-    },
+    openCodeGoStatus: CONNECTED_OPENCODE_STATUS,
   },
   decorators: [
     (Story) => (
@@ -128,5 +187,59 @@ export const ModelsAndProviders: Story = {
       'href',
       '/settings/models/opencode-go',
     )
+  },
+}
+
+const FREE_ONLY_STATUS = {
+  ok: true,
+  transport: 'acp' as const,
+  binaryAvailable: true,
+  binarySource: 'opencode-cli' as const,
+  binaryPath: '/usr/local/bin/opencode acp',
+  agentName: 'OpenCode',
+  agentVersion: '2.4.1',
+  protocolVersion: 1,
+  authenticated: false,
+  entitled: false,
+  authSource: 'none' as const,
+  loggedInProviders: [],
+  keySource: 'none' as const,
+  maskedKey: null,
+  endpointBaseUrl: '/usr/local/bin/opencode acp',
+  models: DEMO_OPENCODE_FREE_MODELS,
+  currentModelId: 'opencode/big-pickle',
+  configOptions: [],
+  supportsImagePrompt: true,
+  usage: null,
+  rateLimited: false,
+  compliance: {
+    protocol: 'ACP (JSON-RPC 2.0 over stdio)' as const,
+    cliAuthStoreOnly: true,
+    keyStoredInXDrive: false as const,
+  },
+}
+
+/**
+ * OpenCode provider view when only the OpenCode CLI is installed (no OpenCode Go login):
+ * free models are immediately usable under the Free section.
+ *
+ * @summary OpenCode Free models without login
+ */
+export const OpenCodeFreeOnly: Story = {
+  args: {
+    variant: 'page',
+    activeProviderId: 'opencode-go',
+    openCodeGoStatus: FREE_ONLY_STATUS,
+    subscriptions: applyOpenCodeGoStatusToSubscriptions(
+      DEFAULT_SUBSCRIPTIONS,
+      FREE_ONLY_STATUS,
+    ),
+  },
+  decorators: ModelsAndProviders.decorators,
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    await expect(canvas.getByText('Tidepool Alpha')).toBeVisible()
+    await expect(canvas.getByText('Big Pickle')).toBeVisible()
+    await expect(canvas.getByText(/Free models · OpenCode ACP/i)).toBeVisible()
   },
 }

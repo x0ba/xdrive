@@ -64,6 +64,22 @@ function inferSpeedTier(
   return 'deep'
 }
 
+export function hasOpenCodeFreeModels(
+  status: OpenCodeGoRuntimeStatus,
+): boolean {
+  return (
+    status.transport === 'acp' &&
+    status.binaryAvailable &&
+    status.models.some((model) => Boolean(model.isFree))
+  )
+}
+
+export function isOpenCodeUsable(status: OpenCodeGoRuntimeStatus): boolean {
+  return (
+    (status.authenticated && status.entitled) || hasOpenCodeFreeModels(status)
+  )
+}
+
 export function openCodeGoModelsToSpecs(
   models: OpenCodeGoModelOption[],
 ): AIModelSpec[] {
@@ -71,16 +87,23 @@ export function openCodeGoModelsToSpecs(
     id: toXDriveOpenCodeGoModelId(model.id),
     name: model.name,
     providerId: 'opencode-go',
-    badge: model.apiProtocol === 'acp' ? 'OpenCode ACP' : 'OpenCode Go',
+    badge: model.isFree
+      ? 'Free'
+      : model.apiProtocol === 'acp'
+        ? 'OpenCode ACP'
+        : 'OpenCode Go',
     role: inferRole(model),
     contextWindow: formatContextWindow(model.contextWindow),
     speedTier: inferSpeedTier(model),
     supportsVisionSketch: model.supportsVision,
     recommendedFor:
       model.description ||
-      (model.apiProtocol === 'acp'
-        ? 'OpenCode Go via local OpenCode ACP'
-        : `OpenCode Go (${model.apiProtocol})`),
+      (model.isFree
+        ? 'Free model via local OpenCode ACP'
+        : model.apiProtocol === 'acp'
+          ? 'OpenCode Go via local OpenCode ACP'
+          : `OpenCode Go (${model.apiProtocol})`),
+    ...(model.isFree ? { isFree: true } : {}),
   }))
 }
 
@@ -89,7 +112,9 @@ export function applyOpenCodeGoStatusToSubscriptions<
     models: Array<AIModelSpec & { promptLabel?: string }>
   },
 >(subscriptions: T[], status: OpenCodeGoRuntimeStatus): T[] {
-  const isConnected = status.authenticated && status.entitled
+  const hasPaidAccess = status.authenticated && status.entitled
+  const hasFreeAccess = hasOpenCodeFreeModels(status)
+  const isConnected = hasPaidAccess || hasFreeAccess
   const liveSpecs =
     status.models.length > 0 ? openCodeGoModelsToSpecs(status.models) : null
 
@@ -102,7 +127,9 @@ export function applyOpenCodeGoStatusToSubscriptions<
     const nextModels = liveSpecs
       ? liveSpecs.map((spec) => ({
           ...spec,
-          promptLabel: `OpenCode Go · ${spec.name}`,
+          promptLabel: spec.isFree
+            ? `OpenCode Free · ${spec.name}`
+            : `OpenCode Go · ${spec.name}`,
         }))
       : sub.models
 
@@ -114,12 +141,14 @@ export function applyOpenCodeGoStatusToSubscriptions<
 
     const isHttpFallback = status.transport === 'http-fallback'
     const planName = isHttpFallback
-      ? isConnected
+      ? hasPaidAccess
         ? 'Go (HTTP fallback)'
         : 'Go Subscription'
-      : isConnected
+      : hasPaidAccess
         ? 'OpenCode ACP'
-        : 'OpenCode CLI'
+        : hasFreeAccess
+          ? 'OpenCode Free (ACP)'
+          : 'OpenCode CLI'
 
     return {
       ...sub,

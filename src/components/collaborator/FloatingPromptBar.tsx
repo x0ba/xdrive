@@ -43,6 +43,7 @@ export interface ConnectedModelOption {
   modelName: string
   rateLimited?: boolean
   supportsVisionSketch?: boolean
+  isFree?: boolean
 }
 
 export const PROMPT_MODELS: ConnectedModelOption[] = [

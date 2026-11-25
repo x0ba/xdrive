@@ -215,11 +215,13 @@ export function buildDriveChatModels(params: {
     subscription.models.map((model): DriveChatModelOption => {
       let supportsReasoning = true
       let reasoningEfforts: ReasoningEffort[] = ALL_EFFORTS
+      let isFree = model.isFree
 
       if (subscription.providerId === 'opencode-go') {
         const rawId = fromXDriveOpenCodeGoModelId(model.id)
         const goMeta = goCatalogById.get(rawId) ?? goCatalogById.get(model.id)
         supportsReasoning = goMeta?.reasoning ?? true
+        isFree = model.isFree ?? goMeta?.isFree
         reasoningEfforts = goMeta?.reasoningEfforts?.length
           ? normalizeReasoningEfforts(
               goMeta.reasoningEfforts,
@@ -253,6 +255,7 @@ export function buildDriveChatModels(params: {
         reasoningEfforts,
         description: model.recommendedFor,
         badge: model.badge,
+        ...(isFree ? { isFree: true } : {}),
       }
     }),
   )

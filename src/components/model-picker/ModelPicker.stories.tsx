@@ -6,8 +6,68 @@ import { CHAT_DEMO_MODELS } from '#/components/chat/demo-fixtures'
 import { ModelPicker } from './ModelPicker'
 import type { ModelPickerOption } from './types'
 
+const OPENCODE_FREE_DEMO_MODELS: ModelPickerOption[] = [
+  {
+    id: 'opencode-go/opencode/tidepool-alpha-free',
+    name: 'Tidepool Alpha',
+    providerId: 'opencode-go',
+    providerName: 'OpenCode Go',
+    connected: true,
+    status: 'active',
+    contextWindow: '256K',
+    supportsReasoning: true,
+    reasoningEfforts: ['off', 'low', 'medium', 'high'],
+    description: 'Free model via local OpenCode ACP',
+    badge: 'Free',
+    isFree: true,
+  },
+  {
+    id: 'opencode-go/opencode/deepseek-v4.1-flash-free',
+    name: 'DeepSeek V4.1 Flash Free',
+    providerId: 'opencode-go',
+    providerName: 'OpenCode Go',
+    connected: true,
+    status: 'active',
+    contextWindow: '1M',
+    supportsReasoning: true,
+    reasoningEfforts: ['off', 'low', 'high', 'max'],
+    description: 'Free model via local OpenCode ACP',
+    badge: 'Free',
+    isFree: true,
+  },
+  {
+    id: 'opencode-go/opencode/big-pickle',
+    name: 'Big Pickle',
+    providerId: 'opencode-go',
+    providerName: 'OpenCode Go',
+    connected: true,
+    status: 'active',
+    contextWindow: '256K',
+    supportsReasoning: true,
+    reasoningEfforts: ['off', 'low', 'medium', 'high'],
+    description: 'Free model via local OpenCode ACP',
+    badge: 'Free',
+    isFree: true,
+  },
+  {
+    id: 'opencode-go/opencode/beam-free',
+    name: 'Beam',
+    providerId: 'opencode-go',
+    providerName: 'OpenCode Go',
+    connected: true,
+    status: 'active',
+    contextWindow: '256K',
+    supportsReasoning: true,
+    reasoningEfforts: ['off', 'low', 'medium', 'high'],
+    description: 'Free model via local OpenCode ACP',
+    badge: 'Free',
+    isFree: true,
+  },
+]
+
 const DEMO_MODELS: ModelPickerOption[] = [
   ...CHAT_DEMO_MODELS,
+  ...OPENCODE_FREE_DEMO_MODELS,
   {
     id: 'xai/grok-4.7',
     name: 'Grok 4.7',
@@ -52,14 +112,16 @@ export default meta
 type Story = StoryObj<typeof meta>
 
 function InteractiveStandardPicker({
+  models = DEMO_MODELS,
   defaultOpen = false,
   defaultSearchQuery = '',
   defaultTab,
-  initialModelId = DEMO_MODELS[0].id,
+  initialModelId = models[0]?.id ?? '',
   initialFavorites = INITIAL_FAVORITES,
   variant = 'ghost',
   size = 'sm',
 }: {
+  models?: ModelPickerOption[]
   defaultOpen?: boolean
   defaultSearchQuery?: string
   defaultTab?:
@@ -76,7 +138,7 @@ function InteractiveStandardPicker({
     <div className="flex min-h-[420px] items-start justify-center p-6">
       <div className={variant === 'field' ? 'w-64' : undefined}>
         <ModelPicker
-          models={DEMO_MODELS}
+          models={models}
           selectedModelId={modelId}
           onSelectModel={setModelId}
           favoriteModelIds={favorites}
@@ -169,15 +231,60 @@ export const OpenFavorites: Story = {
 
 /**
  * Open popover filtered to a specific provider tab (OpenCode Go), demonstrating provider
- * grouping, context window metadata, and favorite sorting.
+ * grouping, context window metadata, favorite sorting, and the separate Free section with badges.
  *
- * @summary Open popover on a provider tab
+ * @summary Open popover on OpenCode Go tab with Free group
  */
 export const ProviderTab: Story = {
   args: { ...Default.args },
   render: () => (
     <InteractiveStandardPicker defaultOpen defaultTab="opencode-go" />
   ),
+  play: async () => {
+    const body = within(document.body)
+    const search = await body.findByPlaceholderText('Search models...')
+    await expect(search).toBeVisible()
+    await expect(body.getByText('GLM-5.3')).toBeVisible()
+    await expect(body.getByText('Tidepool Alpha')).toBeVisible()
+    await expect(body.getByText('Big Pickle')).toBeVisible()
+    const freeSection = document.body.querySelector(
+      '[data-model-picker-section="free"]',
+    )
+    await expect(freeSection).not.toBeNull()
+    const freeBadges = document.body.querySelectorAll(
+      '[data-model-free-badge="true"]',
+    )
+    await expect(freeBadges.length).toBeGreaterThanOrEqual(4)
+  },
+}
+
+/**
+ * OpenCode provider tab when the user is NOT logged into OpenCode Go — only free models
+ * are shown under the Free section so OpenCode is usable with just the CLI installed.
+ *
+ * @summary OpenCode Free-only tab without OpenCode Go login
+ */
+export const OpenCodeFreeOnly: Story = {
+  args: { ...Default.args },
+  render: () => (
+    <InteractiveStandardPicker
+      models={[
+        ...CHAT_DEMO_MODELS.filter((m) => m.providerId !== 'opencode-go'),
+        ...OPENCODE_FREE_DEMO_MODELS,
+      ]}
+      defaultOpen
+      defaultTab="opencode-go"
+      initialModelId={OPENCODE_FREE_DEMO_MODELS[2].id}
+      initialFavorites={[]}
+    />
+  ),
+  play: async () => {
+    const body = within(document.body)
+    await expect(await body.findByText('Tidepool Alpha')).toBeVisible()
+    await expect(body.getByText('Big Pickle')).toBeVisible()
+    await expect(body.queryByText('DeepSeek V4.1 Flash Free')).toBeNull()
+    await expect(body.getByText('DeepSeek V4.1 Flash')).toBeVisible()
+  },
 }
 
 /**

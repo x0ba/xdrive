@@ -172,6 +172,7 @@ export interface AIModelSpec {
   speedTier: 'instant' | 'fast' | 'deep'
   supportsVisionSketch: boolean
   recommendedFor: string
+  isFree?: boolean
 }
 
 export interface AISubscription {
