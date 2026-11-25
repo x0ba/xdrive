@@ -29,6 +29,8 @@ import {
 } from '#/components/collaborator/ShareModal'
 import { ModelPicker } from '#/components/model-picker'
 import type { ModelPickerInputOption } from '#/components/model-picker'
+import { WorkspaceLink } from '#/components/routing/WorkspaceLink'
+import type { AiSidebarTab } from '#/lib/routing'
 import { cn } from '#/lib/utils'
 
 export const QUICK_PROMPTS = [
@@ -236,10 +238,14 @@ export const DEMO_CHECKPOINTS: MarbleCheckpoint[] = [
   },
 ]
 
-type TabId = 'chat' | 'ops' | 'history'
+type TabId = AiSidebarTab
 
 export interface CursorAISidebarProps {
   fileName?: string
+  activeTab?: TabId
+  onTabChange?: (tab: TabId) => void
+  tabHrefs?: Partial<Record<TabId, string>>
+  evergreenHrefs?: Record<string, string>
   messages?: AIMessage[]
   checkpoints?: MarbleCheckpoint[]
   proposals?: MarbleOpProposal[]
@@ -485,6 +491,10 @@ function draftFromIntent(
 }
 
 export function CursorAISidebar({
+  activeTab: activeTabProp,
+  onTabChange,
+  tabHrefs,
+  evergreenHrefs,
   messages = DEMO_MESSAGES,
   checkpoints = DEMO_CHECKPOINTS,
   proposals = DEMO_PROPOSALS,
@@ -512,7 +522,12 @@ export function CursorAISidebar({
   width: widthProp,
   className,
 }: CursorAISidebarProps) {
-  const [tab, setTab] = useState<TabId>('chat')
+  const [internalTab, setInternalTab] = useState<TabId>(activeTabProp ?? 'chat')
+  const tab = activeTabProp ?? internalTab
+  const setTab = (next: TabId) => {
+    if (activeTabProp === undefined) setInternalTab(next)
+    onTabChange?.(next)
+  }
   const [thread, setThread] = useState<AIMessage[]>(messages)
   const [proposalList, setProposalList] =
     useState<MarbleOpProposal[]>(proposals)
@@ -764,12 +779,12 @@ export function CursorAISidebar({
           className="flex items-center gap-0.5"
         >
           {tabs.map((item) => (
-            <button
+            <WorkspaceLink
               key={item.id}
-              type="button"
+              href={tabHrefs?.[item.id] ?? `?ai=${item.id}`}
               role="tab"
               aria-selected={tab === item.id}
-              onClick={() => setTab(item.id)}
+              onNavigate={() => setTab(item.id)}
               className={cn(
                 'rounded px-2 py-1 text-[11.5px] font-medium transition-colors',
                 tab === item.id
@@ -778,7 +793,7 @@ export function CursorAISidebar({
               )}
             >
               {item.label}
-            </button>
+            </WorkspaceLink>
           ))}
         </div>
 
@@ -803,16 +818,20 @@ export function CursorAISidebar({
       >
         <span className="text-[var(--xd-ink-muted)]">Always referenced:</span>
         {evergreenRefs.map((ref) => (
-          <button
+          <WorkspaceLink
             key={ref.slug}
-            type="button"
+            href={evergreenHrefs?.[ref.slug] ?? `/d/${ref.slug}`}
             title={`${ref.title} (${ref.ruleCount} rules active)`}
-            onClick={() => onOpenEvergreenDoc?.(ref.slug)}
+            onNavigate={
+              onOpenEvergreenDoc
+                ? () => onOpenEvergreenDoc(ref.slug)
+                : undefined
+            }
             className="xd-mono inline-flex items-center gap-1 rounded border border-[var(--xd-border)] bg-[var(--xd-rail)] px-1.5 py-0.5 text-[10px] text-[var(--xd-ink-secondary)] transition-colors hover:border-[var(--xd-accent-border)] hover:text-[var(--xd-ink)]"
           >
             <span className="size-1.5 rounded-full bg-[var(--xd-commit)]" />
             <span>{ref.fileName}</span>
-          </button>
+          </WorkspaceLink>
         ))}
       </div>
 
@@ -880,13 +899,13 @@ export function CursorAISidebar({
                 Connect Antigravity or OpenCode Go
               </span>
             </span>
-            <button
-              type="button"
-              onClick={onOpenProviders}
+            <WorkspaceLink
+              href="/settings/models"
+              onNavigate={onOpenProviders}
               className="shrink-0 rounded bg-[var(--xd-accent)] px-2 py-0.5 text-[10.5px] font-medium text-white hover:bg-[var(--xd-accent-hover)]"
             >
               Connect
-            </button>
+            </WorkspaceLink>
           </div>
         )}
 

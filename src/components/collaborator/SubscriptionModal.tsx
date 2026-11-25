@@ -23,6 +23,8 @@ import type {
 } from '#/lib/ai/opencode-go-types'
 import { openCodeGoModelsToSpecs } from '#/lib/ai/opencode-go-client'
 import { Switch } from '#/components/ui/switch'
+import { WorkspaceLink } from '#/components/routing/WorkspaceLink'
+import { settingsProviderHref } from '#/lib/routing'
 import {
   ModelPicker,
   modelPickerOptionsFromSubscriptions,
@@ -259,6 +261,8 @@ export interface SubscriptionModalProps {
   open?: boolean
   onOpenChange?: (open: boolean) => void
   variant?: 'modal' | 'page'
+  activeProviderId?: AIProviderId
+  onSelectProvider?: (providerId: AIProviderId) => void
   subscriptions?: ManagedSubscription[]
   roleAssignments?: RoleAssignments
   favoriteModelIds?: string[]
@@ -293,6 +297,8 @@ export function SubscriptionModal({
   open = true,
   onOpenChange,
   variant = 'modal',
+  activeProviderId,
+  onSelectProvider,
   subscriptions: subscriptionsProp,
   roleAssignments: rolesProp,
   favoriteModelIds,
@@ -317,7 +323,14 @@ export function SubscriptionModal({
   const [internalRoles, setInternalRoles] = useState<RoleAssignments>(
     rolesProp ?? DEFAULT_ROLE_ASSIGNMENTS,
   )
-  const [activeId, setActiveId] = useState<AIProviderId>('antigravity')
+  const [internalActiveId, setInternalActiveId] = useState<AIProviderId>(
+    activeProviderId ?? 'antigravity',
+  )
+  const activeId = activeProviderId ?? internalActiveId
+  const selectProvider = (providerId: AIProviderId) => {
+    if (activeProviderId === undefined) setInternalActiveId(providerId)
+    onSelectProvider?.(providerId)
+  }
   const [draftKey, setDraftKey] = useState('')
   const [geminiApiKey, setGeminiApiKey] = useState('')
   const [showGeminiKeyForm, setShowGeminiKeyForm] = useState(false)
@@ -476,21 +489,21 @@ export function SubscriptionModal({
             const selected = subscription.providerId === active.providerId
             return (
               <li key={subscription.providerId}>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setActiveId(subscription.providerId)
+                <WorkspaceLink
+                  href={settingsProviderHref(subscription.providerId)}
+                  onNavigate={() => {
+                    selectProvider(subscription.providerId)
                     setDraftKey('')
                     setKeyMessage(null)
                     setBridgeMessage(null)
                   }}
+                  aria-current={selected ? 'page' : undefined}
                   className={cn(
                     'flex w-full items-center justify-between gap-2 rounded px-2.5 py-2 text-left text-[12px] transition-colors',
                     selected
                       ? 'bg-[var(--xd-surface-active)] font-medium text-[var(--xd-ink)]'
                       : 'text-[var(--xd-ink-secondary)] hover:bg-[var(--xd-surface-hover)] hover:text-[var(--xd-ink)]',
                   )}
-                  aria-pressed={selected}
                 >
                   <span className="truncate">{subscription.name}</span>
                   <StatusDot
@@ -500,7 +513,7 @@ export function SubscriptionModal({
                         : 'disconnected'
                     }
                   />
-                </button>
+                </WorkspaceLink>
               </li>
             )
           })}

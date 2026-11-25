@@ -214,6 +214,11 @@ export const TopLeftNewButtonMenu: Story = {
     await expect(menuRect.width).toBeGreaterThanOrEqual(280)
     await expect(menuRect.right).toBeGreaterThan(sidebarRect.right)
     await expect(sidebar!.contains(menu)).toBe(false)
+    // Destination modal items render as real links
+    const aiLink = within(menu).getByRole('menuitem', {
+      name: /Build with AI agent/i,
+    })
+    await expect(aiLink).toHaveAttribute('href', '?modal=new-agent')
   },
 }
 

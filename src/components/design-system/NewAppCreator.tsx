@@ -28,6 +28,7 @@ import type {
 import { DriveDocumentThumbnail, getFolderPathLabel } from './DriveExplorer'
 import { DEFAULT_COMPOSER_MODELS } from './FilterAndMetrics'
 import { getCategoryIcon, getCategoryLabel } from './NavigationShell'
+import { WorkspaceLink } from '#/components/routing/WorkspaceLink'
 import { ModelPicker } from '#/components/model-picker'
 import type { ModelPickerInputOption } from '#/components/model-picker'
 
@@ -100,6 +101,8 @@ const TEMPLATE_CATEGORIES: Array<{
 
 export interface NewAppButtonProps {
   templates?: MarbleDocumentFile[]
+  aiAgentHref?: string
+  templatesHref?: string
   onOpenAIAgent?: () => void
   onOpenTemplates?: () => void
   onQuickCreateTemplate?: (template: MarbleDocumentFile) => void
@@ -109,6 +112,8 @@ export interface NewAppButtonProps {
 
 export function NewAppButton({
   templates = [],
+  aiAgentHref = '?modal=new-agent',
+  templatesHref = '?modal=new-template',
   onOpenAIAgent,
   onOpenTemplates,
   onQuickCreateTemplate,
@@ -207,10 +212,10 @@ export function NewAppButton({
         }}
         className="fixed z-60 flex w-72 flex-col overflow-y-auto rounded-lg border border-[var(--xd-border-strong)] bg-[var(--xd-canvas)] py-1.5 text-[var(--xd-ink)] shadow-xl"
       >
-        <button
-          type="button"
+        <WorkspaceLink
+          href={aiAgentHref}
           role="menuitem"
-          onClick={() => {
+          onNavigate={() => {
             setOpen(false)
             onOpenAIAgent?.()
           }}
@@ -227,12 +232,12 @@ export function NewAppButton({
               Describe a new app or document
             </span>
           </span>
-        </button>
+        </WorkspaceLink>
 
-        <button
-          type="button"
+        <WorkspaceLink
+          href={templatesHref}
           role="menuitem"
-          onClick={() => {
+          onNavigate={() => {
             setOpen(false)
             onOpenTemplates?.()
           }}
@@ -249,7 +254,7 @@ export function NewAppButton({
               Start from your saved templates
             </span>
           </span>
-        </button>
+        </WorkspaceLink>
 
         {quickTemplates.length > 0 && (
           <>
@@ -338,6 +343,8 @@ export function NewAppButton({
 export interface NewAppModalProps {
   open: boolean
   initialMode?: NewAppMode
+  onModeChange?: (mode: NewAppMode) => void
+  modeHrefs?: Partial<Record<NewAppMode, string>>
   templates: MarbleDocumentFile[]
   folders?: DriveFolder[]
   initialFolderId?: string | null
@@ -364,6 +371,8 @@ export interface NewAppModalProps {
 export function NewAppModal({
   open,
   initialMode = 'agent',
+  onModeChange,
+  modeHrefs,
   templates,
   folders = [],
   initialFolderId = null,
@@ -511,11 +520,14 @@ export function NewAppModal({
             aria-label="Creation method"
             className="inline-flex items-center rounded border border-[var(--xd-border)] bg-[var(--xd-canvas)] p-0.5"
           >
-            <button
-              type="button"
+            <WorkspaceLink
+              href={modeHrefs?.agent ?? '?modal=new-agent'}
               role="tab"
               aria-selected={mode === 'agent'}
-              onClick={() => setMode('agent')}
+              onNavigate={() => {
+                setMode('agent')
+                onModeChange?.('agent')
+              }}
               className={`inline-flex h-7 items-center gap-1.5 rounded-xs px-3 text-[12px] font-medium transition-colors ${
                 mode === 'agent'
                   ? 'bg-[var(--xd-accent-soft)] text-[var(--xd-accent)]'
@@ -524,12 +536,15 @@ export function NewAppModal({
             >
               <Sparkles className="h-3.5 w-3.5" />
               <span>AI agent</span>
-            </button>
-            <button
-              type="button"
+            </WorkspaceLink>
+            <WorkspaceLink
+              href={modeHrefs?.templates ?? '?modal=new-template'}
               role="tab"
               aria-selected={mode === 'templates'}
-              onClick={() => setMode('templates')}
+              onNavigate={() => {
+                setMode('templates')
+                onModeChange?.('templates')
+              }}
               className={`inline-flex h-7 items-center gap-1.5 rounded-xs px-3 text-[12px] font-medium transition-colors ${
                 mode === 'templates'
                   ? 'bg-[var(--xd-surface-active)] text-[var(--xd-ink)]'
@@ -541,7 +556,7 @@ export function NewAppModal({
               <span className="xd-tabular text-[11px] text-[var(--xd-ink-muted)]">
                 {templates.length}
               </span>
-            </button>
+            </WorkspaceLink>
           </div>
 
           <div className="flex items-center gap-2">
