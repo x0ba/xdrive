@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import type { Meta, StoryObj } from '@storybook/tanstack-react'
-import { expect, userEvent, within } from 'storybook/test'
+import { expect, userEvent, waitFor, within } from 'storybook/test'
 import {
   DriveFileIconTile,
   DriveFileListTable,
@@ -387,13 +387,13 @@ export const AgentHeroReasoningLevel: Story = {
     const trigger = canvas.getByRole('button', { name: /Reasoning effort/i })
     await userEvent.click(trigger)
     const body = within(document.body)
+    const effortGroup = await body.findByRole('radiogroup', {
+      name: 'Reasoning effort',
+    })
+    await waitFor(() => expect(effortGroup).toBeVisible())
     await expect(
-      body.getByRole('radiogroup', { name: 'Reasoning effort' }),
-    ).toBeVisible()
-    await expect(body.getByRole('radio', { name: /High/i })).toHaveAttribute(
-      'aria-checked',
-      'true',
-    )
+      within(effortGroup).getByRole('radio', { name: /High/i }),
+    ).toHaveAttribute('aria-checked', 'true')
   },
 }
 

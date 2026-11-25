@@ -1,5 +1,5 @@
 import type { Meta, StoryObj } from '@storybook/tanstack-react'
-import { expect, userEvent, within } from 'storybook/test'
+import { expect, userEvent, waitFor, within } from 'storybook/test'
 import { SelectionSketchOverlay } from './SelectionSketchOverlay'
 
 /**
@@ -40,9 +40,10 @@ export const SelectMode: Story = {
     const trigger = canvas.getByRole('button', { name: /Reasoning effort/i })
     await userEvent.click(trigger)
     const body = within(document.body)
-    await expect(
-      body.getByRole('radiogroup', { name: 'Reasoning effort' }),
-    ).toBeVisible()
+    const effortGroup = await body.findByRole('radiogroup', {
+      name: 'Reasoning effort',
+    })
+    await waitFor(() => expect(effortGroup).toBeVisible())
   },
 }
 
