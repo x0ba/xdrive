@@ -30,12 +30,7 @@ import {
 } from './templates'
 
 export type MarbleActionKind =
-  | 'dtrt'
-  | 'factory'
-  | 'scale'
-  | 'fork_alt'
-  | 'sketch_build'
-  | 'new_app'
+  'dtrt' | 'factory' | 'scale' | 'fork_alt' | 'sketch_build' | 'new_app'
 
 export interface EvergreenDesignContext {
   designSystem: {
@@ -71,7 +66,8 @@ export interface CollaborationResult {
   stages: NonNullable<AIMessage['stages']>
   newDocument?: MarbleDocumentFile
   evergreenContext: EvergreenDesignContext
-  source: 'antigravity-acp' | 'opencode-go' | 'api' | 'synthesizer'
+  source:
+    'antigravity-acp' | 'opencode-acp' | 'opencode-go' | 'api' | 'synthesizer'
   thoughts?: string[]
   runtime?: {
     protocol: string
@@ -91,10 +87,7 @@ export class MarbleCollaborationError extends Error {
     | 'PROVIDER_UNAVAILABLE'
     | 'AI_ERROR'
 
-  constructor(
-    code: MarbleCollaborationError['code'],
-    message: string,
-  ) {
+  constructor(code: MarbleCollaborationError['code'], message: string) {
     super(message)
     this.name = 'MarbleCollaborationError'
     this.code = code
@@ -128,10 +121,7 @@ const DEFAULT_BANNED_HEXES = [
 export function resolveEvergreenDesignContext(
   evergreenDocs?: MarbleDocumentFile[],
 ): EvergreenDesignContext {
-  const pool = [
-    ...(evergreenDocs ?? []),
-    ...EVERGREEN_WORKSPACE_DOCS,
-  ]
+  const pool = [...(evergreenDocs ?? []), ...EVERGREEN_WORKSPACE_DOCS]
   const designDoc =
     pool.find((doc) => doc.slug === DOCUMENT_DESIGN_SYSTEM_SLUG) ??
     EVERGREEN_WORKSPACE_DOCS[0]
@@ -571,7 +561,8 @@ function draftFactory(
   const parent = seed?.parentId
     ? nodes.find((node) => node.id === seed.parentId)
     : nodes.find((node) => node.affordances.includes('sortable'))
-  if (!parent) return draftDtrt(nodes, instruction, selected, [], evergreenContext)
+  if (!parent)
+    return draftDtrt(nodes, instruction, selected, [], evergreenContext)
   const templateId = mint()
   const buttonId = mint()
   const list = parent.affordances.includes('sortable')
@@ -612,7 +603,10 @@ function draftFactory(
           {
             type: 'setText',
             id: buttonId,
-            text: sanitizeTextWithDonts(buttonLabel(instruction), evergreenContext),
+            text: sanitizeTextWithDonts(
+              buttonLabel(instruction),
+              evergreenContext,
+            ),
           },
         ],
         completed: false,
@@ -634,7 +628,8 @@ function draftFork(
 } {
   const seed =
     pickSeed(nodes, selected) ?? nodes.find((node) => node.tagName === 'h1')
-  if (!seed) return draftDtrt(nodes, instruction, selected, [], evergreenContext)
+  if (!seed)
+    return draftDtrt(nodes, instruction, selected, [], evergreenContext)
   const parent = seed.parentId
     ? nodes.find((node) => node.id === seed.parentId)
     : undefined
@@ -960,10 +955,7 @@ function buildNewApp(
   mint: () => string,
   evergreenContext: EvergreenDesignContext,
 ): { title: string; sections: string[]; document: MarbleDocumentFile } {
-  const title = sanitizeTextWithDonts(
-    inferTitle(instruction),
-    evergreenContext,
-  )
+  const title = sanitizeTextWithDonts(inferTitle(instruction), evergreenContext)
   const sections = inferSections(instruction).map((item) =>
     sanitizeTextWithDonts(item, evergreenContext),
   )
@@ -1593,18 +1585,19 @@ async function askMarbleApi(
         binaryMissing?: boolean
         error?: string
       }
-      const code = payload.authRequired || payload.code === 'AUTH_REQUIRED'
-        ? 'AUTH_REQUIRED'
-        : payload.entitlementRequired ||
-            payload.code === 'ENTITLEMENT_REQUIRED'
-          ? 'ENTITLEMENT_REQUIRED'
-          : payload.rateLimited || payload.code === 'RATE_LIMITED'
-            ? 'RATE_LIMITED'
-            : payload.binaryMissing || payload.code === 'BINARY_MISSING'
-              ? 'BINARY_MISSING'
-              : payload.code === 'PROVIDER_UNAVAILABLE'
-                ? 'PROVIDER_UNAVAILABLE'
-                : 'AI_ERROR'
+      const code =
+        payload.authRequired || payload.code === 'AUTH_REQUIRED'
+          ? 'AUTH_REQUIRED'
+          : payload.entitlementRequired ||
+              payload.code === 'ENTITLEMENT_REQUIRED'
+            ? 'ENTITLEMENT_REQUIRED'
+            : payload.rateLimited || payload.code === 'RATE_LIMITED'
+              ? 'RATE_LIMITED'
+              : payload.binaryMissing || payload.code === 'BINARY_MISSING'
+                ? 'BINARY_MISSING'
+                : payload.code === 'PROVIDER_UNAVAILABLE'
+                  ? 'PROVIDER_UNAVAILABLE'
+                  : 'AI_ERROR'
       throw new MarbleCollaborationError(
         code,
         payload.error || `AI collaboration failed (HTTP ${response.status}).`,
@@ -1639,12 +1632,15 @@ function normalizeApi(
     newDocument?: MarbleDocumentFile
     ops?: MarbleOp[]
     note?: string
-    source?: 'antigravity-acp' | 'opencode-go' | 'api' | 'synthesizer'
+    source?:
+      'antigravity-acp' | 'opencode-acp' | 'opencode-go' | 'api' | 'synthesizer'
     thoughts?: string[]
     runtime?: CollaborationResult['runtime']
   }
   const responseSource =
-    record.source === 'antigravity-acp' || record.source === 'opencode-go'
+    record.source === 'antigravity-acp' ||
+    record.source === 'opencode-acp' ||
+    record.source === 'opencode-go'
       ? record.source
       : 'api'
   if (

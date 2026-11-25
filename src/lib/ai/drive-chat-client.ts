@@ -78,7 +78,8 @@ function scoreDocRelevance(
   if (tokens.length === 0) return score
   const titleLower = doc.title.toLowerCase()
   const fileLower = doc.fileName.toLowerCase()
-  const bodyLower = `${doc.description} ${doc.folder} ${doc.tags.join(' ')}`.toLowerCase()
+  const bodyLower =
+    `${doc.description} ${doc.folder} ${doc.tags.join(' ')}`.toLowerCase()
   for (const token of tokens) {
     if (titleLower.includes(token)) score += 14
     if (fileLower.includes(token)) score += 14
@@ -193,6 +194,19 @@ export function buildDriveChatModels(params: {
       )
     : ALL_EFFORTS
 
+  const openCodeReasoningConfig = openCodeGoStatus?.configOptions?.find(
+    (opt) =>
+      opt.category === 'thought_level' ||
+      opt.category === 'reasoning' ||
+      /reason|think|effort/i.test(`${opt.id} ${opt.name}`),
+  )
+  const openCodeAcpEfforts = openCodeReasoningConfig
+    ? normalizeReasoningEfforts(
+        openCodeReasoningConfig.options.map((choice) => choice.value),
+        true,
+      )
+    : undefined
+
   const goCatalogById = new Map(
     (openCodeGoStatus?.models ?? []).map((model) => [model.id, model]),
   )
@@ -204,12 +218,15 @@ export function buildDriveChatModels(params: {
 
       if (subscription.providerId === 'opencode-go') {
         const rawId = fromXDriveOpenCodeGoModelId(model.id)
-        const goMeta = goCatalogById.get(rawId)
+        const goMeta = goCatalogById.get(rawId) ?? goCatalogById.get(model.id)
         supportsReasoning = goMeta?.reasoning ?? true
-        reasoningEfforts = normalizeReasoningEfforts(
-          goMeta?.reasoningEfforts,
-          supportsReasoning,
-        )
+        reasoningEfforts = goMeta?.reasoningEfforts?.length
+          ? normalizeReasoningEfforts(
+              goMeta.reasoningEfforts,
+              supportsReasoning,
+            )
+          : (openCodeAcpEfforts ??
+            normalizeReasoningEfforts(undefined, supportsReasoning))
       } else if (subscription.providerId === 'antigravity') {
         supportsReasoning = true
         reasoningEfforts = antigravityEfforts

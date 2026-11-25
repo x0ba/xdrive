@@ -198,8 +198,8 @@ Soft-deleted documents live in `.trash/` until restored, manually deleted, or au
 ## What Does _Not_ Live in the Drive Folder
 
 - **Built-in templates** (`PREDEFINED_MARBLE_TEMPLATES`): read-only starter blueprints bundled with the app. Documents created from them are saved into `<XDRIVE_DRIVE_DIR>`.
-- **Machine-local runtime caches & ephemeral temp dirs**: downloaded platform-specific ACP binaries (`~/.xdrive/acp/antigravity-acp`) and temporary LaTeX / ACP scratch directories in `os.tmpdir()`.
-- **Secrets & credentials**: API keys (`OPENCODE_API_KEY`, `CLERK_SECRET_KEY`, etc.) remain in `.env.local` / environment variables and are never written into the Drive folder.
+- **Machine-local runtime caches & ephemeral temp dirs**: downloaded platform-specific ACP binaries (`~/.xdrive/acp/antigravity-acp`) and temporary LaTeX / ACP scratch workspaces (`xdrive-antigravity-acp-workspace`, `xdrive-opencode-acp-workspace`) in `os.tmpdir()`.
+- **Secrets & credentials**: OpenCode credentials stay in OpenCode CLI's own auth store (`opencode auth login`), and optional fallback/server env vars (`OPENCODE_API_KEY`, `CLERK_SECRET_KEY`, etc.) remain in `.env.local` / environment variables and are never written into the Drive folder.
 
 ## Backward Compatibility (Migrate on Read)
 

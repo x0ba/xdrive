@@ -1,13 +1,14 @@
-// Server-only OpenCode Go inference provider (`https://opencode.ai/inference/go`).
+// Server-only OpenCode Go direct-HTTP fallback provider (`https://opencode.ai/inference/go`).
+//
+// Used ONLY as a fallback when the local OpenCode CLI (`opencode acp`) is not
+// installed and `OPENCODE_API_KEY` or `OPENCODE_GO_API_KEY` is configured in
+// the server environment. Never stores or persists API keys to disk or memory.
 //
 // Follows official OpenCode Go client requirements:
 // - Identifies itself with a dedicated User-Agent (`xdrive/1.0`) rather than a
 //   generic SDK user agent.
 // - Sends a stable `x-opencode-session` header per document/conversation for
 //   efficient routing and prompt caching.
-// - Authenticates with an OpenCode Console personal or service-account API key
-//   (`OPENCODE_API_KEY`, `OPENCODE_GO_API_KEY`, or an in-memory key connected
-//   from Models & Providers — never written to repository files).
 // - Fetches live Go models from `/inference/go/v1/models` and verifies account
 //   entitlement and rolling/weekly/monthly usage from `/inference/go/v1/usage`.
 // - Routes each model to its native Go API family (`chat-completions`,
@@ -137,7 +138,10 @@ function parseDataUrl(
   return { mimeType: match[1], data: match[2] }
 }
 
-function extractUpstreamErrorMessage(payload: unknown, fallback: string): string {
+function extractUpstreamErrorMessage(
+  payload: unknown,
+  fallback: string,
+): string {
   if (payload && typeof payload === 'object') {
     const record = payload as Record<string, unknown>
     if (record.error && typeof record.error === 'object') {
@@ -168,9 +172,10 @@ function parseUsageMeter(raw: unknown): OpenCodeGoUsageMeter | undefined {
   return { status, percent, resetsAt }
 }
 
-function resolveProtocolFromCatalog(
-  raw: RawCatalogModel,
-): { protocol: OpenCodeGoApiProtocol; baseUrl: string } {
+function resolveProtocolFromCatalog(raw: RawCatalogModel): {
+  protocol: OpenCodeGoApiProtocol
+  baseUrl: string
+} {
   const apiMap = raw.api ?? {}
   const recommended =
     typeof raw.recommended_api === 'string' ? raw.recommended_api : ''
@@ -232,9 +237,10 @@ function resolveProtocolFromCatalog(
   }
 }
 
-function inferFallbackProtocol(
-  rawModelId: string,
-): { protocol: OpenCodeGoApiProtocol; baseUrl: string } {
+function inferFallbackProtocol(rawModelId: string): {
+  protocol: OpenCodeGoApiProtocol
+  baseUrl: string
+} {
   const id = rawModelId.toLowerCase()
   if (id.startsWith('gemini-')) {
     return {
@@ -268,7 +274,9 @@ function inferFallbackProtocol(
   }
 }
 
-function normalizeCatalogModel(raw: RawCatalogModel): OpenCodeGoModelOption | null {
+function normalizeCatalogModel(
+  raw: RawCatalogModel,
+): OpenCodeGoModelOption | null {
   if (typeof raw.id !== 'string' || !raw.id.trim()) return null
   if (raw.type !== 'chat') return null
 
@@ -295,8 +303,8 @@ function normalizeCatalogModel(raw: RawCatalogModel): OpenCodeGoModelOption | nu
       ? reasoningCap
       : Boolean(
           reasoningCap &&
-            typeof reasoningCap === 'object' &&
-            (reasoningCap as { supported?: unknown }).supported,
+          typeof reasoningCap === 'object' &&
+          (reasoningCap as { supported?: unknown }).supported,
         )
   const reasoningEfforts =
     reasoningCap &&
@@ -311,7 +319,8 @@ function normalizeCatalogModel(raw: RawCatalogModel): OpenCodeGoModelOption | nu
 
   return {
     id,
-    name: typeof raw.name === 'string' && raw.name.trim() ? raw.name.trim() : id,
+    name:
+      typeof raw.name === 'string' && raw.name.trim() ? raw.name.trim() : id,
     description:
       typeof raw.description === 'string' ? raw.description.trim() : null,
     family: typeof raw.family === 'string' ? raw.family : null,
@@ -531,23 +540,23 @@ async function readSseEvents(
 }
 
 class OpenCodeGoManager {
-  private runtimeApiKey: string | null = null
-  private envKeySuppressed = false
   private cachedModels: OpenCodeGoModelOption[] | null = null
   private catalogFetchedAt = 0
 
+  hasEnvApiKey(): boolean {
+    return Boolean(
+      process.env.OPENCODE_API_KEY?.trim() ||
+      process.env.OPENCODE_GO_API_KEY?.trim(),
+    )
+  }
+
   private resolveKey(): { key: string | null; source: OpenCodeGoKeySource } {
-    if (this.runtimeApiKey) {
-      return { key: this.runtimeApiKey, source: 'runtime' }
-    }
-    if (!this.envKeySuppressed) {
-      const fromEnv =
-        process.env.OPENCODE_API_KEY?.trim() ||
-        process.env.OPENCODE_GO_API_KEY?.trim() ||
-        ''
-      if (fromEnv) {
-        return { key: fromEnv, source: 'env' }
-      }
+    const fromEnv =
+      process.env.OPENCODE_API_KEY?.trim() ||
+      process.env.OPENCODE_GO_API_KEY?.trim() ||
+      ''
+    if (fromEnv) {
+      return { key: fromEnv, source: 'env' }
     }
     return { key: null, source: 'none' }
   }
@@ -675,8 +684,8 @@ class OpenCodeGoManager {
         rolling || weekly || monthly ? { rolling, weekly, monthly } : null
       const rateLimited = Boolean(
         rolling?.status === 'rate-limited' ||
-          weekly?.status === 'rate-limited' ||
-          monthly?.status === 'rate-limited',
+        weekly?.status === 'rate-limited' ||
+        monthly?.status === 'rate-limited',
       )
 
       return {
@@ -709,13 +718,20 @@ class OpenCodeGoManager {
     if (!key) {
       return {
         ok: true,
+        transport: 'none',
+        binaryAvailable: false,
+        binarySource: 'none',
         authenticated: false,
         entitled: false,
+        authSource: 'none',
+        loggedInProviders: [],
         keySource: 'none',
         maskedKey: null,
         endpointBaseUrl: OPENCODE_GO_ENDPOINT_BASE_URL,
         models,
         currentModelId,
+        configOptions: [],
+        supportsImagePrompt: true,
         usage: null,
         rateLimited: false,
       }
@@ -724,86 +740,26 @@ class OpenCodeGoManager {
     const check = await this.verifyKeyAndFetchUsage(key)
     return {
       ok: true,
+      transport: 'http-fallback',
+      binaryAvailable: false,
+      binarySource: 'none',
+      agentName: 'OpenCode Go (HTTP fallback)',
+      agentVersion: 'v1',
       authenticated: check.authenticated,
       entitled: check.entitled,
+      authSource: check.authenticated ? 'env-fallback' : 'none',
+      loggedInProviders: [],
       keySource: source,
       maskedKey: maskApiKey(key),
       endpointBaseUrl: OPENCODE_GO_ENDPOINT_BASE_URL,
       models,
       currentModelId,
+      configOptions: [],
+      supportsImagePrompt: true,
       usage: check.usage,
       rateLimited: check.rateLimited,
       error: check.error,
     }
-  }
-
-  async authenticate(apiKey?: string): Promise<OpenCodeGoRuntimeStatus> {
-    const trimmed = apiKey?.trim()
-    let candidate = trimmed || ''
-    let nextSource: OpenCodeGoKeySource = 'runtime'
-
-    if (!candidate) {
-      const envKey =
-        process.env.OPENCODE_API_KEY?.trim() ||
-        process.env.OPENCODE_GO_API_KEY?.trim() ||
-        ''
-      if (!envKey) {
-        throw new OpenCodeGoError(
-          'AUTH_REQUIRED',
-          'Paste your OpenCode Console API key or set OPENCODE_API_KEY in .env.local to connect OpenCode Go.',
-          401,
-        )
-      }
-      candidate = envKey
-      nextSource = 'env'
-    }
-
-    const check = await this.verifyKeyAndFetchUsage(candidate)
-    if (!check.authenticated) {
-      throw new OpenCodeGoError(
-        'AUTH_REQUIRED',
-        check.error || 'OpenCode API key is invalid.',
-        401,
-      )
-    }
-    if (!check.entitled) {
-      throw new OpenCodeGoError(
-        'ENTITLEMENT_REQUIRED',
-        check.error || 'OpenCode Go subscription required for this API key.',
-        403,
-      )
-    }
-
-    if (nextSource === 'runtime') {
-      this.runtimeApiKey = candidate
-      this.envKeySuppressed = false
-    } else {
-      this.runtimeApiKey = null
-      this.envKeySuppressed = false
-    }
-
-    const models = await this.getModels(true)
-    return {
-      ok: true,
-      authenticated: true,
-      entitled: true,
-      keySource: nextSource,
-      maskedKey: maskApiKey(candidate),
-      endpointBaseUrl: OPENCODE_GO_ENDPOINT_BASE_URL,
-      models,
-      currentModelId: models[0]?.id ?? DEFAULT_OPENCODE_GO_MODELS[0].id,
-      usage: check.usage,
-      rateLimited: check.rateLimited,
-    }
-  }
-
-  async logout(): Promise<OpenCodeGoRuntimeStatus> {
-    this.runtimeApiKey = null
-    this.envKeySuppressed = Boolean(
-      process.env.OPENCODE_API_KEY?.trim() ||
-        process.env.OPENCODE_GO_API_KEY?.trim(),
-    )
-    return await this.getStatus(false)
   }
 
   async runPrompt(
@@ -813,7 +769,7 @@ class OpenCodeGoManager {
     if (!key) {
       throw new OpenCodeGoError(
         'AUTH_REQUIRED',
-        'OpenCode Go is not connected. Add your OpenCode API key in Models & Providers or set OPENCODE_API_KEY in .env.local.',
+        'OpenCode CLI is not installed and OPENCODE_API_KEY is not set. Install OpenCode and run `opencode auth login`, or set OPENCODE_API_KEY in .env.local as a direct-HTTP fallback.',
         401,
       )
     }
@@ -1031,10 +987,7 @@ class OpenCodeGoManager {
         choices?: Array<{
           finish_reason?: string | null
           message?: {
-            content?:
-              | string
-              | Array<{ type?: string; text?: string }>
-              | null
+            content?: string | Array<{ type?: string; text?: string }> | null
             reasoning_content?: string | null
             reasoning?: string | null
           }
@@ -1343,7 +1296,9 @@ class OpenCodeGoManager {
     const budget = anthropicThinkingBudget(params.reasoningEffort)
     const requestBody: Record<string, unknown> = {
       model: params.modelId,
-      max_tokens: budget ? Math.max(params.maxTokens, budget + 4096) : params.maxTokens,
+      max_tokens: budget
+        ? Math.max(params.maxTokens, budget + 4096)
+        : params.maxTokens,
       messages,
       stream: true,
     }

@@ -1,8 +1,5 @@
 import type { Meta, StoryObj } from '@storybook/tanstack-react'
-import {
-  DEFAULT_OPENCODE_GO_MODELS,
-  OPENCODE_GO_ENDPOINT_BASE_URL,
-} from '#/lib/ai/opencode-go-types'
+import { DEFAULT_OPENCODE_GO_MODELS } from '#/lib/ai/opencode-go-types'
 import { SubscriptionModal } from './SubscriptionModal'
 
 /**
@@ -82,31 +79,36 @@ export const ModelsAndProviders: Story = {
     },
     openCodeGoStatus: {
       ok: true,
+      transport: 'acp',
+      binaryAvailable: true,
+      binarySource: 'opencode-cli',
+      binaryPath: '/usr/local/bin/opencode acp',
+      agentName: 'OpenCode',
+      agentVersion: '1.2.0',
+      protocolVersion: 1,
       authenticated: true,
       entitled: true,
-      keySource: 'env',
-      maskedKey: 'sk-o···9f2a',
-      endpointBaseUrl: OPENCODE_GO_ENDPOINT_BASE_URL,
-      models: DEFAULT_OPENCODE_GO_MODELS,
+      authSource: 'opencode-cli',
+      loggedInProviders: ['OpenCode Go'],
+      keySource: 'none',
+      maskedKey: null,
+      endpointBaseUrl: '/usr/local/bin/opencode acp',
+      models: DEFAULT_OPENCODE_GO_MODELS.map((model) => ({
+        ...model,
+        acpModelId: `opencode-go/${model.id}`,
+        apiProtocol: 'acp' as const,
+        baseUrl: 'opencode acp',
+      })),
       currentModelId: 'glm-5.3',
-      usage: {
-        rolling: {
-          status: 'ok',
-          percent: 18,
-          resetsAt: '2026-11-23T22:00:00.000Z',
-        },
-        weekly: {
-          status: 'ok',
-          percent: 34,
-          resetsAt: '2026-11-30T00:00:00.000Z',
-        },
-        monthly: {
-          status: 'ok',
-          percent: 42,
-          resetsAt: '2026-12-01T00:00:00.000Z',
-        },
-      },
+      configOptions: [],
+      supportsImagePrompt: true,
+      usage: null,
       rateLimited: false,
+      compliance: {
+        protocol: 'ACP (JSON-RPC 2.0 over stdio)',
+        cliAuthStoreOnly: true,
+        keyStoredInXDrive: false,
+      },
     },
   },
   decorators: [

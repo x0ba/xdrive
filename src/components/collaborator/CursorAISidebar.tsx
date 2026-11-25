@@ -1001,9 +1001,7 @@ export function CursorAISidebar({
                   sendText(draft)
                 }
               }}
-              placeholder={
-                blocked ? 'AI locked' : 'Ask for a change...'
-              }
+              placeholder={blocked ? 'AI locked' : 'Ask for a change...'}
               className="max-h-24 min-h-12 flex-1 resize-none rounded border border-[var(--xd-border)] bg-[var(--xd-rail)] px-2 py-1.5 text-[12px] outline-none focus-visible:border-[var(--xd-accent)] disabled:opacity-50"
             />
             <button
@@ -1046,6 +1044,17 @@ function MessageBubble({ message }: { message: AIMessage }) {
               Antigravity ACP
               {message.modelId
                 ? ` · ${message.modelId.replace(/^antigravity\//, '')}`
+                : ''}
+            </span>
+          </div>
+        )}
+        {message.runtimeSource === 'opencode-acp' && (
+          <div className="xd-mono mb-1 flex items-center gap-1 text-[9.5px] text-[var(--xd-commit)]">
+            <ShieldCheck className="size-2.5 shrink-0" />
+            <span>
+              OpenCode ACP
+              {message.modelId
+                ? ` · ${message.modelId.replace(/^opencode-go\//, '')}`
                 : ''}
             </span>
           </div>

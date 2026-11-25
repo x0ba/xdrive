@@ -181,7 +181,11 @@ export interface AISubscription {
   planName: string
   connected: boolean
   authMethod:
-    'antigravity_acp' | 'subscription_oauth' | 'api_key' | 'cli_bridge'
+    | 'antigravity_acp'
+    | 'opencode_acp'
+    | 'subscription_oauth'
+    | 'api_key'
+    | 'cli_bridge'
   maskedCredential?: string
   status: 'active' | 'rate_limited' | 'disconnected'
   models: AIModelSpec[]
@@ -234,7 +238,8 @@ export interface AIMessage {
   timestamp: string
   modelId?: string
   providerId?: AIProviderId
-  runtimeSource?: 'antigravity-acp' | 'opencode-go' | 'api' | 'synthesizer'
+  runtimeSource?:
+    'antigravity-acp' | 'opencode-acp' | 'opencode-go' | 'api' | 'synthesizer'
   thoughts?: string[]
   attachedElements?: SelectedMarbleElement[]
   attachedSketches?: SketchAnnotation[]

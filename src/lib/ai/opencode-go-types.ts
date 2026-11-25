@@ -1,19 +1,48 @@
-// Shared isomorphic types and helpers for OpenCode Go integration in xDrive.
-// Uses the official OpenCode Go inference endpoints (`https://opencode.ai/inference/go`),
-// authenticating with a personal or service-account OpenCode API key
-// (`OPENCODE_API_KEY` or entered in Models & Providers) and sending a stable
-// `x-opencode-session` header plus custom `User-Agent` per OpenCode Go guidelines.
+// Shared isomorphic types and helpers for OpenCode integration in xDrive.
+//
+// Primary transport: local OpenCode CLI over Agent Client Protocol (`opencode acp`,
+// JSON-RPC 2.0 over stdio), using OpenCode's own credential store populated via
+// `opencode auth login` so xDrive never asks for or stores an OpenCode API key.
+//
+// Fallback transport (only when the OpenCode CLI is not installed): direct HTTP
+// to `https://opencode.ai/inference/go` using `OPENCODE_API_KEY` /
+// `OPENCODE_GO_API_KEY` from the server environment.
 
 export type OpenCodeGoApiProtocol =
-  | 'chat-completions'
-  | 'responses'
-  | 'messages'
-  | 'generate-content'
+  'acp' | 'chat-completions' | 'responses' | 'messages' | 'generate-content'
 
-export type OpenCodeGoKeySource = 'env' | 'runtime' | 'none'
+export type OpenCodeTransport = 'acp' | 'http-fallback' | 'none'
+
+export type OpenCodeBinarySource = 'custom' | 'opencode-cli' | 'none'
+
+export type OpenCodeAuthSource = 'opencode-cli' | 'env-fallback' | 'none'
+
+export type OpenCodeGoKeySource = 'env' | 'none'
+
+export interface OpenCodeConfigSelectChoice {
+  value: string
+  name: string
+  description?: string | null
+}
+
+export interface OpenCodeConfigOption {
+  id: string
+  name: string
+  description?: string | null
+  category?: string | null
+  currentValue: string
+  options: OpenCodeConfigSelectChoice[]
+}
+
+export interface OpenCodeComplianceInfo {
+  protocol: 'ACP (JSON-RPC 2.0 over stdio)'
+  cliAuthStoreOnly: boolean
+  keyStoredInXDrive: false
+}
 
 export interface OpenCodeGoModelOption {
   id: string
+  acpModelId?: string
   name: string
   description?: string | null
   family?: string | null
@@ -46,15 +75,27 @@ export interface OpenCodeGoUsageSummary {
 
 export interface OpenCodeGoRuntimeStatus {
   ok: boolean
+  transport: OpenCodeTransport
+  binaryAvailable: boolean
+  binarySource: OpenCodeBinarySource
+  binaryPath?: string
+  agentName?: string
+  agentVersion?: string
+  protocolVersion?: number
   authenticated: boolean
   entitled: boolean
+  authSource: OpenCodeAuthSource
+  loggedInProviders?: string[]
   keySource: OpenCodeGoKeySource
   maskedKey?: string | null
   endpointBaseUrl: string
   models: OpenCodeGoModelOption[]
   currentModelId?: string | null
+  configOptions?: OpenCodeConfigOption[]
+  supportsImagePrompt?: boolean
   usage?: OpenCodeGoUsageSummary | null
   rateLimited: boolean
+  compliance?: OpenCodeComplianceInfo
   error?: string
 }
 
@@ -149,7 +190,8 @@ export const DEFAULT_OPENCODE_GO_MODELS: OpenCodeGoModelOption[] = [
   {
     id: 'claude-haiku-5-5',
     name: 'Claude Haiku 5.5',
-    description: 'Fast review, prose edits, and Anthropic-native tool precision',
+    description:
+      'Fast review, prose edits, and Anthropic-native tool precision',
     family: 'claude-haiku',
     contextWindow: 1_000_000,
     outputLimit: 128_000,

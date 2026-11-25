@@ -459,6 +459,7 @@ function sanitizeAIMessage(raw: unknown): AIMessage | null {
   if (providerId) out.providerId = providerId
   if (
     rec.runtimeSource === 'antigravity-acp' ||
+    rec.runtimeSource === 'opencode-acp' ||
     rec.runtimeSource === 'opencode-go' ||
     rec.runtimeSource === 'api' ||
     rec.runtimeSource === 'synthesizer'
