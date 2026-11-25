@@ -16,10 +16,7 @@ import type {
   AntigravityAuthMethodId,
   AntigravityRuntimeStatus,
 } from '#/lib/ai/antigravity-types'
-import {
-  DEFAULT_OPENCODE_GO_MODELS,
-  OPENCODE_GO_ENDPOINT_BASE_URL,
-} from '#/lib/ai/opencode-go-types'
+import { DEFAULT_OPENCODE_GO_MODELS } from '#/lib/ai/opencode-go-types'
 import type {
   OpenCodeGoRuntimeStatus,
   OpenCodeGoUsageMeter,
@@ -111,13 +108,13 @@ export const DEFAULT_SUBSCRIPTIONS: ManagedSubscription[] = [
     providerId: 'opencode-go',
     name: 'OpenCode Go',
     tagline:
-      'Unified subscription routing across GLM, Kimi, DeepSeek, Gemini, Claude, GPT, and Qwen via opencode.ai/inference/go.',
-    planName: 'Go Subscription',
+      'Local OpenCode CLI over ACP (`opencode acp`) authenticated via `opencode auth login` — no API key stored in xDrive.',
+    planName: 'OpenCode ACP',
     connected: false,
-    authMethod: 'api_key',
+    authMethod: 'opencode_acp',
     status: 'disconnected',
     defaultModelId: 'opencode-go/glm-5.3',
-    endpointUrl: OPENCODE_GO_ENDPOINT_BASE_URL,
+    endpointUrl: 'opencode acp (JSON-RPC stdio)',
     usageThisMonth: { opsGenerated: 0, appsBuilt: 0, quotaPercent: 0 },
     models: openCodeGoModelsToSpecs(DEFAULT_OPENCODE_GO_MODELS).map((spec) => ({
       ...spec,
@@ -278,8 +275,6 @@ export interface SubscriptionModalProps {
   openCodeGoBusy?: string | null
   openCodeGoError?: string | null
   onRefreshOpenCodeGo?: () => void
-  onAuthenticateOpenCodeGo?: (options?: { apiKey?: string }) => void
-  onLogoutOpenCodeGo?: () => void
 }
 
 function maskSecret(value: string): string {
@@ -306,8 +301,6 @@ export function SubscriptionModal({
   openCodeGoBusy = null,
   openCodeGoError = null,
   onRefreshOpenCodeGo,
-  onAuthenticateOpenCodeGo,
-  onLogoutOpenCodeGo,
 }: SubscriptionModalProps) {
   const titleId = useId()
   const [internalSubs, setInternalSubs] = useState<ManagedSubscription[]>(
@@ -320,7 +313,6 @@ export function SubscriptionModal({
   const [draftKey, setDraftKey] = useState('')
   const [geminiApiKey, setGeminiApiKey] = useState('')
   const [showGeminiKeyForm, setShowGeminiKeyForm] = useState(false)
-  const [openCodeApiKey, setOpenCodeApiKey] = useState('')
   const [keyMessage, setKeyMessage] = useState<string | null>(null)
   const [bridgeMessage, setBridgeMessage] = useState<string | null>(null)
 
@@ -421,6 +413,8 @@ export function SubscriptionModal({
   const isOpenCodeGoConnected = openCodeGoStatus
     ? openCodeGoStatus.authenticated && openCodeGoStatus.entitled
     : active.connected
+  const openCodeBinaryAvailable = openCodeGoStatus?.binaryAvailable ?? false
+  const openCodeIsHttpFallback = openCodeGoStatus?.transport === 'http-fallback'
   const openCodeGoUsageRows: Array<[string, OpenCodeGoUsageMeter]> =
     openCodeGoStatus?.usage
       ? (
@@ -510,7 +504,7 @@ export function SubscriptionModal({
                 )}
                 {isOpenCodeGo && (
                   <span className="xd-mono rounded border border-[var(--xd-accent-border)] bg-[var(--xd-accent-soft)] px-1.5 py-0.5 text-[10px] font-medium text-[var(--xd-accent)]">
-                    Go API
+                    {openCodeIsHttpFallback ? 'HTTP Fallback' : 'ACP'}
                   </span>
                 )}
               </div>
@@ -762,8 +756,9 @@ export function SubscriptionModal({
                     >
                       <p className="text-[11px] text-[var(--xd-ink-secondary)]">
                         Optional: authenticate the Antigravity ACP runtime with
-                        a Google AI Studio <span className="xd-mono">GEMINI_API_KEY</span>{' '}
-                        (kept in server memory only, never saved to repo files).
+                        a Google AI Studio{' '}
+                        <span className="xd-mono">GEMINI_API_KEY</span> (kept in
+                        server memory only, never saved to repo files).
                       </p>
                       <div className="flex items-center gap-1.5">
                         <input
@@ -798,7 +793,12 @@ export function SubscriptionModal({
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <div className="flex items-center gap-1.5 font-medium text-[var(--xd-ink)]">
                     <ShieldCheck className="size-3.5 text-[var(--xd-commit)]" />
-                    <span>OpenCode Go Inference API</span>
+                    <span>
+                      {openCodeGoStatus?.agentName || 'OpenCode ACP Server'}
+                      {openCodeGoStatus?.agentVersion
+                        ? ` v${openCodeGoStatus.agentVersion}`
+                        : ''}
+                    </span>
                   </div>
                   <span
                     className={cn(
@@ -810,7 +810,9 @@ export function SubscriptionModal({
                           : openCodeGoStatus?.authenticated &&
                               !openCodeGoStatus.entitled
                             ? 'bg-[var(--xd-danger-soft)] text-[var(--xd-danger)]'
-                            : 'bg-[var(--xd-sketch-soft)] text-[var(--xd-sketch)]',
+                            : openCodeBinaryAvailable
+                              ? 'bg-[var(--xd-sketch-soft)] text-[var(--xd-sketch)]'
+                              : 'bg-[var(--xd-danger-soft)] text-[var(--xd-danger)]',
                     )}
                   >
                     {isOpenCodeGoConnected ? (
@@ -819,45 +821,67 @@ export function SubscriptionModal({
                         <span>
                           {openCodeGoStatus?.rateLimited
                             ? 'Connected · Rate limited'
-                            : 'Connected · OpenCode Go'}
+                            : openCodeIsHttpFallback
+                              ? 'Connected · OPENCODE_API_KEY fallback'
+                              : 'Connected · OpenCode ACP'}
                         </span>
                       </>
                     ) : openCodeGoStatus?.authenticated &&
                       !openCodeGoStatus.entitled ? (
                       <span>Go subscription required</span>
+                    ) : openCodeBinaryAvailable ? (
+                      <span>Login required</span>
                     ) : (
-                      <span>API key required</span>
+                      <span>OpenCode CLI not installed</span>
                     )}
                   </span>
                 </div>
 
                 <p className="mt-1.5 text-[11.5px] leading-relaxed text-[var(--xd-ink-secondary)]">
-                  Connects directly to OpenCode Go (
-                  <span className="xd-mono">opencode.ai/inference/go</span>)
-                  with per-document{' '}
-                  <span className="xd-mono">x-opencode-session</span> routing
-                  across Chat Completions, Responses, Anthropic Messages, and
-                  Gemini models. Create a personal API key in the OpenCode
-                  Console under{' '}
-                  <span className="font-medium text-[var(--xd-ink)]">
-                    Account → Personal API keys
-                  </span>{' '}
-                  or set <span className="xd-mono">OPENCODE_API_KEY</span> in{' '}
-                  <span className="xd-mono">.env.local</span>.
+                  {openCodeIsHttpFallback ? (
+                    <>
+                      OpenCode CLI was not found on this machine, so xDrive is
+                      falling back to direct HTTP against{' '}
+                      <span className="xd-mono">opencode.ai/inference/go</span>{' '}
+                      using <span className="xd-mono">OPENCODE_API_KEY</span>{' '}
+                      from the server environment. Install OpenCode CLI and run{' '}
+                      <span className="xd-mono">opencode auth login</span> to
+                      use ACP without storing an API key in xDrive.
+                    </>
+                  ) : (
+                    <>
+                      Communicates directly with the local OpenCode CLI over
+                      Agent Client Protocol (
+                      <span className="xd-mono">opencode acp</span>, JSON-RPC
+                      2.0 <span className="xd-mono">stdio</span>) and uses
+                      OpenCode’s own credential store from{' '}
+                      <span className="xd-mono">opencode auth login</span>.
+                      xDrive never asks for or persists an OpenCode API key.
+                    </>
+                  )}
                 </p>
 
                 <div className="xd-mono mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[10.5px] text-[var(--xd-ink-muted)]">
                   <span className="inline-flex items-center gap-1">
                     <Terminal className="size-3" />
-                    {openCodeGoStatus?.endpointBaseUrl || active.endpointUrl}
+                    {openCodeGoStatus?.binaryPath ||
+                      openCodeGoStatus?.endpointBaseUrl ||
+                      active.endpointUrl}
                   </span>
-                  {openCodeGoStatus?.maskedKey && (
+                  {openCodeBinaryAvailable &&
+                    openCodeGoStatus?.binarySource &&
+                    openCodeGoStatus.binarySource !== 'none' && (
+                      <span>source: {openCodeGoStatus.binarySource}</span>
+                    )}
+                  {openCodeGoStatus?.loggedInProviders &&
+                    openCodeGoStatus.loggedInProviders.length > 0 && (
+                      <span>
+                        auth: {openCodeGoStatus.loggedInProviders.join(', ')}
+                      </span>
+                    )}
+                  {openCodeIsHttpFallback && openCodeGoStatus.maskedKey && (
                     <span>
-                      key: {openCodeGoStatus.maskedKey} (
-                      {openCodeGoStatus.keySource === 'env'
-                        ? 'OPENCODE_API_KEY'
-                        : 'server memory'}
-                      )
+                      key: {openCodeGoStatus.maskedKey} (OPENCODE_API_KEY)
                     </span>
                   )}
                 </div>
@@ -889,7 +913,9 @@ export function SubscriptionModal({
                                 ? 'bg-[var(--xd-sketch)]'
                                 : 'bg-[var(--xd-accent)]',
                             )}
-                            style={{ width: `${Math.min(100, meter.percent)}%` }}
+                            style={{
+                              width: `${Math.min(100, meter.percent)}%`,
+                            }}
                           />
                         </div>
                       </div>
@@ -905,75 +931,121 @@ export function SubscriptionModal({
                 </p>
               )}
 
-              <form
-                className="space-y-2 rounded border border-[var(--xd-border)] bg-[var(--xd-rail)] p-2.5"
-                onSubmit={(event) => {
-                  event.preventDefault()
-                  const trimmed = openCodeApiKey.trim()
-                  if (!trimmed) return
-                  if (onAuthenticateOpenCodeGo) {
-                    onAuthenticateOpenCodeGo({ apiKey: trimmed })
-                  } else {
-                    patchActive({
-                      authMethod: 'api_key',
-                      maskedCredential: maskSecret(trimmed),
-                      connected: true,
-                      status: 'active',
-                    })
-                  }
-                  setOpenCodeApiKey('')
-                }}
-              >
-                <p className="text-[11px] text-[var(--xd-ink-secondary)]">
-                  Paste your OpenCode API key to verify your Go subscription and
-                  enable OpenCode Go models (kept in server memory only, never
-                  written to repository files).
-                </p>
-                <div className="flex flex-wrap items-center gap-1.5">
-                  <input
-                    type="password"
-                    autoComplete="off"
-                    aria-label="OpenCode Go API key"
-                    value={openCodeApiKey}
-                    onChange={(event) => setOpenCodeApiKey(event.target.value)}
-                    placeholder={
-                      openCodeGoStatus?.maskedKey ?? 'Paste OpenCode API key...'
-                    }
-                    className="h-7 min-w-[180px] flex-1 rounded border border-[var(--xd-border)] bg-[var(--xd-canvas)] px-2 text-[12px] outline-none focus-visible:border-[var(--xd-accent)]"
-                  />
-                  <button
-                    type="submit"
-                    disabled={
-                      !openCodeApiKey.trim() || Boolean(openCodeGoBusy)
-                    }
-                    className="inline-flex h-7 items-center gap-1.5 rounded bg-[var(--xd-accent)] px-3 text-[11.5px] font-medium text-white hover:bg-[var(--xd-accent-hover)] disabled:opacity-40"
-                  >
-                    {openCodeGoBusy === 'authenticate' ? (
-                      <Loader2 className="size-3 animate-spin" />
-                    ) : (
-                      <KeyRound className="size-3" />
+              {!openCodeBinaryAvailable && !isOpenCodeGoConnected ? (
+                <div className="space-y-2 rounded border border-[var(--xd-border)] bg-[var(--xd-rail)] p-3 text-[11.5px]">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <p className="font-medium text-[var(--xd-ink)]">
+                      Set up OpenCode CLI (ACP)
+                    </p>
+                    {onRefreshOpenCodeGo && (
+                      <button
+                        type="button"
+                        disabled={Boolean(openCodeGoBusy)}
+                        onClick={onRefreshOpenCodeGo}
+                        className="inline-flex h-7 items-center gap-1.5 rounded bg-[var(--xd-accent)] px-2.5 text-[11.5px] font-medium text-white hover:bg-[var(--xd-accent-hover)] disabled:opacity-45"
+                      >
+                        <RefreshCw
+                          className={cn(
+                            'size-3',
+                            openCodeGoBusy === 'refresh' && 'animate-spin',
+                          )}
+                        />
+                        <span>Detect CLI</span>
+                      </button>
                     )}
-                    <span>
-                      {isOpenCodeGoConnected ? 'Update key' : 'Connect'}
+                  </div>
+                  <ol className="list-decimal space-y-1.5 pl-4 text-[var(--xd-ink-secondary)]">
+                    <li>
+                      Install OpenCode CLI (or point{' '}
+                      <span className="xd-mono">XDRIVE_OPENCODE_BIN</span> to
+                      your binary in <span className="xd-mono">.env.local</span>
+                      ):
+                      <pre className="xd-mono mt-1 overflow-x-auto rounded border border-[var(--xd-border)] bg-[var(--xd-canvas)] px-2 py-1 text-[11px] text-[var(--xd-ink)]">
+                        curl -fsSL https://opencode.ai/install | bash
+                      </pre>
+                    </li>
+                    <li>
+                      Sign in with your OpenCode Go subscription (stored in
+                      OpenCode’s own credential store):
+                      <pre className="xd-mono mt-1 overflow-x-auto rounded border border-[var(--xd-border)] bg-[var(--xd-canvas)] px-2 py-1 text-[11px] text-[var(--xd-ink)]">
+                        opencode auth login
+                      </pre>
+                    </li>
+                    <li>
+                      Click{' '}
+                      <span className="font-medium text-[var(--xd-ink)]">
+                        Detect CLI
+                      </span>{' '}
+                      to connect over ACP. (If you cannot install the CLI,{' '}
+                      <span className="xd-mono">OPENCODE_API_KEY</span> in{' '}
+                      <span className="xd-mono">.env.local</span> works as a
+                      direct-HTTP fallback.)
+                    </li>
+                  </ol>
+                </div>
+              ) : openCodeBinaryAvailable && !isOpenCodeGoConnected ? (
+                <div className="space-y-2 rounded border border-[var(--xd-border)] bg-[var(--xd-rail)] p-3 text-[11.5px]">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <p className="font-medium text-[var(--xd-ink)]">
+                      Sign in via OpenCode CLI
+                    </p>
+                    {onRefreshOpenCodeGo && (
+                      <button
+                        type="button"
+                        disabled={Boolean(openCodeGoBusy)}
+                        onClick={onRefreshOpenCodeGo}
+                        className="inline-flex h-7 items-center gap-1.5 rounded bg-[var(--xd-accent)] px-2.5 text-[11.5px] font-medium text-white hover:bg-[var(--xd-accent-hover)] disabled:opacity-45"
+                      >
+                        <RefreshCw
+                          className={cn(
+                            'size-3',
+                            openCodeGoBusy === 'refresh' && 'animate-spin',
+                          )}
+                        />
+                        <span>Check login</span>
+                      </button>
+                    )}
+                  </div>
+                  <p className="text-[var(--xd-ink-secondary)]">
+                    OpenCode CLI was detected, but no active OpenCode Go login
+                    was found. Run the command below in your terminal, choose{' '}
+                    <span className="font-medium text-[var(--xd-ink)]">
+                      OpenCode Go
                     </span>
-                  </button>
-                  {isOpenCodeGoConnected && onLogoutOpenCodeGo && (
-                    <button
-                      type="button"
-                      disabled={Boolean(openCodeGoBusy)}
-                      onClick={onLogoutOpenCodeGo}
-                      className="inline-flex h-7 items-center gap-1 rounded border border-[var(--xd-border)] px-2.5 text-[11.5px] text-[var(--xd-ink-secondary)] hover:border-[var(--xd-danger)]/40 hover:text-[var(--xd-danger)] disabled:opacity-45"
-                    >
-                      {openCodeGoBusy === 'logout' ? (
-                        <Loader2 className="size-3 animate-spin" />
-                      ) : (
-                        <LogOut className="size-3" />
-                      )}
-                      <span>Disconnect</span>
-                    </button>
+                    , then click{' '}
+                    <span className="font-medium text-[var(--xd-ink)]">
+                      Check login
+                    </span>
+                    :
+                  </p>
+                  <pre className="xd-mono overflow-x-auto rounded border border-[var(--xd-border)] bg-[var(--xd-canvas)] px-2.5 py-1.5 text-[11px] text-[var(--xd-ink)]">
+                    opencode auth login
+                  </pre>
+                </div>
+              ) : (
+                <div className="rounded border border-[var(--xd-border)] bg-[var(--xd-rail)] px-3 py-2 text-[11.5px] text-[var(--xd-ink-secondary)]">
+                  {openCodeIsHttpFallback ? (
+                    <>
+                      Using <span className="xd-mono">OPENCODE_API_KEY</span>{' '}
+                      fallback because <span className="xd-mono">opencode</span>{' '}
+                      is not on PATH. Install OpenCode CLI and run{' '}
+                      <span className="xd-mono">opencode auth login</span> to
+                      switch to ACP automatically.
+                    </>
+                  ) : (
+                    <>
+                      Credentials are managed by OpenCode CLI. Run{' '}
+                      <span className="xd-mono">opencode auth list</span> or{' '}
+                      <span className="xd-mono">opencode auth logout</span> in
+                      your terminal to manage accounts, then click{' '}
+                      <span className="font-medium text-[var(--xd-ink)]">
+                        Refresh
+                      </span>
+                      .
+                    </>
                   )}
                 </div>
-              </form>
+              )}
             </div>
           ) : (
             <div className="space-y-2">
@@ -1041,7 +1113,9 @@ export function SubscriptionModal({
                       aria-label="API key or token"
                       value={draftKey}
                       onChange={(event) => setDraftKey(event.target.value)}
-                      placeholder={active.maskedCredential ?? 'Paste API key...'}
+                      placeholder={
+                        active.maskedCredential ?? 'Paste API key...'
+                      }
                       className="h-7 min-w-0 flex-1 rounded border border-[var(--xd-border)] bg-[var(--xd-canvas)] px-2 text-[12px] outline-none focus-visible:border-[var(--xd-accent)]"
                     />
                     <button
@@ -1087,9 +1161,13 @@ export function SubscriptionModal({
             <h4 className="mb-1.5 text-[11.5px] font-medium text-[var(--xd-ink-muted)]">
               {isAntigravity && isAuthenticated
                 ? `Plan models from Antigravity ACP (${active.models.length})`
-                : isOpenCodeGo
-                  ? `OpenCode Go catalog (${active.models.length})`
-                  : 'Available models'}
+                : isOpenCodeGo &&
+                    isOpenCodeGoConnected &&
+                    !openCodeIsHttpFallback
+                  ? `Models from OpenCode ACP (${active.models.length})`
+                  : isOpenCodeGo
+                    ? `OpenCode Go catalog (${active.models.length})`
+                    : 'Available models'}
             </h4>
             <ul className="divide-y divide-[var(--xd-border)] rounded border border-[var(--xd-border)]">
               {active.models.map((item) => (

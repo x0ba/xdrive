@@ -110,6 +110,29 @@ All Drive data—folders, `.mrbl` documents, metadata, share settings, checkpoin
 
 See [docs/drive-layout.md](./docs/drive-layout.md) for the complete on-disk layout, schemas, and backward-compatibility details.
 
+## AI Providers (ACP)
+
+xDrive drives both **Google Antigravity** and **OpenCode** over the standard **Agent Client Protocol (ACP)** (JSON-RPC 2.0 over `stdio`) inside isolated temporary scratch workspaces so credentials remain in each CLI's own auth store and xDrive never stores an OpenCode API key on disk or inside the Drive folder.
+
+### OpenCode (OpenCode Go via `opencode acp`)
+
+1. Install the OpenCode CLI (e.g. `curl -fsSL https://opencode.ai/install | bash`), or point `XDRIVE_OPENCODE_BIN` in `.env.local` to your `opencode` binary.
+2. Authenticate using OpenCode's own credential store:
+
+   ```bash
+   opencode auth login
+   ```
+
+   Select **OpenCode Go** (or your OpenCode account). Credentials stay in OpenCode's local store (`opencode auth list` / `opencode auth logout`).
+
+3. Open **Models & Providers** in xDrive and click **Refresh** to detect the CLI and load your OpenCode Go models for `/api/ai` collaborate and Drive Chat.
+
+**Fallback behavior:** When the `opencode` CLI is not installed on the host, xDrive falls back to direct HTTP against `https://opencode.ai/inference/go` only if `OPENCODE_API_KEY` (or `OPENCODE_GO_API_KEY`) is set in the server environment (`.env.local`). No API key is accepted in the UI or persisted to disk.
+
+### Google Antigravity (`agy acp`)
+
+Install the official `agy` CLI (or set `XDRIVE_ANTIGRAVITY_BIN`), or download the SHA-256 verified ACP Registry binary from **Models & Providers**, and sign in natively via ACP `authenticate`.
+
 # TanStack Chat Application
 
 Am example chat application built with TanStack Start, TanStack Store, and Claude AI.

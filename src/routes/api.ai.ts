@@ -5,9 +5,11 @@ import {
 } from '#/lib/ai/antigravity-acp.server'
 import { toXDriveAntigravityModelId } from '#/lib/ai/antigravity-types'
 import {
-  OpenCodeGoError,
-  getOpenCodeGoManager,
-} from '#/lib/ai/opencode-go.server'
+  OpenCodeAcpError,
+  getOpenCodeStatus,
+  runOpenCodePrompt,
+} from '#/lib/ai/opencode-acp.server'
+import { OpenCodeGoError } from '#/lib/ai/opencode-go.server'
 import { toXDriveOpenCodeGoModelId } from '#/lib/ai/opencode-go-types'
 import {
   buildMarbleAcpPrompt,
@@ -28,6 +30,19 @@ function errorResponse(error: unknown) {
       {
         ok: false,
         providerId: 'antigravity',
+        code: error.code,
+        authRequired: error.code === 'AUTH_REQUIRED',
+        binaryMissing: error.code === 'BINARY_MISSING',
+        error: error.message,
+      },
+      error.httpStatus,
+    )
+  }
+  if (error instanceof OpenCodeAcpError) {
+    return json(
+      {
+        ok: false,
+        providerId: 'opencode-go',
         code: error.code,
         authRequired: error.code === 'AUTH_REQUIRED',
         binaryMissing: error.code === 'BINARY_MISSING',
@@ -73,7 +88,7 @@ export async function GET({ request }: { request: Request }) {
 
   try {
     if (provider === 'opencode-go') {
-      const status = await getOpenCodeGoManager().getStatus(refresh)
+      const status = await getOpenCodeStatus(refresh)
       return json(status)
     }
     if (provider === 'antigravity') {
@@ -83,7 +98,7 @@ export async function GET({ request }: { request: Request }) {
 
     const [antigravityStatus, openCodeGoStatus] = await Promise.all([
       getAntigravityAcpManager().getStatus(),
-      getOpenCodeGoManager().getStatus(refresh),
+      getOpenCodeStatus(refresh),
     ])
     return json({
       ...antigravityStatus,
@@ -102,7 +117,10 @@ export async function POST({ request }: { request: Request }) {
   try {
     const parsed: unknown = await request.json()
     if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-      return json({ ok: false, error: 'Request body must be a JSON object' }, 400)
+      return json(
+        { ok: false, error: 'Request body must be a JSON object' },
+        400,
+      )
     }
     body = parsed as Record<string, unknown>
   } catch {
@@ -112,12 +130,11 @@ export async function POST({ request }: { request: Request }) {
   const action = typeof body.action === 'string' ? body.action : 'collaborate'
   const providerId = resolveProviderId(body)
   const antigravity = getAntigravityAcpManager()
-  const openCodeGo = getOpenCodeGoManager()
 
   try {
     if (action === 'status') {
       if (providerId === 'opencode-go') {
-        const status = await openCodeGo.getStatus(Boolean(body.refresh))
+        const status = await getOpenCodeStatus(Boolean(body.refresh))
         return json(status)
       }
       const status = await antigravity.getStatus()
@@ -130,11 +147,19 @@ export async function POST({ request }: { request: Request }) {
     }
 
     if (action === 'authenticate') {
-      const apiKey =
-        typeof body.apiKey === 'string' ? body.apiKey : undefined
+      const apiKey = typeof body.apiKey === 'string' ? body.apiKey : undefined
       if (providerId === 'opencode-go') {
-        const status = await openCodeGo.authenticate(apiKey)
-        return json(status)
+        return json(
+          {
+            ok: false,
+            providerId: 'opencode-go',
+            code: 'AUTH_REQUIRED',
+            authRequired: true,
+            error:
+              'xDrive uses the local OpenCode CLI over ACP and does not accept or store OpenCode API keys. Run `opencode auth login` in your terminal (select OpenCode Go), then refresh status.',
+          },
+          400,
+        )
       }
       const methodId =
         typeof body.methodId === 'string' && body.methodId.trim()
@@ -146,8 +171,16 @@ export async function POST({ request }: { request: Request }) {
 
     if (action === 'logout') {
       if (providerId === 'opencode-go') {
-        const status = await openCodeGo.logout()
-        return json(status)
+        return json(
+          {
+            ok: false,
+            providerId: 'opencode-go',
+            code: 'AUTH_REQUIRED',
+            error:
+              'Manage OpenCode credentials directly with `opencode auth logout` in your terminal, then refresh status.',
+          },
+          400,
+        )
       }
       const status = await antigravity.logout()
       return json(status)
@@ -217,7 +250,7 @@ export async function POST({ request }: { request: Request }) {
             ? body.sessionId.trim()
             : undefined
 
-        const goResult = await openCodeGo.runPrompt({
+        const openCodeResult = await runOpenCodePrompt({
           prompt,
           modelId: collaborateInput.modelId,
           sessionId,
@@ -225,26 +258,32 @@ export async function POST({ request }: { request: Request }) {
           signal: request.signal,
         })
 
-        const resolvedModelId = toXDriveOpenCodeGoModelId(goResult.modelId)
+        const resolvedModelId = toXDriveOpenCodeGoModelId(
+          openCodeResult.modelId,
+        )
         const parsed = parseMarbleAcpResponse(
-          goResult.text,
+          openCodeResult.text,
           collaborateInput,
           resolvedModelId,
         )
 
         return json({
           ok: true,
-          source: 'opencode-go',
+          source:
+            openCodeResult.transport === 'acp' ? 'opencode-acp' : 'opencode-go',
           proposal: parsed.proposal,
           stages: parsed.stages,
           newDocument: parsed.newDocument,
-          thoughts: goResult.thoughts,
+          thoughts: openCodeResult.thoughts,
           runtime: {
-            protocol: goResult.apiProtocol,
-            agentName: 'OpenCode Go',
-            agentVersion: 'v1',
+            protocol: openCodeResult.protocol,
+            agentName: openCodeResult.agentName,
+            agentVersion: openCodeResult.agentVersion,
             modelId: resolvedModelId,
-            stopReason: goResult.stopReason,
+            ...(openCodeResult.acpModelId
+              ? { acpModelId: openCodeResult.acpModelId }
+              : {}),
+            stopReason: openCodeResult.stopReason,
           },
         })
       }

@@ -8,9 +8,10 @@ import {
 } from '#/lib/ai/antigravity-acp.server'
 import { toXDriveAntigravityModelId } from '#/lib/ai/antigravity-types'
 import {
-  OpenCodeGoError,
-  getOpenCodeGoManager,
-} from '#/lib/ai/opencode-go.server'
+  OpenCodeAcpError,
+  runOpenCodePrompt,
+} from '#/lib/ai/opencode-acp.server'
+import { OpenCodeGoError } from '#/lib/ai/opencode-go.server'
 import { toXDriveOpenCodeGoModelId } from '#/lib/ai/opencode-go-types'
 import {
   buildDriveChatSystemPrompt,
@@ -55,6 +56,15 @@ function extractStreamError(
       error: error.message,
     }
   }
+  if (error instanceof OpenCodeAcpError) {
+    return {
+      type: 'error',
+      providerId: 'opencode-go',
+      code: error.code,
+      authRequired: error.code === 'AUTH_REQUIRED',
+      error: error.message,
+    }
+  }
   if (error instanceof OpenCodeGoError) {
     return {
       type: 'error',
@@ -82,9 +92,20 @@ async function runTanStackDirectProvider(params: {
   signal: AbortSignal
   onTextDelta: (delta: string) => void
   onThoughtDelta: (delta: string) => void
-}): Promise<{ text: string; thoughts: string[]; modelId: string; stopReason: string }> {
-  const { providerId, body, systemPrompt, signal, onTextDelta, onThoughtDelta } =
-    params
+}): Promise<{
+  text: string
+  thoughts: string[]
+  modelId: string
+  stopReason: string
+}> {
+  const {
+    providerId,
+    body,
+    systemPrompt,
+    signal,
+    onTextDelta,
+    onThoughtDelta,
+  } = params
   if (providerId === 'openai' && !process.env.OPENAI_API_KEY?.trim()) {
     throw new Error(
       'OpenAI is not configured on this server (set OPENAI_API_KEY in .env.local or switch to Google Antigravity / OpenCode Go).',
@@ -171,13 +192,12 @@ export async function POST({ request }: { request: Request }) {
   }
 
   const providerId = resolveProviderId(body)
-  const drive =
-    (body.drive as DriveChatApiRequest['drive'] | undefined) ?? {
-      docs: [],
-      trashedDocs: [],
-      folders: [],
-      focusedRefs: [],
-    }
+  const drive = (body.drive as DriveChatApiRequest['drive'] | undefined) ?? {
+    docs: [],
+    trashedDocs: [],
+    folders: [],
+    focusedRefs: [],
+  }
 
   const stream = new ReadableStream<Uint8Array>({
     async start(controller) {
@@ -267,8 +287,14 @@ export async function POST({ request }: { request: Request }) {
           protocol = 'acp'
           stopReason = result.stopReason
         } else if (providerId === 'opencode-go') {
-          const result = await getOpenCodeGoManager().runPrompt({
+          const acpPrompt = buildSingleTurnPromptForAcp({
+            ...body,
+            drive,
+            providerId,
+          })
+          const result = await runOpenCodePrompt({
             prompt: latestMessage,
+            acpPrompt,
             systemPrompt,
             history,
             modelId: body.modelId,
@@ -281,7 +307,7 @@ export async function POST({ request }: { request: Request }) {
           rawText = result.text
           thoughts = result.thoughts
           resolvedModelId = toXDriveOpenCodeGoModelId(result.modelId)
-          protocol = result.apiProtocol
+          protocol = result.protocol
           stopReason = result.stopReason
         } else if (providerId === 'openai' || providerId === 'claude') {
           const result = await runTanStackDirectProvider({

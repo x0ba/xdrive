@@ -6,9 +6,9 @@ import { openCodeGoModelsToSpecs } from '../ai/opencode-go-client'
 // 1. Google Antigravity via the official Agent Client Protocol (ACP) runtime
 //    (`agy acp` / ACP Registry binary), using native Google OAuth for personal
 //    Google AI plans (Pro / Ultra / Free), Gemini Enterprise, or Gemini API key.
-// 2. OpenCode Go via the official OpenCode Go inference API
-//    (`https://opencode.ai/inference/go`), authenticating with OPENCODE_API_KEY
-//    or a personal/service-account key entered in Models & Providers.
+// 2. OpenCode Go via the local OpenCode CLI over ACP (`opencode acp`), relying
+//    on OpenCode's own credential store (`opencode auth login`) with an optional
+//    `OPENCODE_API_KEY` direct-HTTP fallback only when the CLI is not installed.
 //
 // Live connection state, usage meters, and exact available models are populated
 // from GET /api/ai. Other third-party providers start honestly disconnected.
@@ -43,13 +43,13 @@ export const INITIAL_AI_SUBSCRIPTIONS: AISubscription[] = [
     providerId: 'opencode-go',
     name: 'OpenCode Go',
     tagline:
-      'Unified subscription routing across GLM, Kimi, DeepSeek, Gemini, Claude, GPT, and Qwen via opencode.ai/inference/go.',
-    planName: 'Go Subscription',
+      'Local OpenCode CLI over ACP (`opencode acp`) authenticated via `opencode auth login` — no API key stored in xDrive.',
+    planName: 'OpenCode ACP',
     connected: false,
-    authMethod: 'api_key',
+    authMethod: 'opencode_acp',
     status: 'disconnected',
     defaultModelId: 'opencode-go/glm-5.3',
-    endpointUrl: 'https://opencode.ai/inference/go',
+    endpointUrl: 'opencode acp (JSON-RPC stdio)',
     usageThisMonth: { opsGenerated: 0, appsBuilt: 0, quotaPercent: 0 },
     models: openCodeGoModelsToSpecs(DEFAULT_OPENCODE_GO_MODELS),
   },

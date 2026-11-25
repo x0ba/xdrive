@@ -1,4 +1,4 @@
-// Browser-side client helpers for OpenCode Go (/api/ai).
+// Browser-side client helpers for OpenCode ACP / OpenCode Go (/api/ai).
 
 import type { AIModelSpec, AISubscription } from '#/lib/types'
 import {
@@ -20,49 +20,21 @@ async function readJsonOrThrow<T>(response: Response): Promise<T> {
     const message =
       typeof record?.error === 'string' && record.error
         ? record.error
-        : `OpenCode Go request failed (HTTP ${response.status})`
+        : `OpenCode request failed (HTTP ${response.status})`
     throw new Error(message)
   }
   return raw as T
 }
 
-export async function fetchOpenCodeGoStatus(): Promise<OpenCodeGoRuntimeStatus> {
-  const response = await fetch('/api/ai?provider=opencode-go', {
+export async function fetchOpenCodeGoStatus(
+  refresh = false,
+): Promise<OpenCodeGoRuntimeStatus> {
+  const query = refresh
+    ? '/api/ai?provider=opencode-go&refresh=1'
+    : '/api/ai?provider=opencode-go'
+  const response = await fetch(query, {
     method: 'GET',
     headers: { accept: 'application/json' },
-  })
-  return await readJsonOrThrow<OpenCodeGoRuntimeStatus>(response)
-}
-
-export async function authenticateOpenCodeGo(options?: {
-  apiKey?: string
-}): Promise<OpenCodeGoRuntimeStatus> {
-  const response = await fetch('/api/ai', {
-    method: 'POST',
-    headers: {
-      'content-type': 'application/json',
-      accept: 'application/json',
-    },
-    body: JSON.stringify({
-      action: 'authenticate',
-      providerId: 'opencode-go',
-      apiKey: options?.apiKey,
-    }),
-  })
-  return await readJsonOrThrow<OpenCodeGoRuntimeStatus>(response)
-}
-
-export async function logoutOpenCodeGo(): Promise<OpenCodeGoRuntimeStatus> {
-  const response = await fetch('/api/ai', {
-    method: 'POST',
-    headers: {
-      'content-type': 'application/json',
-      accept: 'application/json',
-    },
-    body: JSON.stringify({
-      action: 'logout',
-      providerId: 'opencode-go',
-    }),
   })
   return await readJsonOrThrow<OpenCodeGoRuntimeStatus>(response)
 }
@@ -83,7 +55,9 @@ function inferRole(model: OpenCodeGoModelOption): AIModelSpec['role'] {
   return 'implementation'
 }
 
-function inferSpeedTier(model: OpenCodeGoModelOption): AIModelSpec['speedTier'] {
+function inferSpeedTier(
+  model: OpenCodeGoModelOption,
+): AIModelSpec['speedTier'] {
   const text = `${model.id} ${model.name}`.toLowerCase()
   if (text.includes('flash')) return 'fast'
   if (text.includes('haiku')) return 'fast'
@@ -97,14 +71,16 @@ export function openCodeGoModelsToSpecs(
     id: toXDriveOpenCodeGoModelId(model.id),
     name: model.name,
     providerId: 'opencode-go',
-    badge: 'OpenCode Go',
+    badge: model.apiProtocol === 'acp' ? 'OpenCode ACP' : 'OpenCode Go',
     role: inferRole(model),
     contextWindow: formatContextWindow(model.contextWindow),
     speedTier: inferSpeedTier(model),
     supportsVisionSketch: model.supportsVision,
     recommendedFor:
       model.description ||
-      `OpenCode Go (${model.apiProtocol})`,
+      (model.apiProtocol === 'acp'
+        ? 'OpenCode Go via local OpenCode ACP'
+        : `OpenCode Go (${model.apiProtocol})`),
   }))
 }
 
@@ -136,14 +112,29 @@ export function applyOpenCodeGoStatusToSubscriptions<
         ? 'rate_limited'
         : 'active'
 
+    const isHttpFallback = status.transport === 'http-fallback'
+    const planName = isHttpFallback
+      ? isConnected
+        ? 'Go (HTTP fallback)'
+        : 'Go Subscription'
+      : isConnected
+        ? 'OpenCode ACP'
+        : 'OpenCode CLI'
+
     return {
       ...sub,
       connected: isConnected,
       status: nextStatus,
-      planName: isConnected ? 'Go' : 'Go Subscription',
-      authMethod: 'api_key',
-      maskedCredential: status.maskedKey ?? undefined,
-      endpointUrl: status.endpointBaseUrl || sub.endpointUrl,
+      planName,
+      authMethod: isHttpFallback ? 'api_key' : 'opencode_acp',
+      maskedCredential: isHttpFallback
+        ? (status.maskedKey ?? undefined)
+        : undefined,
+      endpointUrl:
+        status.binaryPath ||
+        (isHttpFallback
+          ? status.endpointBaseUrl
+          : 'opencode acp (JSON-RPC stdio)'),
       defaultModelId: defaultModelId || sub.defaultModelId,
       usageThisMonth: {
         ...sub.usageThisMonth,

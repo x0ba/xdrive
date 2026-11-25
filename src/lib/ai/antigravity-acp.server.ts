@@ -14,33 +14,27 @@
 //   wraps headless `agy -p` loops.
 
 import { createHash } from 'node:crypto'
-import { execFile, spawn } from 'node:child_process'
-import type { ChildProcessWithoutNullStreams } from 'node:child_process'
-import {
-  access,
-  chmod,
-  constants as fsConstants,
-  mkdir,
-  readFile,
-  writeFile,
-} from 'node:fs/promises'
+import { chmod, mkdir, readFile, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
-import { Readable, Writable } from 'node:stream'
-import { promisify } from 'node:util'
 import JSZip from 'jszip'
+import type { InitializeResponse } from '@agentclientprotocol/sdk/unstable'
 import {
-  PROTOCOL_VERSION,
-  client as createAcpClient,
-  ndJsonStream,
-} from '@agentclientprotocol/sdk/unstable'
+  AcpError,
+  AcpProcessRuntime,
+  acpCacheDir,
+  acpScratchWorkspaceDir,
+  isAcpAuthRequiredError,
+  isExecutable,
+  whichBinary,
+} from './acp-runtime.server'
 import type {
-  ClientConnection,
-  ContentBlock,
-  InitializeResponse,
-  NewSessionResponse,
-  SessionConfigOption,
-} from '@agentclientprotocol/sdk/unstable'
+  AcpErrorCode,
+  AcpPromptInput,
+  AcpPromptOutput,
+  AcpSessionDiscovery,
+  ResolvedAcpBinary,
+} from './acp-runtime.server'
 import type {
   AntigravityAuthMethodId,
   AntigravityAuthMethodInfo,
@@ -50,8 +44,6 @@ import type {
   AntigravityRuntimeStatus,
 } from './antigravity-types'
 import { fromXDriveAntigravityModelId } from './antigravity-types'
-
-const execFileAsync = promisify(execFile)
 
 const ACP_REGISTRY_MANIFEST_URL =
   'https://raw.githubusercontent.com/agentclientprotocol/registry/main/antigravity-acp/agent.json'
@@ -64,12 +56,7 @@ const COMPLIANCE_INFO = {
   tokenExtraction: false as const,
 }
 
-interface ResolvedBinary {
-  source: AntigravityBinarySource
-  command: string
-  args: string[]
-  displayPath: string
-}
+type ResolvedBinary = ResolvedAcpBinary<AntigravityBinarySource>
 
 interface RegistryPlatformBinary {
   archive: string
@@ -96,52 +83,22 @@ interface InstalledRegistryMetadata {
   installedAt: string
 }
 
-export interface AntigravityPromptInput {
-  prompt: string
-  modelId?: string
-  reasoningEffort?: 'off' | 'low' | 'medium' | 'high' | 'max'
-  imageDataUrls?: string[]
-  signal?: AbortSignal
-  onTextDelta?: (delta: string) => void
-  onThoughtDelta?: (delta: string) => void
-}
+export type AntigravityPromptInput = AcpPromptInput
+export type AntigravityPromptOutput = AcpPromptOutput
 
-export interface AntigravityPromptOutput {
-  text: string
-  thoughts: string[]
-  stopReason: string
-  modelId: string
-  agentName: string
-  agentVersion: string
-}
-
-export class AntigravityAcpError extends Error {
-  readonly code:
-    | 'BINARY_MISSING'
-    | 'AUTH_REQUIRED'
-    | 'ACP_ERROR'
-    | 'TIMEOUT'
-    | 'INSTALL_FAILED'
-  readonly httpStatus: number
-
-  constructor(
-    code: AntigravityAcpError['code'],
-    message: string,
-    httpStatus = 500,
-  ) {
-    super(message)
+export class AntigravityAcpError extends AcpError {
+  constructor(code: AcpErrorCode, message: string, httpStatus = 500) {
+    super(code, message, httpStatus)
     this.name = 'AntigravityAcpError'
-    this.code = code
-    this.httpStatus = httpStatus
   }
 }
 
 function registryCacheDir(): string {
-  return path.join(os.homedir(), '.xdrive', 'acp', 'antigravity-acp')
+  return acpCacheDir('antigravity-acp')
 }
 
 function scratchWorkspaceDir(): string {
-  return path.join(os.tmpdir(), 'xdrive-antigravity-acp-workspace')
+  return acpScratchWorkspaceDir('antigravity')
 }
 
 function registryPlatformKey(): string | null {
@@ -156,42 +113,12 @@ function registryPlatformKey(): string | null {
   return null
 }
 
-async function isExecutable(filePath: string): Promise<boolean> {
-  try {
-    await access(
-      filePath,
-      process.platform === 'win32' ? fsConstants.F_OK : fsConstants.X_OK,
-    )
-    return true
-  } catch {
-    return false
-  }
-}
-
-async function whichBinary(cmd: string): Promise<string | null> {
-  try {
-    const tool = process.platform === 'win32' ? 'where' : 'which'
-    const { stdout } = await execFileAsync(tool, [cmd], { timeout: 2500 })
-    const first = stdout
-      .split(/\r?\n/)
-      .map((line) => line.trim())
-      .find(Boolean)
-    if (first && (await isExecutable(first))) return first
-  } catch {
-    // Ignore PATH lookup failure and fall through to known install locations.
-  }
-  return null
-}
-
 async function readInstalledRegistryBinary(): Promise<ResolvedBinary | null> {
   const metaPath = path.join(registryCacheDir(), 'installed.json')
   try {
     const raw = await readFile(metaPath, 'utf8')
     const meta = JSON.parse(raw) as InstalledRegistryMetadata
-    if (
-      meta.commandPath &&
-      (await isExecutable(meta.commandPath))
-    ) {
+    if (meta.commandPath && (await isExecutable(meta.commandPath))) {
       return {
         source: 'acp-registry',
         command: meta.commandPath,
@@ -325,7 +252,9 @@ export async function installOfficialAntigravityBinary(): Promise<ResolvedBinary
   const zip = await JSZip.loadAsync(buffer)
   const resolvedRoot = path.resolve(versionDir)
   for (const [entryName, entry] of Object.entries(zip.files)) {
-    const normalized = path.normalize(entryName).replace(/^(\.\.(\/|\\|$))+/, '')
+    const normalized = path
+      .normalize(entryName)
+      .replace(/^(\.\.(\/|\\|$))+/, '')
     if (!normalized || normalized.startsWith(path.sep)) continue
     const dest = path.resolve(versionDir, normalized)
     if (!dest.startsWith(resolvedRoot + path.sep) && dest !== resolvedRoot) {
@@ -387,152 +316,28 @@ export async function installOfficialAntigravityBinary(): Promise<ResolvedBinary
   }
 }
 
-function normalizeConfigOptions(
-  rawOptions: SessionConfigOption[] | null | undefined,
-): AntigravityConfigOption[] {
-  if (!Array.isArray(rawOptions)) return []
-  const result: AntigravityConfigOption[] = []
-  for (const opt of rawOptions) {
-    if (opt.type !== 'select') continue
-    const choices: AntigravityConfigOption['options'] = []
-    if (Array.isArray(opt.options)) {
-      for (const entry of opt.options) {
-        if ('options' in entry && Array.isArray(entry.options)) {
-          for (const nested of entry.options) {
-            choices.push({
-              value: nested.value,
-              name: nested.name,
-              description: nested.description ?? null,
-            })
-          }
-        } else if ('value' in entry) {
-          choices.push({
-            value: entry.value,
-            name: entry.name,
-            description: entry.description ?? null,
-          })
-        }
-      }
-    }
-    result.push({
-      id: opt.id,
-      name: opt.name,
-      description: opt.description ?? null,
-      category: opt.category ?? null,
-      currentValue: opt.currentValue,
-      options: choices,
-    })
+function extractAntigravityTier(
+  meta: Record<string, unknown> | undefined,
+): string | null {
+  if (!meta) return null
+  const agMeta = meta.antigravity as Record<string, unknown> | undefined
+  const candidate = agMeta?.tier ?? agMeta?.plan ?? meta.tier ?? meta.planName
+  if (typeof candidate === 'string' && candidate.trim()) {
+    return candidate.trim()
   }
-  return result
-}
-
-function extractModelsFromSession(session: NewSessionResponse): {
-  models: AntigravityModelOption[]
-  currentModelId: string | null
-  modelConfigId: string | null
-  configOptions: AntigravityConfigOption[]
-  tier: string | null
-} {
-  const configOptions = normalizeConfigOptions(session.configOptions)
-  const modelConfig =
-    configOptions.find((opt) => opt.category === 'model') ??
-    configOptions.find((opt) => opt.id.toLowerCase() === 'model') ??
-    null
-
-  let models: AntigravityModelOption[] = []
-  let currentModelId: string | null = null
-
-  if (modelConfig && modelConfig.options.length > 0) {
-    currentModelId = modelConfig.currentValue || modelConfig.options[0].value
-    models = modelConfig.options.map((choice) => ({
-      id: choice.value,
-      name: choice.name,
-      description: choice.description ?? null,
-      isDefault: choice.value === currentModelId,
-    }))
-  } else {
-    // Support legacy ACP `models` extension on NewSessionResponse if returned.
-    const legacy = (
-      session as NewSessionResponse & {
-        models?: {
-          currentModelId?: string
-          availableModels?: Array<{
-            modelId?: string
-            id?: string
-            name?: string
-            description?: string
-          }>
-        }
-      }
-    ).models
-    if (legacy && Array.isArray(legacy.availableModels)) {
-      currentModelId = legacy.currentModelId ?? null
-      models = legacy.availableModels
-        .map((item) => {
-          const id = item.modelId ?? item.id ?? ''
-          if (!id) return null
-          return {
-            id,
-            name: item.name || id,
-            description: item.description ?? null,
-            isDefault: id === currentModelId,
-          }
-        })
-        .filter((item): item is NonNullable<typeof item> => item !== null)
-    }
+  if (
+    candidate &&
+    typeof candidate === 'object' &&
+    'name' in candidate &&
+    typeof (candidate as { name?: unknown }).name === 'string'
+  ) {
+    return (candidate as { name: string }).name
   }
-
-  let tier: string | null = null
-  const meta = session._meta as Record<string, unknown> | undefined
-  if (meta) {
-    const agMeta = meta.antigravity as Record<string, unknown> | undefined
-    const candidate =
-      agMeta?.tier ?? agMeta?.plan ?? meta.tier ?? meta.planName
-    if (typeof candidate === 'string' && candidate.trim()) {
-      tier = candidate.trim()
-    } else if (
-      candidate &&
-      typeof candidate === 'object' &&
-      'name' in candidate &&
-      typeof (candidate as { name?: unknown }).name === 'string'
-    ) {
-      tier = (candidate as { name: string }).name
-    }
-  }
-
-  return {
-    models,
-    currentModelId,
-    modelConfigId: modelConfig?.id ?? null,
-    configOptions,
-    tier,
-  }
-}
-
-function isAuthRequiredError(error: unknown): boolean {
-  if (!error || typeof error !== 'object') return false
-  const code = (error as { code?: unknown }).code
-  const message =
-    error instanceof Error
-      ? error.message
-      : String((error as { message?: unknown }).message ?? '')
-  return code === -32000 || /authentication required|not authenticated/i.test(message)
-}
-
-function parseDataUrlImage(
-  dataUrl: string,
-): { mimeType: string; data: string } | null {
-  const match = dataUrl.match(/^data:(image\/[a-zA-Z0-9.+-]+);base64,(.+)$/)
-  if (!match) return null
-  return { mimeType: match[1], data: match[2] }
+  return null
 }
 
 class AntigravityAcpManager {
-  private child: ChildProcessWithoutNullStreams | null = null
-  private connection: ClientConnection | null = null
-  private initResponse: InitializeResponse | null = null
-  private resolvedBinary: ResolvedBinary | null = null
-  private stderrTail: string[] = []
+  private readonly runtime: AcpProcessRuntime<AntigravityBinarySource>
   private activeAuthMethod: string | null = null
   private ephemeralApiKey: string | null = null
   private cachedModels: AntigravityModelOption[] = []
@@ -540,174 +345,40 @@ class AntigravityAcpManager {
   private cachedModelConfigId: string | null = null
   private cachedConfigOptions: AntigravityConfigOption[] = []
   private cachedTier: string | null = null
-  private connectingPromise: Promise<void> | null = null
   private authLock: Promise<AntigravityRuntimeStatus> | null = null
 
-  private isAlive(): boolean {
-    return Boolean(
-      this.child &&
-        this.connection &&
-        this.initResponse &&
-        this.child.exitCode === null &&
-        !this.child.killed &&
-        !this.connection.signal.aborted,
-    )
+  constructor() {
+    this.runtime = new AcpProcessRuntime<AntigravityBinarySource>({
+      providerLabel: 'Antigravity',
+      defaultAgentName: 'Antigravity ACP Server',
+      workspaceDir: scratchWorkspaceDir,
+      resolveBinary: resolveAntigravityBinary,
+      getEnv: () => {
+        const env: NodeJS.ProcessEnv = { ...process.env }
+        if (this.ephemeralApiKey) {
+          env.GEMINI_API_KEY = this.ephemeralApiKey
+        }
+        return env
+      },
+      missingBinaryMessage: () =>
+        'Google Antigravity ACP binary (`agy`) is not installed. Install Antigravity CLI or download the official ACP Registry binary from Models & Providers.',
+      authRequiredMessage: () =>
+        'Google Antigravity is not signed in. Open Models & Providers to sign in with your Google AI plan.',
+      createError: (code, message, httpStatus) =>
+        new AntigravityAcpError(code, message, httpStatus),
+    })
   }
 
   async shutdown(): Promise<void> {
-    const conn = this.connection
-    const proc = this.child
-    this.connection = null
-    this.child = null
-    this.initResponse = null
-    this.connectingPromise = null
-    try {
-      conn?.close()
-    } catch {
-      // ignore close errors
-    }
-    if (proc && proc.exitCode === null && !proc.killed) {
-      proc.kill('SIGTERM')
-    }
+    await this.runtime.shutdown()
   }
 
-  private async ensureConnected(): Promise<{
-    connection: ClientConnection
-    init: InitializeResponse
-    binary: ResolvedBinary
-  }> {
-    if (this.isAlive() && this.connection && this.initResponse && this.resolvedBinary) {
-      return {
-        connection: this.connection,
-        init: this.initResponse,
-        binary: this.resolvedBinary,
-      }
-    }
-
-    if (this.connectingPromise) {
-      await this.connectingPromise
-      if (this.connection && this.initResponse && this.resolvedBinary) {
-        return {
-          connection: this.connection,
-          init: this.initResponse,
-          binary: this.resolvedBinary,
-        }
-      }
-    }
-
-    this.connectingPromise = this.startProcess()
-    try {
-      await this.connectingPromise
-    } finally {
-      this.connectingPromise = null
-    }
-
-    if (!this.connection || !this.initResponse || !this.resolvedBinary) {
-      throw new AntigravityAcpError(
-        'ACP_ERROR',
-        'Failed to initialize Antigravity ACP runtime.',
-        503,
-      )
-    }
-
-    return {
-      connection: this.connection,
-      init: this.initResponse,
-      binary: this.resolvedBinary,
-    }
-  }
-
-  private async startProcess(): Promise<void> {
-    await this.shutdown()
-    const binary = await resolveAntigravityBinary()
-    if (!binary) {
-      this.resolvedBinary = null
-      throw new AntigravityAcpError(
-        'BINARY_MISSING',
-        'Google Antigravity ACP binary (`agy`) is not installed. Install Antigravity CLI or download the official ACP Registry binary from Models & Providers.',
-        503,
-      )
-    }
-
-    await mkdir(scratchWorkspaceDir(), { recursive: true })
-    this.stderrTail = []
-
-    const env: NodeJS.ProcessEnv = { ...process.env }
-    if (this.ephemeralApiKey) {
-      env.GEMINI_API_KEY = this.ephemeralApiKey
-    }
-
-    const child = spawn(binary.command, binary.args, {
-      stdio: ['pipe', 'pipe', 'pipe'],
-      cwd: scratchWorkspaceDir(),
-      env,
-    })
-
-    child.stderr.on('data', (chunk: Buffer) => {
-      const text = chunk.toString('utf8').trim()
-      if (!text) return
-      this.stderrTail.push(text)
-      if (this.stderrTail.length > 20) this.stderrTail.shift()
-    })
-
-    child.on('exit', () => {
-      if (this.child === child) {
-        this.child = null
-        this.connection = null
-        this.initResponse = null
-      }
-    })
-
-    const output = Writable.toWeb(child.stdin) as WritableStream<Uint8Array>
-    const input = Readable.toWeb(child.stdout) as ReadableStream<Uint8Array>
-    const stream = ndJsonStream(output, input)
-
-    const acpClient = createAcpClient({ name: 'xDrive' })
-      // Deny arbitrary tool/command execution during Marble proposal generation.
-      .onRequest('session/request_permission', () => ({
-        outcome: { outcome: 'cancelled' },
-      }))
-
-    const connection = acpClient.connect(stream)
-
-    try {
-      const init = await connection.agent.request(
-        'initialize',
-        {
-          protocolVersion: PROTOCOL_VERSION,
-          clientCapabilities: {},
-          clientInfo: {
-            name: 'xDrive',
-            version: '0.1.0',
-          },
-        },
-        {
-          cancellationSignal: AbortSignal.timeout(15_000),
-          stopWaitingOnCancel: true,
-        },
-      )
-      this.child = child
-      this.connection = connection
-      this.initResponse = init
-      this.resolvedBinary = binary
-    } catch (error) {
-      try {
-        connection.close()
-      } catch {
-        // ignore
-      }
-      if (child.exitCode === null && !child.killed) {
-        child.kill('SIGTERM')
-      }
-      const stderrSummary = this.stderrTail.slice(-3).join(' | ')
-      throw new AntigravityAcpError(
-        'ACP_ERROR',
-        `Antigravity ACP handshake failed: ${
-          error instanceof Error ? error.message : String(error)
-        }${stderrSummary ? ` (${stderrSummary})` : ''}`,
-        503,
-      )
-    }
+  private cacheDiscovery(discovery: AcpSessionDiscovery): void {
+    this.cachedModels = discovery.models
+    this.cachedCurrentModelId = discovery.currentModelId
+    this.cachedModelConfigId = discovery.modelConfigId
+    this.cachedConfigOptions = discovery.configOptions
+    this.cachedTier = extractAntigravityTier(discovery.meta)
   }
 
   private buildStatus(
@@ -716,13 +387,13 @@ class AntigravityAcpManager {
     authenticated: boolean,
     error?: string,
   ): AntigravityRuntimeStatus {
-    const authMethods: AntigravityAuthMethodInfo[] = (init.authMethods ?? []).map(
-      (method) => ({
-        id: method.id,
-        name: method.name,
-        description: method.description ?? null,
-      }),
-    )
+    const authMethods: AntigravityAuthMethodInfo[] = (
+      init.authMethods ?? []
+    ).map((method) => ({
+      id: method.id,
+      name: method.name,
+      description: method.description ?? null,
+    }))
 
     const capabilities = init.agentCapabilities
 
@@ -752,9 +423,11 @@ class AntigravityAcpManager {
   }
 
   async getStatus(): Promise<AntigravityRuntimeStatus> {
-    let connState: Awaited<ReturnType<AntigravityAcpManager['ensureConnected']>>
+    let connState: Awaited<
+      ReturnType<AcpProcessRuntime<AntigravityBinarySource>['ensureConnected']>
+    >
     try {
-      connState = await this.ensureConnected()
+      connState = await this.runtime.ensureConnected()
     } catch (error) {
       const missing =
         error instanceof AntigravityAcpError && error.code === 'BINARY_MISSING'
@@ -779,34 +452,13 @@ class AntigravityAcpManager {
       }
     }
 
-    const { connection, init, binary } = connState
+    const { init, binary } = connState
     try {
-      const session = await connection.agent.request(
-        'session/new',
-        {
-          cwd: scratchWorkspaceDir(),
-          mcpServers: [],
-        },
-        {
-          cancellationSignal: AbortSignal.timeout(15_000),
-          stopWaitingOnCancel: true,
-        },
-      )
-      const discovered = extractModelsFromSession(session)
-      this.cachedModels = discovered.models
-      this.cachedCurrentModelId = discovered.currentModelId
-      this.cachedModelConfigId = discovered.modelConfigId
-      this.cachedConfigOptions = discovered.configOptions
-      this.cachedTier = discovered.tier
-
-      // Close the probe session so we don't accumulate idle sessions.
-      void connection.agent
-        .request('session/close', { sessionId: session.sessionId })
-        .catch(() => {})
-
+      const { discovery } = await this.runtime.probeSession(15_000)
+      this.cacheDiscovery(discovery)
       return this.buildStatus(init, binary, true)
     } catch (error) {
-      if (isAuthRequiredError(error)) {
+      if (isAcpAuthRequiredError(error)) {
         this.cachedModels = []
         this.cachedCurrentModelId = null
         this.cachedConfigOptions = []
@@ -847,7 +499,7 @@ class AntigravityAcpManager {
         await this.shutdown()
       }
 
-      const { connection } = await this.ensureConnected()
+      const { connection } = await this.runtime.ensureConnected()
       await connection.agent.request(
         'authenticate',
         { methodId },
@@ -877,7 +529,7 @@ class AntigravityAcpManager {
     this.cachedTier = null
 
     try {
-      const { connection } = await this.ensureConnected()
+      const { connection } = await this.runtime.ensureConnected()
       await connection.agent.request(
         'logout',
         {},
@@ -903,204 +555,27 @@ class AntigravityAcpManager {
   async runPrompt(
     input: AntigravityPromptInput,
   ): Promise<AntigravityPromptOutput> {
-    const { connection, init } = await this.ensureConnected()
-    const cwd = scratchWorkspaceDir()
-    await mkdir(cwd, { recursive: true })
-
-    let activeSession
-    try {
-      activeSession = await connection.agent
-        .buildSession({ cwd, mcpServers: [] })
-        .start({
-          cancellationSignal: input.signal
-            ? AbortSignal.any([input.signal, AbortSignal.timeout(20_000)])
-            : AbortSignal.timeout(20_000),
-          stopWaitingOnCancel: true,
-        })
-    } catch (error) {
-      if (isAuthRequiredError(error)) {
-        throw new AntigravityAcpError(
-          'AUTH_REQUIRED',
-          'Google Antigravity is not signed in. Open Models & Providers to sign in with your Google AI plan.',
-          401,
-        )
-      }
-      throw new AntigravityAcpError(
-        'ACP_ERROR',
-        error instanceof Error
-          ? error.message
-          : 'Failed to create Antigravity ACP session.',
-        502,
-      )
-    }
-
-    try {
-      const discovered = extractModelsFromSession(
-        activeSession.newSessionResponse,
-      )
-      if (discovered.models.length > 0) {
-        this.cachedModels = discovered.models
-        this.cachedCurrentModelId = discovered.currentModelId
-        this.cachedModelConfigId = discovered.modelConfigId
-        this.cachedConfigOptions = discovered.configOptions
-        this.cachedTier = discovered.tier
-      }
-
-      let activeModelId =
-        discovered.currentModelId ??
-        this.cachedCurrentModelId ??
-        'antigravity-default'
-
-      const requestedModel = input.modelId
-        ? fromXDriveAntigravityModelId(input.modelId).trim()
-        : ''
-      if (
-        requestedModel &&
-        requestedModel !== 'auto' &&
-        requestedModel !== 'default' &&
-        requestedModel !== activeModelId
-      ) {
-        const configId = discovered.modelConfigId ?? this.cachedModelConfigId
-        const matchingOption = discovered.models.find(
+    return await this.runtime.runPrompt(input, {
+      defaultModelId: this.cachedCurrentModelId ?? 'antigravity-default',
+      cachedModelConfigId: this.cachedModelConfigId,
+      onDiscovery: (discovered) => {
+        if (discovered.models.length > 0) {
+          this.cacheDiscovery(discovered)
+        }
+      },
+      resolveRequestedModel: (requestedModelId, discovered) => {
+        const requested = fromXDriveAntigravityModelId(requestedModelId).trim()
+        if (!requested || requested === 'auto' || requested === 'default') {
+          return null
+        }
+        const match = discovered.models.find(
           (item) =>
-            item.id === requestedModel ||
-            item.name.toLowerCase() === requestedModel.toLowerCase(),
+            item.id === requested ||
+            item.name.toLowerCase() === requested.toLowerCase(),
         )
-        const targetModelValue = matchingOption?.id ?? requestedModel
-        if (configId) {
-          try {
-            await connection.agent.request('session/set_config_option', {
-              sessionId: activeSession.sessionId,
-              configId,
-              value: targetModelValue,
-            })
-            activeModelId = targetModelValue
-          } catch {
-            // Fall back to session's default model if the requested model is unavailable on this tier.
-          }
-        } else {
-          try {
-            await connection.agent.request('session/set_model', {
-              sessionId: activeSession.sessionId,
-              modelId: targetModelValue,
-            })
-            activeModelId = targetModelValue
-          } catch {
-            // Fall back to default model.
-          }
-        }
-      }
-
-      if (input.reasoningEffort) {
-        const reasoningConfig = discovered.configOptions.find(
-          (opt) =>
-            opt.category === 'thought_level' ||
-            opt.category === 'reasoning' ||
-            /reason|think|effort/i.test(`${opt.id} ${opt.name}`),
-        )
-        if (reasoningConfig && reasoningConfig.options.length > 0) {
-          const desired = input.reasoningEffort.toLowerCase()
-          const match =
-            reasoningConfig.options.find(
-              (choice) =>
-                choice.value.toLowerCase() === desired ||
-                choice.name.toLowerCase() === desired,
-            ) ??
-            reasoningConfig.options.find((choice) =>
-              `${choice.value} ${choice.name}`.toLowerCase().includes(desired),
-            ) ??
-            (desired === 'off'
-              ? reasoningConfig.options.find((choice) =>
-                  /off|none|minimal|disabled/i.test(
-                    `${choice.value} ${choice.name}`,
-                  ),
-                )
-              : undefined)
-          if (match && match.value !== reasoningConfig.currentValue) {
-            try {
-              await connection.agent.request('session/set_config_option', {
-                sessionId: activeSession.sessionId,
-                configId: reasoningConfig.id,
-                value: match.value,
-              })
-            } catch {
-              // Ignore if model does not support changing reasoning option.
-            }
-          }
-        }
-      }
-
-      const blocks: ContentBlock[] = [{ type: 'text', text: input.prompt }]
-      const supportsImages = Boolean(
-        init.agentCapabilities?.promptCapabilities?.image,
-      )
-      if (supportsImages && input.imageDataUrls?.length) {
-        for (const dataUrl of input.imageDataUrls.slice(0, 3)) {
-          const parsed = parseDataUrlImage(dataUrl)
-          if (parsed) {
-            blocks.push({
-              type: 'image',
-              mimeType: parsed.mimeType,
-              data: parsed.data,
-            })
-          }
-        }
-      }
-
-      const promptPromise = activeSession.prompt(blocks, {
-        cancellationSignal: input.signal
-          ? AbortSignal.any([input.signal, AbortSignal.timeout(120_000)])
-          : AbortSignal.timeout(120_000),
-        stopWaitingOnCancel: true,
-      })
-      // Avoid unhandled rejection if the update loop exits early.
-      promptPromise.catch(() => {})
-
-      let text = ''
-      let currentThought = ''
-      const thoughts: string[] = []
-      let stopReason = 'end_turn'
-
-      let msg = await activeSession.nextUpdate()
-      while (msg.kind !== 'stop') {
-        const update = msg.update
-        if (
-          update.sessionUpdate === 'agent_message_chunk' &&
-          update.content.type === 'text'
-        ) {
-          text += update.content.text
-          input.onTextDelta?.(update.content.text)
-        } else if (
-          update.sessionUpdate === 'agent_thought_chunk' &&
-          update.content.type === 'text'
-        ) {
-          currentThought += update.content.text
-          input.onThoughtDelta?.(update.content.text)
-        }
-        msg = await activeSession.nextUpdate()
-      }
-      stopReason = msg.stopReason
-
-      await promptPromise
-
-      if (currentThought.trim()) {
-        thoughts.push(currentThought.trim())
-      }
-
-      return {
-        text: text.trim(),
-        thoughts,
-        stopReason,
-        modelId: activeModelId,
-        agentName: init.agentInfo?.name ?? 'Antigravity ACP Server',
-        agentVersion: init.agentInfo?.version ?? 'unknown',
-      }
-    } finally {
-      activeSession.dispose()
-      void connection.agent
-        .request('session/close', { sessionId: activeSession.sessionId })
-        .catch(() => {})
-    }
+        return match?.id ?? requested
+      },
+    })
   }
 }
 

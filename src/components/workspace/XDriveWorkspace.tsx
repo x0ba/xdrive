@@ -113,9 +113,7 @@ import type {
 } from '#/lib/ai/antigravity-types'
 import {
   applyOpenCodeGoStatusToSubscriptions,
-  authenticateOpenCodeGo,
   fetchOpenCodeGoStatus,
-  logoutOpenCodeGo,
 } from '#/lib/ai/opencode-go-client'
 import { toXDriveOpenCodeGoModelId } from '#/lib/ai/opencode-go-types'
 import type { OpenCodeGoRuntimeStatus } from '#/lib/ai/opencode-go-types'
@@ -1372,55 +1370,17 @@ export function XDriveWorkspace({
     }
   }
 
-  async function refreshOpenCodeGo() {
+  async function refreshOpenCodeGo(forceRefresh = true) {
     setOpenCodeGoBusy('refresh')
     setOpenCodeGoError(null)
     try {
-      const status = await fetchOpenCodeGoStatus()
+      const status = await fetchOpenCodeGoStatus(forceRefresh)
       applyLiveOpenCodeGoStatus(status)
     } catch (error) {
       setOpenCodeGoError(
         error instanceof Error
           ? error.message
-          : 'Could not reach OpenCode Go backend.',
-      )
-    } finally {
-      setOpenCodeGoBusy(null)
-    }
-  }
-
-  async function handleAuthenticateOpenCodeGo(options?: { apiKey?: string }) {
-    setOpenCodeGoBusy('authenticate')
-    setOpenCodeGoError(null)
-    try {
-      const status = await authenticateOpenCodeGo(options)
-      applyLiveOpenCodeGoStatus(status)
-      if (status.authenticated && status.entitled) {
-        setAgentStatus(
-          `Connected OpenCode Go with ${status.models.length} model${status.models.length === 1 ? '' : 's'}.`,
-        )
-      }
-    } catch (error) {
-      setOpenCodeGoError(
-        error instanceof Error
-          ? error.message
-          : 'OpenCode Go connection failed.',
-      )
-    } finally {
-      setOpenCodeGoBusy(null)
-    }
-  }
-
-  async function handleLogoutOpenCodeGo() {
-    setOpenCodeGoBusy('logout')
-    setOpenCodeGoError(null)
-    try {
-      const status = await logoutOpenCodeGo()
-      applyLiveOpenCodeGoStatus(status)
-      setAgentStatus('Disconnected OpenCode Go.')
-    } catch (error) {
-      setOpenCodeGoError(
-        error instanceof Error ? error.message : 'Disconnect failed.',
+          : 'Could not reach OpenCode backend.',
       )
     } finally {
       setOpenCodeGoBusy(null)
@@ -2031,7 +1991,7 @@ export function XDriveWorkspace({
       threadId,
       label:
         input.providerId === 'opencode-go'
-          ? `Running OpenCode Go (${input.model.replace(/^opencode-go\//, '')})…`
+          ? `Running ${openCodeGoStatus?.transport === 'http-fallback' ? 'OpenCode Go' : 'OpenCode ACP'} (${input.model.replace(/^opencode-go\//, '')})…`
           : `Running Google Antigravity ACP (${input.model.replace(/^antigravity\//, '')})…`,
     })
     try {
@@ -2170,10 +2130,11 @@ export function XDriveWorkspace({
         if (
           input.providerId === 'opencode-go' &&
           (error.code === 'AUTH_REQUIRED' ||
+            error.code === 'BINARY_MISSING' ||
             error.code === 'ENTITLEMENT_REQUIRED' ||
             error.code === 'RATE_LIMITED')
         ) {
-          void refreshOpenCodeGo()
+          void refreshOpenCodeGo(true)
         } else if (
           error.code === 'AUTH_REQUIRED' ||
           error.code === 'BINARY_MISSING'
@@ -4824,11 +4785,7 @@ export function XDriveWorkspace({
                     openCodeGoStatus={openCodeGoStatus}
                     openCodeGoBusy={openCodeGoBusy}
                     openCodeGoError={openCodeGoError}
-                    onRefreshOpenCodeGo={() => void refreshOpenCodeGo()}
-                    onAuthenticateOpenCodeGo={(options) =>
-                      void handleAuthenticateOpenCodeGo(options)
-                    }
-                    onLogoutOpenCodeGo={() => void handleLogoutOpenCodeGo()}
+                    onRefreshOpenCodeGo={() => void refreshOpenCodeGo(true)}
                   />
                 </div>
               )}
