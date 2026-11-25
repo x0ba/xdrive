@@ -69,6 +69,30 @@ export const SplitOverleafStudio: Story = {
     await expect(
       canvas.getByRole('button', { name: /Recompile/i }),
     ).toBeVisible()
+    await userEvent.click(
+      canvas.getByRole('button', {
+        name: 'Compiler & auto-compile settings',
+      }),
+    )
+    const compilerMenu = canvasElement.querySelector<HTMLElement>(
+      '[data-marble-id="latex-compiler-menu"]',
+    )
+    await expect(compilerMenu).not.toBeNull()
+    await expect(compilerMenu?.textContent).toContain('Compiler engine')
+    const menuRect = compilerMenu!.getBoundingClientRect()
+    await expect(menuRect.height).toBeGreaterThan(40)
+    let clip = compilerMenu!.parentElement
+    while (clip) {
+      const style = getComputedStyle(clip)
+      if (style.overflowX !== 'visible' || style.overflowY !== 'visible') {
+        const bounds = clip.getBoundingClientRect()
+        const visible =
+          Math.min(menuRect.bottom, bounds.bottom) -
+          Math.max(menuRect.top, bounds.top)
+        await expect(visible).toBeGreaterThan(menuRect.height - 2)
+      }
+      clip = clip.parentElement
+    }
     await expect(
       canvas.getByRole('button', { name: /Download PDF/i }),
     ).toBeVisible()
