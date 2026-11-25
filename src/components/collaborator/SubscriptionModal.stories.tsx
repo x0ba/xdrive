@@ -3,6 +3,8 @@ import { expect, within } from 'storybook/test'
 import { DEFAULT_OPENCODE_GO_MODELS } from '#/lib/ai/opencode-go-types'
 import type { OpenCodeGoModelOption } from '#/lib/ai/opencode-go-types'
 import { applyOpenCodeGoStatusToSubscriptions } from '#/lib/ai/opencode-go-client'
+import { DEFAULT_GROK_BUILD_MODELS } from '#/lib/ai/grok-build-types'
+import { applyGrokBuildStatusToSubscriptions } from '#/lib/ai/grok-build-client'
 import { DEFAULT_SUBSCRIPTIONS, SubscriptionModal } from './SubscriptionModal'
 
 const DEMO_OPENCODE_FREE_MODELS: OpenCodeGoModelOption[] = [
@@ -105,6 +107,59 @@ const CONNECTED_OPENCODE_STATUS = {
   },
 }
 
+const CONNECTED_GROK_BUILD_STATUS = {
+  ok: true,
+  binaryAvailable: true,
+  binarySource: 'grok-cli' as const,
+  binaryPath: '/usr/local/bin/grok --no-auto-update agent stdio',
+  agentName: 'Grok Build ACP',
+  agentVersion: '1.0.92',
+  protocolVersion: 1,
+  grokShell: true,
+  authenticated: true,
+  activeAuthMethod: 'cached_token',
+  authSource: 'cached_token' as const,
+  authMethods: [
+    {
+      id: 'cached_token',
+      name: 'cached_token',
+      description: 'Cached token from ~/.grok/auth.json',
+    },
+    {
+      id: 'grok.com',
+      name: 'Grok',
+      description: 'Sign in with Grok',
+    },
+  ],
+  tier: 'SuperGrok Heavy',
+  models: DEFAULT_GROK_BUILD_MODELS,
+  currentModelId: 'grok-4.7',
+  configOptions: [],
+  supportsImagePrompt: true,
+  compliance: {
+    protocol: 'ACP (JSON-RPC 2.0 over stdio)' as const,
+    cliAuthStoreOnly: true,
+    keyStoredInXDrive: false as const,
+  },
+}
+
+const SIGNED_OUT_GROK_BUILD_STATUS = {
+  ...CONNECTED_GROK_BUILD_STATUS,
+  authenticated: false,
+  activeAuthMethod: null,
+  authSource: 'none' as const,
+  authMethods: [
+    {
+      id: 'grok.com',
+      name: 'Grok',
+      description: 'Sign in with Grok',
+    },
+  ],
+  tier: null,
+  error:
+    'Grok CLI was found, but no active sign-in was detected. Run `grok login` in your terminal (or set `XAI_API_KEY` in `.env.local`), then click Refresh.',
+}
+
 /**
  * Full-page model provider and role routing settings layout.
  *
@@ -114,9 +169,12 @@ export const ModelsAndProviders: Story = {
   name: 'Models & Providers',
   args: {
     variant: 'page',
-    subscriptions: applyOpenCodeGoStatusToSubscriptions(
-      DEFAULT_SUBSCRIPTIONS,
-      CONNECTED_OPENCODE_STATUS,
+    subscriptions: applyGrokBuildStatusToSubscriptions(
+      applyOpenCodeGoStatusToSubscriptions(
+        DEFAULT_SUBSCRIPTIONS,
+        CONNECTED_OPENCODE_STATUS,
+      ),
+      CONNECTED_GROK_BUILD_STATUS,
     ),
     antigravityStatus: {
       ok: true,
@@ -170,6 +228,7 @@ export const ModelsAndProviders: Story = {
       },
     },
     openCodeGoStatus: CONNECTED_OPENCODE_STATUS,
+    grokBuildStatus: CONNECTED_GROK_BUILD_STATUS,
   },
   decorators: [
     (Story) => (
@@ -186,6 +245,11 @@ export const ModelsAndProviders: Story = {
     await expect(openCodeLink).toHaveAttribute(
       'href',
       '/settings/models/opencode-go',
+    )
+    const grokBuildLink = canvas.getByRole('link', { name: /Grok Build/i })
+    await expect(grokBuildLink).toHaveAttribute(
+      'href',
+      '/settings/models/grok-build',
     )
   },
 }
@@ -241,5 +305,54 @@ export const OpenCodeFreeOnly: Story = {
     await expect(canvas.getByText('Tidepool Alpha')).toBeVisible()
     await expect(canvas.getByText('Big Pickle')).toBeVisible()
     await expect(canvas.getByText(/Free models · OpenCode ACP/i)).toBeVisible()
+  },
+}
+
+/**
+ * Grok Build provider view when the local `grok` CLI is installed and authenticated
+ * via `grok login` (`cached_token`).
+ *
+ * @summary Grok Build ACP connected state
+ */
+export const GrokBuildConnected: Story = {
+  args: {
+    variant: 'page',
+    activeProviderId: 'grok-build',
+    grokBuildStatus: CONNECTED_GROK_BUILD_STATUS,
+    subscriptions: applyGrokBuildStatusToSubscriptions(
+      DEFAULT_SUBSCRIPTIONS,
+      CONNECTED_GROK_BUILD_STATUS,
+    ),
+  },
+  decorators: ModelsAndProviders.decorators,
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    await expect(canvas.getByText(/Connected · SuperGrok Heavy/i)).toBeVisible()
+    await expect(canvas.getByText('Grok 4.7')).toBeVisible()
+    await expect(canvas.getByText('Grok 4.7 Fast')).toBeVisible()
+  },
+}
+
+/**
+ * Grok Build provider view when the local `grok` CLI is installed but not signed in,
+ * guiding the user to run `grok login` or set `XAI_API_KEY`.
+ *
+ * @summary Grok Build ACP sign-in required state
+ */
+export const GrokBuildSignedOut: Story = {
+  args: {
+    variant: 'page',
+    activeProviderId: 'grok-build',
+    grokBuildStatus: SIGNED_OUT_GROK_BUILD_STATUS,
+    subscriptions: applyGrokBuildStatusToSubscriptions(
+      DEFAULT_SUBSCRIPTIONS,
+      SIGNED_OUT_GROK_BUILD_STATUS,
+    ),
+  },
+  decorators: ModelsAndProviders.decorators,
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    await expect(canvas.getByText(/Sign in required/i)).toBeVisible()
+    await expect(canvas.getByText('grok login')).toBeVisible()
   },
 }

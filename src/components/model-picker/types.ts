@@ -8,6 +8,7 @@ import type {
 export const PROVIDER_DISPLAY_NAMES: Record<AIProviderId, string> = {
   antigravity: 'Google Antigravity',
   'opencode-go': 'OpenCode Go',
+  'grok-build': 'Grok Build',
   openai: 'OpenAI',
   claude: 'Anthropic Claude',
   xai: 'SpaceX AI / xAI',

@@ -607,13 +607,26 @@ export function parseDataUrlImage(
   return { mimeType: match[1], data: match[2] }
 }
 
+export interface AcpConnectedState<TSource extends string = string> {
+  connection: ClientConnection
+  init: InitializeResponse
+  binary: ResolvedAcpBinary<TSource>
+}
+
+interface AcpConnectionHandle<
+  TSource extends string,
+> extends AcpConnectedState<TSource> {
+  child: ChildProcessWithoutNullStreams
+  activeRequests: number
+  retired: boolean
+}
+
 export class AcpProcessRuntime<TSource extends string = string> {
-  private child: ChildProcessWithoutNullStreams | null = null
-  private connection: ClientConnection | null = null
-  private initResponse: InitializeResponse | null = null
-  private resolvedBinary: ResolvedAcpBinary<TSource> | null = null
+  private activeHandle: AcpConnectionHandle<TSource> | null = null
+  private readonly retiredHandles = new Set<AcpConnectionHandle<TSource>>()
   private stderrTail: string[] = []
-  private connectingPromise: Promise<void> | null = null
+  private connectingPromise: Promise<AcpConnectionHandle<TSource>> | null = null
+  private connectionGeneration = 0
   private readonly options: AcpRuntimeOptions<TSource>
 
   constructor(options: AcpRuntimeOptions<TSource>) {
@@ -631,94 +644,167 @@ export class AcpProcessRuntime<TSource extends string = string> {
     return new AcpError(code, message, httpStatus)
   }
 
-  isAlive(): boolean {
+  private isHandleAlive(
+    handle: AcpConnectionHandle<TSource> | null,
+  ): handle is AcpConnectionHandle<TSource> {
     return Boolean(
-      this.child &&
-      this.connection &&
-      this.initResponse &&
-      this.child.exitCode === null &&
-      !this.child.killed &&
-      !this.connection.signal.aborted,
+      handle &&
+      handle.child.exitCode === null &&
+      !handle.child.killed &&
+      !handle.connection.signal.aborted,
     )
+  }
+
+  private terminateHandle(handle: AcpConnectionHandle<TSource>): void {
+    this.retiredHandles.delete(handle)
+    if (this.activeHandle === handle) {
+      this.activeHandle = null
+    }
+    try {
+      handle.connection.close()
+    } catch {
+      // ignore close errors
+    }
+    if (handle.child.exitCode === null && !handle.child.killed) {
+      handle.child.kill('SIGTERM')
+    }
+  }
+
+  private releaseHandle(handle: AcpConnectionHandle<TSource>): void {
+    handle.activeRequests = Math.max(0, handle.activeRequests - 1)
+    if (handle.retired && handle.activeRequests === 0) {
+      this.terminateHandle(handle)
+    }
+  }
+
+  isAlive(): boolean {
+    return this.isHandleAlive(this.activeHandle)
+  }
+
+  hasActiveRequests(): boolean {
+    if ((this.activeHandle?.activeRequests ?? 0) > 0) return true
+    for (const handle of this.retiredHandles) {
+      if (handle.activeRequests > 0) return true
+    }
+    return false
+  }
+
+  getRetiredHandleCount(): number {
+    return this.retiredHandles.size
   }
 
   getStderrSummary(maxLines = 3): string {
     return this.stderrTail.slice(-maxLines).join(' | ')
   }
 
-  async shutdown(): Promise<void> {
-    const conn = this.connection
-    const proc = this.child
-    this.connection = null
-    this.child = null
-    this.initResponse = null
+  // Non-disruptively detaches the current shared connection so subsequent
+  // callers spawn a fresh ACP process while any in-flight prompts finish on
+  // their existing process and clean up automatically once drained.
+  retireConnection(): void {
+    this.connectionGeneration += 1
     this.connectingPromise = null
-    try {
-      conn?.close()
-    } catch {
-      // ignore close errors
-    }
-    if (proc && proc.exitCode === null && !proc.killed) {
-      proc.kill('SIGTERM')
+    const handle = this.activeHandle
+    if (!handle) return
+    this.activeHandle = null
+    handle.retired = true
+    if (handle.activeRequests === 0) {
+      this.terminateHandle(handle)
+    } else {
+      this.retiredHandles.add(handle)
     }
   }
 
-  async ensureConnected(): Promise<{
-    connection: ClientConnection
-    init: InitializeResponse
-    binary: ResolvedAcpBinary<TSource>
-  }> {
-    if (
-      this.isAlive() &&
-      this.connection &&
-      this.initResponse &&
-      this.resolvedBinary
-    ) {
-      return {
-        connection: this.connection,
-        init: this.initResponse,
-        binary: this.resolvedBinary,
-      }
+  async shutdown(): Promise<void> {
+    this.connectionGeneration += 1
+    this.connectingPromise = null
+    const active = this.activeHandle
+    this.activeHandle = null
+    if (active) {
+      active.retired = true
+      this.terminateHandle(active)
+    }
+    for (const handle of [...this.retiredHandles]) {
+      handle.retired = true
+      this.terminateHandle(handle)
+    }
+  }
+
+  private async ensureHandle(): Promise<AcpConnectionHandle<TSource>> {
+    if (this.isHandleAlive(this.activeHandle)) {
+      return this.activeHandle
     }
 
     if (this.connectingPromise) {
-      await this.connectingPromise
-      if (this.connection && this.initResponse && this.resolvedBinary) {
-        return {
-          connection: this.connection,
-          init: this.initResponse,
-          binary: this.resolvedBinary,
-        }
+      const pending = await this.connectingPromise
+      if (this.isHandleAlive(pending) && !pending.retired) {
+        return pending
+      }
+      if (this.isHandleAlive(this.activeHandle)) {
+        return this.activeHandle
       }
     }
 
-    this.connectingPromise = this.startProcess()
+    const generation = ++this.connectionGeneration
+    const promise = this.startProcess(generation)
+    this.connectingPromise = promise
     try {
-      await this.connectingPromise
+      const handle = await promise
+      return handle
     } finally {
-      this.connectingPromise = null
-    }
-
-    if (!this.connection || !this.initResponse || !this.resolvedBinary) {
-      throw this.makeError(
-        'ACP_ERROR',
-        `Failed to initialize ${this.options.providerLabel} ACP runtime.`,
-        503,
-      )
-    }
-
-    return {
-      connection: this.connection,
-      init: this.initResponse,
-      binary: this.resolvedBinary,
+      if (this.connectingPromise === promise) {
+        this.connectingPromise = null
+      }
     }
   }
 
-  private async startProcess(): Promise<void> {
-    await this.shutdown()
+  async ensureConnected(): Promise<AcpConnectedState<TSource>> {
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+      const handle = await this.ensureHandle()
+      if (!handle.retired) {
+        return {
+          connection: handle.connection,
+          init: handle.init,
+          binary: handle.binary,
+        }
+      }
+      // This handle was superseded by retireConnection()/shutdown() while
+      // starting. Since ensureConnected() does not track activeRequests,
+      // reap it immediately if unused and acquire the current connection.
+      if (handle.activeRequests === 0) {
+        this.terminateHandle(handle)
+      }
+    }
+    throw this.makeError(
+      'ACP_ERROR',
+      `${this.options.providerLabel} ACP connection was superseded during startup.`,
+      503,
+    )
+  }
+
+  async withConnection<T>(
+    fn: (state: AcpConnectedState<TSource>) => Promise<T>,
+  ): Promise<T> {
+    const handle = await this.ensureHandle()
+    handle.activeRequests += 1
+    try {
+      return await fn({
+        connection: handle.connection,
+        init: handle.init,
+        binary: handle.binary,
+      })
+    } finally {
+      this.releaseHandle(handle)
+    }
+  }
+
+  private async startProcess(
+    generation: number,
+  ): Promise<AcpConnectionHandle<TSource>> {
+    if (this.activeHandle && !this.isHandleAlive(this.activeHandle)) {
+      this.terminateHandle(this.activeHandle)
+    }
     const binary = await this.options.resolveBinary()
     if (!binary) {
-      this.resolvedBinary = null
       throw this.makeError(
         'BINARY_MISSING',
         this.options.missingBinaryMessage(),
@@ -745,14 +831,6 @@ export class AcpProcessRuntime<TSource extends string = string> {
       if (!text) return
       this.stderrTail.push(text)
       if (this.stderrTail.length > 20) this.stderrTail.shift()
-    })
-
-    child.on('exit', () => {
-      if (this.child === child) {
-        this.child = null
-        this.connection = null
-        this.initResponse = null
-      }
     })
 
     const output = Writable.toWeb(child.stdin) as WritableStream<Uint8Array>
@@ -785,10 +863,29 @@ export class AcpProcessRuntime<TSource extends string = string> {
           stopWaitingOnCancel: true,
         },
       )
-      this.child = child
-      this.connection = connection
-      this.initResponse = init
-      this.resolvedBinary = binary
+      const handle: AcpConnectionHandle<TSource> = {
+        child,
+        connection,
+        init,
+        binary,
+        activeRequests: 0,
+        retired: false,
+      }
+      child.on('exit', () => {
+        if (this.activeHandle === handle) {
+          this.activeHandle = null
+        }
+        this.retiredHandles.delete(handle)
+      })
+      if (generation !== this.connectionGeneration) {
+        // Superseded by a concurrent retireConnection() or shutdown(); mark
+        // retired so the immediate caller can finish cleanly and then reap it.
+        handle.retired = true
+        this.retiredHandles.add(handle)
+      } else {
+        this.activeHandle = handle
+      }
+      return handle
     } catch (error) {
       try {
         connection.close()
@@ -809,12 +906,15 @@ export class AcpProcessRuntime<TSource extends string = string> {
     }
   }
 
-  async probeSession(timeoutMs?: number): Promise<{
+  async probeSessionOn(
+    state: AcpConnectedState<TSource>,
+    timeoutMs?: number,
+  ): Promise<{
     init: InitializeResponse
     binary: ResolvedAcpBinary<TSource>
     discovery: AcpSessionDiscovery
   }> {
-    const { connection, init, binary } = await this.ensureConnected()
+    const { connection, init, binary } = state
     const cwd = this.options.workspaceDir()
     await mkdir(cwd, { recursive: true })
 
@@ -842,11 +942,22 @@ export class AcpProcessRuntime<TSource extends string = string> {
     return { init, binary, discovery }
   }
 
+  async probeSession(timeoutMs?: number): Promise<{
+    init: InitializeResponse
+    binary: ResolvedAcpBinary<TSource>
+    discovery: AcpSessionDiscovery
+  }> {
+    return await this.withConnection((state) =>
+      this.probeSessionOn(state, timeoutMs),
+    )
+  }
+
   async runPrompt(
     input: AcpPromptInput,
     runOptions?: {
       defaultModelId?: string
       cachedModelConfigId?: string | null
+      beforeSession?: (state: AcpConnectedState<TSource>) => Promise<void>
       resolveRequestedModel?: (
         requestedModelId: string,
         discovered: AcpSessionDiscovery,
@@ -854,203 +965,265 @@ export class AcpProcessRuntime<TSource extends string = string> {
       onDiscovery?: (discovery: AcpSessionDiscovery) => void
     },
   ): Promise<AcpPromptOutput> {
-    const { connection, init } = await this.ensureConnected()
-    const cwd = this.options.workspaceDir()
-    await mkdir(cwd, { recursive: true })
+    return await this.withConnection(async (state) => {
+      if (runOptions?.beforeSession) {
+        await runOptions.beforeSession(state)
+      }
+      const { connection, init } = state
+      const cwd = this.options.workspaceDir()
+      await mkdir(cwd, { recursive: true })
 
-    const sessionTimeoutMs = this.options.sessionTimeoutMs ?? 20_000
-    const sessionWatchdog = createPromptTimeoutController({
-      idleTimeoutMs: sessionTimeoutMs,
-      maxDurationMs: sessionTimeoutMs,
-      clientSignal: input.signal,
-    })
-    let activeSession
-    try {
-      activeSession = await connection.agent
-        .buildSession({ cwd, mcpServers: [] })
-        .start({
-          cancellationSignal: sessionWatchdog.signal,
-          stopWaitingOnCancel: true,
-        })
-    } catch (error) {
-      throw mapAcpPromptError({
-        error,
-        providerLabel: this.options.providerLabel,
-        abortReason: sessionWatchdog.getAbortReason(),
-        clientAborted: Boolean(input.signal?.aborted),
+      const sessionTimeoutMs = this.options.sessionTimeoutMs ?? 20_000
+      const sessionWatchdog = createPromptTimeoutController({
         idleTimeoutMs: sessionTimeoutMs,
         maxDurationMs: sessionTimeoutMs,
-        authRequiredMessage: this.options.authRequiredMessage(),
-        makeError: (code, message, httpStatus) =>
-          this.makeError(code, message, httpStatus),
-      })
-    } finally {
-      sessionWatchdog.cleanup()
-    }
-
-    const { idleTimeoutMs, maxDurationMs } = resolvePromptTimeoutConfig({
-      inputIdleTimeoutMs: input.idleTimeoutMs,
-      inputMaxDurationMs: input.maxDurationMs,
-      optionIdleTimeoutMs: this.options.promptIdleTimeoutMs,
-      optionMaxDurationMs: this.options.promptMaxDurationMs,
-    })
-    let promptWatchdog: PromptTimeoutController | null = null
-
-    try {
-      const discovered = extractAcpSessionDiscovery(
-        activeSession.newSessionResponse,
-      )
-      runOptions?.onDiscovery?.(discovered)
-
-      let activeModelId =
-        discovered.currentModelId ??
-        runOptions?.defaultModelId ??
-        `${this.options.providerLabel.toLowerCase()}-default`
-
-      if (input.modelId?.trim()) {
-        const targetModelValue = runOptions?.resolveRequestedModel
-          ? runOptions.resolveRequestedModel(input.modelId.trim(), discovered)
-          : input.modelId.trim()
-
-        if (
-          targetModelValue &&
-          targetModelValue !== 'auto' &&
-          targetModelValue !== 'default' &&
-          targetModelValue !== activeModelId
-        ) {
-          const configId =
-            discovered.modelConfigId ?? runOptions?.cachedModelConfigId ?? null
-          let modelSet = false
-          if (configId) {
-            try {
-              await connection.agent.request('session/set_config_option', {
-                sessionId: activeSession.sessionId,
-                configId,
-                value: targetModelValue,
-              })
-              activeModelId = targetModelValue
-              modelSet = true
-            } catch {
-              // Fall through to try session/set_model or session default.
-            }
-          }
-          if (!modelSet) {
-            try {
-              await connection.agent.request('session/set_model', {
-                sessionId: activeSession.sessionId,
-                modelId: targetModelValue,
-              })
-              activeModelId = targetModelValue
-            } catch {
-              // Fall back to session's default model if unavailable.
-            }
-          }
-        }
-      }
-
-      if (input.reasoningEffort) {
-        const reasoningConfig = discovered.configOptions.find(
-          (opt) =>
-            opt.category === 'thought_level' ||
-            opt.category === 'reasoning' ||
-            /reason|think|effort/i.test(`${opt.id} ${opt.name}`),
-        )
-        if (reasoningConfig && reasoningConfig.options.length > 0) {
-          const desired = input.reasoningEffort.toLowerCase()
-          const match =
-            reasoningConfig.options.find(
-              (choice) =>
-                choice.value.toLowerCase() === desired ||
-                choice.name.toLowerCase() === desired,
-            ) ??
-            reasoningConfig.options.find((choice) =>
-              `${choice.value} ${choice.name}`.toLowerCase().includes(desired),
-            ) ??
-            (desired === 'off'
-              ? reasoningConfig.options.find((choice) =>
-                  /off|none|minimal|disabled/i.test(
-                    `${choice.value} ${choice.name}`,
-                  ),
-                )
-              : undefined)
-          if (match && match.value !== reasoningConfig.currentValue) {
-            try {
-              await connection.agent.request('session/set_config_option', {
-                sessionId: activeSession.sessionId,
-                configId: reasoningConfig.id,
-                value: match.value,
-              })
-            } catch {
-              // Ignore if model does not support changing reasoning option.
-            }
-          }
-        }
-      }
-
-      const blocks: ContentBlock[] = [{ type: 'text', text: input.prompt }]
-      const supportsImages = Boolean(
-        init.agentCapabilities?.promptCapabilities?.image,
-      )
-      if (supportsImages && input.imageDataUrls?.length) {
-        for (const dataUrl of input.imageDataUrls.slice(0, 3)) {
-          const parsed = parseDataUrlImage(dataUrl)
-          if (parsed) {
-            blocks.push({
-              type: 'image',
-              mimeType: parsed.mimeType,
-              data: parsed.data,
-            })
-          }
-        }
-      }
-
-      promptWatchdog = createPromptTimeoutController({
-        idleTimeoutMs,
-        maxDurationMs,
         clientSignal: input.signal,
       })
-
-      const promptPromise = activeSession.prompt(blocks, {
-        cancellationSignal: promptWatchdog.signal,
-        stopWaitingOnCancel: true,
-      })
-      // Avoid unhandled rejection if the update loop exits early.
-      promptPromise.catch(() => {})
-
-      let text = ''
-      let currentThought = ''
-      const thoughts: string[] = []
-      let stopReason = 'end_turn'
-
-      let msg = await activeSession.nextUpdate()
-      while (msg.kind !== 'stop') {
-        promptWatchdog.touch()
-        const update = msg.update
-        if (
-          update.sessionUpdate === 'agent_message_chunk' &&
-          update.content.type === 'text'
-        ) {
-          text += update.content.text
-          input.onTextDelta?.(update.content.text)
-        } else if (
-          update.sessionUpdate === 'agent_thought_chunk' &&
-          update.content.type === 'text'
-        ) {
-          currentThought += update.content.text
-          input.onThoughtDelta?.(update.content.text)
-        }
-        msg = await activeSession.nextUpdate()
-      }
-      stopReason = msg.stopReason
-
-      await promptPromise
-
-      const postAbortReason = promptWatchdog.getAbortReason()
-      if (stopReason === 'cancelled' && postAbortReason !== null) {
+      let activeSession
+      try {
+        activeSession = await connection.agent
+          .buildSession({ cwd, mcpServers: [] })
+          .start({
+            cancellationSignal: sessionWatchdog.signal,
+            stopWaitingOnCancel: true,
+          })
+      } catch (error) {
         throw mapAcpPromptError({
-          error: new Error('Request cancelled'),
+          error,
           providerLabel: this.options.providerLabel,
-          abortReason: postAbortReason,
+          abortReason: sessionWatchdog.getAbortReason(),
+          clientAborted: Boolean(input.signal?.aborted),
+          idleTimeoutMs: sessionTimeoutMs,
+          maxDurationMs: sessionTimeoutMs,
+          authRequiredMessage: this.options.authRequiredMessage(),
+          makeError: (code, message, httpStatus) =>
+            this.makeError(code, message, httpStatus),
+        })
+      } finally {
+        sessionWatchdog.cleanup()
+      }
+
+      const { idleTimeoutMs, maxDurationMs } = resolvePromptTimeoutConfig({
+        inputIdleTimeoutMs: input.idleTimeoutMs,
+        inputMaxDurationMs: input.maxDurationMs,
+        optionIdleTimeoutMs: this.options.promptIdleTimeoutMs,
+        optionMaxDurationMs: this.options.promptMaxDurationMs,
+      })
+      let promptWatchdog: PromptTimeoutController | null = null
+
+      try {
+        const discovered = extractAcpSessionDiscovery(
+          activeSession.newSessionResponse,
+        )
+        runOptions?.onDiscovery?.(discovered)
+
+        let activeModelId =
+          discovered.currentModelId ??
+          runOptions?.defaultModelId ??
+          `${this.options.providerLabel.toLowerCase()}-default`
+
+        if (input.modelId?.trim()) {
+          const targetModelValue = runOptions?.resolveRequestedModel
+            ? runOptions.resolveRequestedModel(input.modelId.trim(), discovered)
+            : input.modelId.trim()
+
+          if (
+            targetModelValue &&
+            targetModelValue !== 'auto' &&
+            targetModelValue !== 'default' &&
+            targetModelValue !== activeModelId
+          ) {
+            const configId =
+              discovered.modelConfigId ??
+              runOptions?.cachedModelConfigId ??
+              null
+            let modelSet = false
+            if (configId) {
+              try {
+                await connection.agent.request('session/set_config_option', {
+                  sessionId: activeSession.sessionId,
+                  configId,
+                  value: targetModelValue,
+                })
+                activeModelId = targetModelValue
+                modelSet = true
+              } catch {
+                // Fall through to try session/set_model or session default.
+              }
+            }
+            if (!modelSet) {
+              try {
+                await connection.agent.request('session/set_model', {
+                  sessionId: activeSession.sessionId,
+                  modelId: targetModelValue,
+                })
+                activeModelId = targetModelValue
+              } catch {
+                // Fall back to session's default model if unavailable.
+              }
+            }
+          }
+        }
+
+        if (input.reasoningEffort) {
+          const reasoningConfig = discovered.configOptions.find(
+            (opt) =>
+              opt.category === 'thought_level' ||
+              opt.category === 'reasoning' ||
+              /reason|think|effort/i.test(`${opt.id} ${opt.name}`),
+          )
+          if (reasoningConfig && reasoningConfig.options.length > 0) {
+            const desired = input.reasoningEffort.toLowerCase()
+            const match =
+              reasoningConfig.options.find(
+                (choice) =>
+                  choice.value.toLowerCase() === desired ||
+                  choice.name.toLowerCase() === desired,
+              ) ??
+              reasoningConfig.options.find((choice) =>
+                `${choice.value} ${choice.name}`
+                  .toLowerCase()
+                  .includes(desired),
+              ) ??
+              (desired === 'off'
+                ? reasoningConfig.options.find((choice) =>
+                    /off|none|minimal|disabled/i.test(
+                      `${choice.value} ${choice.name}`,
+                    ),
+                  )
+                : desired === 'max'
+                  ? (reasoningConfig.options.find((choice) =>
+                      /xhigh|extra[\s_-]*high|max/i.test(
+                        `${choice.value} ${choice.name}`,
+                      ),
+                    ) ??
+                    reasoningConfig.options.find(
+                      (choice) => choice.value.toLowerCase() === 'high',
+                    ))
+                  : undefined)
+            if (match && match.value !== reasoningConfig.currentValue) {
+              try {
+                await connection.agent.request('session/set_config_option', {
+                  sessionId: activeSession.sessionId,
+                  configId: reasoningConfig.id,
+                  value: match.value,
+                })
+              } catch {
+                // Ignore if model does not support changing reasoning option.
+              }
+            }
+          }
+        }
+
+        const blocks: ContentBlock[] = [{ type: 'text', text: input.prompt }]
+        const supportsImages = Boolean(
+          init.agentCapabilities?.promptCapabilities?.image,
+        )
+        if (supportsImages && input.imageDataUrls?.length) {
+          for (const dataUrl of input.imageDataUrls.slice(0, 3)) {
+            const parsed = parseDataUrlImage(dataUrl)
+            if (parsed) {
+              blocks.push({
+                type: 'image',
+                mimeType: parsed.mimeType,
+                data: parsed.data,
+              })
+            }
+          }
+        }
+
+        promptWatchdog = createPromptTimeoutController({
+          idleTimeoutMs,
+          maxDurationMs,
+          clientSignal: input.signal,
+        })
+        const sendSessionCancel = () => {
+          void connection.agent
+            .notify('session/cancel', { sessionId: activeSession.sessionId })
+            .catch(() => {})
+        }
+        promptWatchdog.signal.addEventListener('abort', sendSessionCancel, {
+          once: true,
+        })
+
+        const promptPromise = activeSession.prompt(blocks, {
+          cancellationSignal: promptWatchdog.signal,
+          stopWaitingOnCancel: true,
+        })
+        // Avoid unhandled rejection if the update loop exits early.
+        promptPromise.catch(() => {})
+
+        let text = ''
+        let currentThought = ''
+        const thoughts: string[] = []
+        let stopReason = 'end_turn'
+
+        try {
+          let msg = await activeSession.nextUpdate()
+          while (msg.kind !== 'stop') {
+            promptWatchdog.touch()
+            const update = msg.update
+            if (
+              update.sessionUpdate === 'agent_message_chunk' &&
+              update.content.type === 'text'
+            ) {
+              text += update.content.text
+              input.onTextDelta?.(update.content.text)
+            } else if (
+              update.sessionUpdate === 'agent_thought_chunk' &&
+              update.content.type === 'text'
+            ) {
+              currentThought += update.content.text
+              input.onThoughtDelta?.(update.content.text)
+            }
+            msg = await activeSession.nextUpdate()
+          }
+          stopReason = msg.stopReason
+
+          await promptPromise
+        } finally {
+          promptWatchdog.signal.removeEventListener('abort', sendSessionCancel)
+        }
+
+        const postAbortReason = promptWatchdog.getAbortReason()
+        if (stopReason === 'cancelled' && postAbortReason !== null) {
+          throw mapAcpPromptError({
+            error: new Error('Request cancelled'),
+            providerLabel: this.options.providerLabel,
+            abortReason: postAbortReason,
+            clientAborted: Boolean(input.signal?.aborted),
+            idleTimeoutMs,
+            maxDurationMs,
+            authRequiredMessage: this.options.authRequiredMessage(),
+            makeError: (code, message, httpStatus) =>
+              this.makeError(code, message, httpStatus),
+          })
+        }
+
+        if (currentThought.trim()) {
+          thoughts.push(currentThought.trim())
+        }
+
+        const initMeta = init._meta as Record<string, unknown> | undefined
+        const metaVersion =
+          typeof initMeta?.agentVersion === 'string' &&
+          initMeta.agentVersion.trim()
+            ? initMeta.agentVersion.trim()
+            : undefined
+
+        return {
+          text: text.trim(),
+          thoughts,
+          stopReason,
+          modelId: activeModelId,
+          agentName: init.agentInfo?.name ?? this.options.defaultAgentName,
+          agentVersion: init.agentInfo?.version ?? metaVersion ?? 'unknown',
+        }
+      } catch (error) {
+        throw mapAcpPromptError({
+          error,
+          providerLabel: this.options.providerLabel,
+          abortReason: promptWatchdog?.getAbortReason() ?? null,
           clientAborted: Boolean(input.signal?.aborted),
           idleTimeoutMs,
           maxDurationMs,
@@ -1058,38 +1231,13 @@ export class AcpProcessRuntime<TSource extends string = string> {
           makeError: (code, message, httpStatus) =>
             this.makeError(code, message, httpStatus),
         })
+      } finally {
+        promptWatchdog?.cleanup()
+        activeSession.dispose()
+        void connection.agent
+          .request('session/close', { sessionId: activeSession.sessionId })
+          .catch(() => {})
       }
-
-      if (currentThought.trim()) {
-        thoughts.push(currentThought.trim())
-      }
-
-      return {
-        text: text.trim(),
-        thoughts,
-        stopReason,
-        modelId: activeModelId,
-        agentName: init.agentInfo?.name ?? this.options.defaultAgentName,
-        agentVersion: init.agentInfo?.version ?? 'unknown',
-      }
-    } catch (error) {
-      throw mapAcpPromptError({
-        error,
-        providerLabel: this.options.providerLabel,
-        abortReason: promptWatchdog?.getAbortReason() ?? null,
-        clientAborted: Boolean(input.signal?.aborted),
-        idleTimeoutMs,
-        maxDurationMs,
-        authRequiredMessage: this.options.authRequiredMessage(),
-        makeError: (code, message, httpStatus) =>
-          this.makeError(code, message, httpStatus),
-      })
-    } finally {
-      promptWatchdog?.cleanup()
-      activeSession.dispose()
-      void connection.agent
-        .request('session/close', { sessionId: activeSession.sessionId })
-        .catch(() => {})
-    }
+    })
   }
 }

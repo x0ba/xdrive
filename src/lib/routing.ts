@@ -49,6 +49,7 @@ export const SIMULATED_SHARE_ROLES = [
 export const SETTINGS_PROVIDER_IDS = [
   'antigravity',
   'opencode-go',
+  'grok-build',
   'openai',
   'claude',
   'xai',

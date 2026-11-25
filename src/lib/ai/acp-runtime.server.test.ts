@@ -1,6 +1,10 @@
+import { readFile, rm } from 'node:fs/promises'
+import os from 'node:os'
+import path from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   AcpError,
+  AcpProcessRuntime,
   DEFAULT_ACP_PROMPT_IDLE_TIMEOUT_MS,
   DEFAULT_ACP_PROMPT_MAX_DURATION_MS,
   createPromptTimeoutController,
@@ -375,5 +379,150 @@ describe('mapAcpPromptError & error mapping', () => {
       error: 'Sign in',
     })
     expect(authErr.code).toBe('AUTH_REQUIRED')
+  })
+})
+
+function isProcessAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0)
+    return true
+  } catch {
+    return false
+  }
+}
+
+async function waitForProcessExit(pid: number, timeoutMs = 2000) {
+  const deadline = Date.now() + timeoutMs
+  while (Date.now() < deadline) {
+    if (!isProcessAlive(pid)) return true
+    await new Promise((resolve) => setTimeout(resolve, 25))
+  }
+  return !isProcessAlive(pid)
+}
+
+describe('AcpProcessRuntime superseded connection lifecycle', () => {
+  it('terminates a superseded startup handle instead of leaking it when refreshed during initialization', async () => {
+    const pidLogPath = path.join(
+      os.tmpdir(),
+      `xdrive-acp-superseded-pids-${Date.now()}-${Math.random().toString(36).slice(2, 7)}.log`,
+    )
+    const delayedInitAcpScript = `
+      const fs = require('node:fs');
+      const readline = require('node:readline');
+      const delayMs = Number(process.argv[1] || '0');
+      const pidLogPath = process.argv[2];
+      fs.appendFileSync(pidLogPath, String(process.pid) + '\\n');
+      const rl = readline.createInterface({ input: process.stdin });
+      const send = (msg) => process.stdout.write(JSON.stringify(msg) + '\\n');
+      let seq = 0;
+      rl.on('line', (line) => {
+        if (!line.trim()) return;
+        const req = JSON.parse(line);
+        if (req.method === 'initialize') {
+          setTimeout(() => {
+            send({
+              jsonrpc: '2.0',
+              id: req.id,
+              result: {
+                protocolVersion: 1,
+                agentInfo: { name: 'FakeACP', version: String(process.pid) },
+                agentCapabilities: {},
+              },
+            });
+          }, delayMs);
+        } else if (req.method === 'session/new') {
+          send({
+            jsonrpc: '2.0',
+            id: req.id,
+            result: {
+              sessionId: 'sess-' + (++seq) + '-' + process.pid,
+              configOptions: [],
+            },
+          });
+        } else if (req.method === 'session/close') {
+          send({ jsonrpc: '2.0', id: req.id, result: {} });
+        }
+      });
+    `
+
+    let spawnCount = 0
+
+    const runtime = new AcpProcessRuntime({
+      providerLabel: 'TestProvider',
+      defaultAgentName: 'FakeACP',
+      workspaceDir: () => path.join(os.tmpdir(), 'xdrive-test-acp-lifecycle'),
+      resolveBinary: async () => {
+        spawnCount += 1
+        // First startup takes 250ms to initialize; replacement starts fast (10ms).
+        const delayMs = spawnCount === 1 ? '250' : '10'
+        return {
+          source: 'custom',
+          command: process.execPath,
+          args: ['-e', delayedInitAcpScript, delayMs, pidLogPath],
+          displayPath: 'fake-acp',
+        }
+      },
+      missingBinaryMessage: () => 'missing',
+      authRequiredMessage: () => 'auth',
+    })
+
+    try {
+      // 1. Caller A starts connecting via ensureConnected() (first process initializes slowly).
+      const firstEnsurePromise = runtime.ensureConnected()
+
+      // Give spawn #1 a moment to enter `initialize`.
+      await new Promise((resolve) => setTimeout(resolve, 40))
+
+      // 2. Concurrent refresh retires the in-flight connection and starts replacement process #2.
+      runtime.retireConnection()
+      const refreshedState = await runtime.withConnection(async (state) => {
+        await runtime.probeSessionOn(state, 5_000)
+        return state
+      })
+      const replacementPid = Number(refreshedState.init.agentInfo?.version)
+      expect(Number.isFinite(replacementPid)).toBe(true)
+
+      // 3. Wait for Caller A's ensureConnected() to resolve: it must reap superseded process #1
+      //    and return the active replacement connection rather than leaking process #1.
+      const callerAState = await firstEnsurePromise
+      const callerAPid = Number(callerAState.init.agentInfo?.version)
+      expect(callerAPid).toBe(replacementPid)
+
+      const loggedPids = (await readFile(pidLogPath, 'utf8'))
+        .trim()
+        .split(/\r?\n/)
+        .map(Number)
+        .filter(Number.isFinite)
+      const supersededPid = loggedPids.find((pid) => pid !== replacementPid)
+      expect(supersededPid).toBeDefined()
+      expect(await waitForProcessExit(supersededPid!)).toBe(true)
+
+      // Verify no retired handles remain leaked and the replacement is still alive.
+      expect(runtime.getRetiredHandleCount()).toBe(0)
+      expect(runtime.isAlive()).toBe(true)
+      expect(isProcessAlive(replacementPid)).toBe(true)
+
+      // 4. Verify withConnection() also reaps a superseded startup process once its callback finishes.
+      spawnCount = 0
+      runtime.retireConnection()
+      const slowWithConn = runtime.withConnection(async (state) => {
+        const pid = Number(state.init.agentInfo?.version)
+        await runtime.probeSessionOn(state, 5_000)
+        return pid
+      })
+      await new Promise((resolve) => setTimeout(resolve, 40))
+      runtime.retireConnection()
+      const fastPid = await runtime.withConnection(async (state) =>
+        Number(state.init.agentInfo?.version),
+      )
+      const slowPid = await slowWithConn
+      expect(slowPid).not.toBe(fastPid)
+      expect(runtime.getRetiredHandleCount()).toBe(0)
+      expect(await waitForProcessExit(slowPid)).toBe(true)
+      expect(isProcessAlive(fastPid)).toBe(true)
+    } finally {
+      await runtime.shutdown()
+      await rm(pidLogPath, { force: true }).catch(() => {})
+    }
   })
 })

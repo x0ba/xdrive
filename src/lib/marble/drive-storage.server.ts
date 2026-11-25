@@ -67,6 +67,7 @@ const VALID_SHARE_PERMISSIONS = new Set<SharePermissionLevel>([
 const VALID_PROVIDERS = new Set<AIProviderId>([
   'antigravity',
   'opencode-go',
+  'grok-build',
   'xai',
   'claude',
   'openai',

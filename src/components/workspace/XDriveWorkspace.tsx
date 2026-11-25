@@ -145,6 +145,15 @@ import {
   toXDriveOpenCodeGoModelId,
 } from '#/lib/ai/opencode-go-types'
 import type { OpenCodeGoRuntimeStatus } from '#/lib/ai/opencode-go-types'
+import {
+  applyGrokBuildStatusToSubscriptions,
+  fetchGrokBuildStatus,
+} from '#/lib/ai/grok-build-client'
+import {
+  isGrokBuildModelId,
+  toXDriveGrokBuildModelId,
+} from '#/lib/ai/grok-build-types'
+import type { GrokBuildRuntimeStatus } from '#/lib/ai/grok-build-types'
 import type {
   AIMessage,
   AIProviderId,
@@ -563,6 +572,7 @@ function providerFor(
 ): AIProviderId {
   const match = models.find((model) => model.id === modelId)
   if (match) return match.providerId
+  if (isGrokBuildModelId(modelId)) return 'grok-build'
   if (isOpenCodeModelId(modelId)) return 'opencode-go'
   if (modelId.startsWith('antigravity/') || modelId.startsWith('gemini')) {
     return 'antigravity'
@@ -858,6 +868,10 @@ export function XDriveWorkspace({
     useState<OpenCodeGoRuntimeStatus | null>(null)
   const [openCodeGoBusy, setOpenCodeGoBusy] = useState<string | null>(null)
   const [openCodeGoError, setOpenCodeGoError] = useState<string | null>(null)
+  const [grokBuildStatus, setGrokBuildStatus] =
+    useState<GrokBuildRuntimeStatus | null>(null)
+  const [grokBuildBusy, setGrokBuildBusy] = useState<string | null>(null)
+  const [grokBuildError, setGrokBuildError] = useState<string | null>(null)
   const [thinkingState, setThinkingState] = useState<{
     threadId: string
     phase: 'connecting' | 'thinking' | 'generating' | 'parsing'
@@ -1651,8 +1665,9 @@ export function XDriveWorkspace({
         subscriptions,
         antigravityStatus,
         openCodeGoStatus,
+        grokBuildStatus,
       }),
-    [subscriptions, antigravityStatus, openCodeGoStatus],
+    [subscriptions, antigravityStatus, openCodeGoStatus, grokBuildStatus],
   )
 
   const folderAncestors = useMemo(
@@ -1769,7 +1784,9 @@ export function XDriveWorkspace({
           : 'antigravity/default'
       setModelId((current) =>
         current === 'antigravity/default' ||
-        (!current.startsWith('antigravity/') && !isOpenCodeModelId(current))
+        (!current.startsWith('antigravity/') &&
+          !isOpenCodeModelId(current) &&
+          !isGrokBuildModelId(current))
           ? preferred
           : current,
       )
@@ -1814,6 +1831,52 @@ export function XDriveWorkspace({
         review: prev.review === 'antigravity/default' ? preferred : prev.review,
         design: prev.design === 'antigravity/default' ? preferred : prev.design,
       }))
+    }
+  }
+
+  function applyLiveGrokBuildStatus(status: GrokBuildRuntimeStatus) {
+    setGrokBuildStatus(status)
+    setSubscriptions((prev) =>
+      applyGrokBuildStatusToSubscriptions(prev, status),
+    )
+    if (status.authenticated) {
+      const preferred = status.currentModelId
+        ? toXDriveGrokBuildModelId(status.currentModelId)
+        : status.models[0]
+          ? toXDriveGrokBuildModelId(status.models[0].id)
+          : 'grok-build/grok-4.7'
+      setModelId((current) =>
+        current === 'antigravity/default' ? preferred : current,
+      )
+      setRoles((prev) => ({
+        implementation:
+          prev.implementation === 'antigravity/default'
+            ? preferred
+            : prev.implementation,
+        exploration:
+          prev.exploration === 'antigravity/default'
+            ? preferred
+            : prev.exploration,
+        review: prev.review === 'antigravity/default' ? preferred : prev.review,
+        design: prev.design === 'antigravity/default' ? preferred : prev.design,
+      }))
+    }
+  }
+
+  async function refreshGrokBuild(forceRefresh = true) {
+    setGrokBuildBusy('refresh')
+    setGrokBuildError(null)
+    try {
+      const status = await fetchGrokBuildStatus(forceRefresh)
+      applyLiveGrokBuildStatus(status)
+    } catch (error) {
+      setGrokBuildError(
+        error instanceof Error
+          ? error.message
+          : 'Could not reach Grok Build ACP backend.',
+      )
+    } finally {
+      setGrokBuildBusy(null)
     }
   }
 
@@ -1926,6 +1989,14 @@ export function XDriveWorkspace({
       .then((status) => {
         if (!active) return
         applyLiveOpenCodeGoStatus(status)
+      })
+      .catch(() => {
+        // Static/Storybook environments do not expose /api/ai.
+      })
+    void fetchGrokBuildStatus()
+      .then((status) => {
+        if (!active) return
+        applyLiveGrokBuildStatus(status)
       })
       .catch(() => {
         // Static/Storybook environments do not expose /api/ai.
@@ -2581,9 +2652,11 @@ export function XDriveWorkspace({
     }
     const threadId = input.doc?.id ?? 'drive'
     const providerTag =
-      input.providerId === 'opencode-go'
-        ? `${openCodeGoStatus?.transport === 'http-fallback' ? 'OpenCode Go' : 'OpenCode ACP'} (${input.model.replace(/^opencode-go\/(?:opencode\/)?/, '')})`
-        : `Antigravity ACP (${input.model.replace(/^antigravity\//, '')})`
+      input.providerId === 'grok-build'
+        ? `Grok Build ACP (${input.model.replace(/^grok-build\//, '')})`
+        : input.providerId === 'opencode-go'
+          ? `${openCodeGoStatus?.transport === 'http-fallback' ? 'OpenCode Go' : 'OpenCode ACP'} (${input.model.replace(/^opencode-go\/(?:opencode\/)?/, '')})`
+          : `Antigravity ACP (${input.model.replace(/^antigravity\//, '')})`
     const startedAt = Date.now()
     upsertThreadMessage(threadId, user)
     setThinkingState({
@@ -2743,6 +2816,11 @@ export function XDriveWorkspace({
         error instanceof Error ? error.message : 'The collaborator failed'
       if (error instanceof MarbleCollaborationError) {
         if (
+          input.providerId === 'grok-build' &&
+          (error.code === 'AUTH_REQUIRED' || error.code === 'BINARY_MISSING')
+        ) {
+          void refreshGrokBuild(true)
+        } else if (
           input.providerId === 'opencode-go' &&
           (error.code === 'AUTH_REQUIRED' ||
             error.code === 'BINARY_MISSING' ||
@@ -4195,7 +4273,9 @@ export function XDriveWorkspace({
             }
             return
           }
-          if (
+          if (event.providerId === 'grok-build' && event.authRequired) {
+            void refreshGrokBuild(true)
+          } else if (
             event.providerId === 'opencode-go' &&
             (event.authRequired ||
               event.entitlementRequired ||
@@ -5629,6 +5709,10 @@ export function XDriveWorkspace({
                     openCodeGoBusy={openCodeGoBusy}
                     openCodeGoError={openCodeGoError}
                     onRefreshOpenCodeGo={() => void refreshOpenCodeGo(true)}
+                    grokBuildStatus={grokBuildStatus}
+                    grokBuildBusy={grokBuildBusy}
+                    grokBuildError={grokBuildError}
+                    onRefreshGrokBuild={() => void refreshGrokBuild(true)}
                   />
                 </div>
               )}
@@ -5726,10 +5810,11 @@ export function XDriveWorkspace({
               antigravityStatus ? antigravityStatus.authenticated : undefined
             }
             hasConnectedProvider={
-              antigravityStatus || openCodeGoStatus
+              antigravityStatus || openCodeGoStatus || grokBuildStatus
                 ? Boolean(
                     antigravityStatus?.authenticated ||
-                    (openCodeGoStatus && isOpenCodeUsable(openCodeGoStatus)),
+                    (openCodeGoStatus && isOpenCodeUsable(openCodeGoStatus)) ||
+                    grokBuildStatus?.authenticated,
                   )
                 : undefined
             }
