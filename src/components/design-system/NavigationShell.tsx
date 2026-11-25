@@ -857,7 +857,7 @@ export function SidebarRail({
             onDragOver={(e) => handleDragOver(e, 'root')}
             onDragLeave={() => setDropTargetId(null)}
             onDrop={(e) => handleDrop(e, null)}
-            className={`group flex items-center gap-1 rounded px-1.5 py-1.5 text-[12.5px] transition-colors ${
+            className={`group flex items-center gap-1 rounded px-2 py-1.5 text-[12.5px] transition-colors ${
               dropTargetId === 'root'
                 ? 'bg-[var(--xd-accent-soft)] ring-1 ring-[var(--xd-accent)]'
                 : isMyDriveRootActive
@@ -865,25 +865,6 @@ export function SidebarRail({
                   : 'text-[var(--xd-ink-secondary)] hover:bg-[var(--xd-surface-hover)] hover:text-[var(--xd-ink)]'
             }`}
           >
-            {folders.length > 0 ? (
-              <button
-                type="button"
-                aria-label={
-                  driveExpanded ? 'Collapse My Drive' : 'Expand My Drive'
-                }
-                onClick={() => setDriveExpanded((prev) => !prev)}
-                className="inline-flex h-4 w-4 shrink-0 items-center justify-center rounded text-[var(--xd-ink-muted)] hover:text-[var(--xd-ink)]"
-              >
-                {driveExpanded ? (
-                  <ChevronDown className="h-3 w-3" />
-                ) : (
-                  <ChevronRight className="h-3 w-3" />
-                )}
-              </button>
-            ) : (
-              <span className="w-1 shrink-0" />
-            )}
-
             <button
               type="button"
               onClick={() => {
@@ -913,9 +894,26 @@ export function SidebarRail({
                 }}
                 aria-label="New folder in My Drive"
                 title="New folder"
-                className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded text-[var(--xd-ink-muted)] opacity-0 transition-opacity hover:bg-[var(--xd-surface-active)] hover:text-[var(--xd-ink)] group-hover:opacity-100 focus:opacity-100"
+                className="-my-0.5 inline-flex h-5 w-5 shrink-0 items-center justify-center rounded text-[var(--xd-ink-muted)] opacity-0 transition-opacity hover:bg-[var(--xd-surface-active)] hover:text-[var(--xd-ink)] group-hover:opacity-100 focus:opacity-100"
               >
                 <FolderPlus className="h-3 w-3" />
+              </button>
+            )}
+
+            {folders.length > 0 && (
+              <button
+                type="button"
+                aria-label={
+                  driveExpanded ? 'Collapse My Drive' : 'Expand My Drive'
+                }
+                onClick={() => setDriveExpanded((prev) => !prev)}
+                className="-my-0.5 inline-flex h-5 w-5 shrink-0 items-center justify-center rounded text-[var(--xd-ink-muted)] hover:bg-[var(--xd-surface-active)] hover:text-[var(--xd-ink)]"
+              >
+                {driveExpanded ? (
+                  <ChevronDown className="h-3 w-3" />
+                ) : (
+                  <ChevronRight className="h-3 w-3" />
+                )}
               </button>
             )}
           </div>
