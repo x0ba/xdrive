@@ -251,16 +251,17 @@ export const LatexPdfPreview = forwardRef<
       className="flex h-full min-h-0 flex-1 flex-col bg-[var(--xd-rail)]"
     >
       {/* Overleaf-Style PDF Viewer Header Toolbar */}
-      <div className="flex h-9 shrink-0 items-center justify-between gap-2 border-b border-[var(--xd-border)] bg-[var(--xd-rail)] px-2.5 text-[12px]">
+      <div className="relative z-30 flex h-9 shrink-0 items-center justify-between gap-2 border-b border-[var(--xd-border)] bg-[var(--xd-rail)] px-2.5 text-[12px]">
         <div className="flex items-center gap-1.5">
-          {/* Split Recompile Button + Settings Dropdown */}
-          <div className="inline-flex h-7 items-center overflow-hidden rounded bg-[var(--xd-accent)] text-white">
+          {/* Split Recompile Button + Settings Dropdown.
+              The menu is position:absolute, so this group must not clip it. */}
+          <div className="inline-flex h-7 items-center rounded bg-[var(--xd-accent)] text-white">
             <button
               type="button"
               onClick={onRecompile}
               disabled={compiling}
               title="Recompile LaTeX document (⌘S / ⌘↵)"
-              className="inline-flex h-full items-center gap-1.5 px-2.5 text-[12px] font-medium transition-colors hover:bg-[var(--xd-accent-hover)] disabled:opacity-70"
+              className="inline-flex h-full items-center gap-1.5 rounded-l px-2.5 text-[12px] font-medium transition-colors hover:bg-[var(--xd-accent-hover)] disabled:opacity-70"
             >
               {compiling ? (
                 <Loader2 className="h-3.5 w-3.5 animate-spin" />
@@ -278,10 +279,13 @@ export const LatexPdfPreview = forwardRef<
                   <ChevronDown className="h-3 w-3 text-white" />
                 </span>
               }
-              className="[&>button]:h-7 [&>button]:rounded-none [&>button]:px-1.5 [&>button]:text-white [&>button:hover]:bg-[var(--xd-accent-hover)] [&>button>svg:last-child]:hidden"
+              className="[&>button]:h-7 [&>button]:rounded-none [&>button]:rounded-r [&>button]:px-1.5 [&>button]:text-white [&>button:hover]:bg-[var(--xd-accent-hover)] [&>button[aria-expanded=true]]:bg-[var(--xd-accent-hover)] [&>button>svg:last-child]:hidden"
             >
               {(close) => (
-                <div className="space-y-2.5 text-[12px]">
+                <div
+                  data-marble-id="latex-compiler-menu"
+                  className="space-y-2.5 text-[12px]"
+                >
                   <div className="flex items-center justify-between">
                     <span className="font-medium text-[var(--xd-ink)]">
                       Auto-compile
