@@ -514,4 +514,123 @@ describe('template-workspace-helpers', () => {
     expect(merged[0]?.checkpoints).toHaveLength(1)
     expect(merged[0]?.syncState).toBe('saving')
   })
+
+  it('reverts a failed rename to server source when that doc ignores pending rename state', () => {
+    const editedSource =
+      '<!doctype html><html><head><title>Rename Target</title></head><body><h1 data-marble-id="h1">Edited During Failed Reload</h1></body></html>'
+    const serverSource =
+      '<!doctype html><html><head><title>Rename Target</title></head><body><h1 data-marble-id="h1">Server Body</h1></body></html>'
+    const currentDoc = makeDoc({
+      id: 'doc-failed-rename',
+      slug: 'rename-target',
+      title: 'Rename Target',
+      source: editedSource,
+      version: 4,
+      syncState: 'saving',
+    })
+    const serverDoc = makeDoc({
+      id: 'doc-failed-rename',
+      slug: 'rename-target',
+      title: 'Rename Target',
+      source: serverSource,
+      version: 1,
+      syncState: 'saved',
+    })
+    const heldMap = new Map<string, HeldDocEdit[]>([
+      [
+        'doc-failed-rename',
+        [
+          {
+            ops: [],
+            nextSource: editedSource,
+            lastEditedBy: { name: 'You', initials: 'YO' },
+            updatedAt: '2026-11-26T00:12:00.000Z',
+          },
+        ],
+      ],
+    ])
+
+    const merged = mergeReloadedWorkspaceDocs({
+      reloadedDocs: [serverDoc],
+      currentDocs: [currentDoc],
+      pendingRenameDocIds: new Set(['doc-failed-rename']),
+      heldDocEdits: heldMap,
+      ignorePendingRenameDocIds: new Set(['doc-failed-rename']),
+    })
+
+    expect(merged).toHaveLength(1)
+    const syncState: MarbleDocumentFile['syncState'] = merged[0].syncState
+    expect(merged[0]?.source).toBe(serverSource)
+    expect(syncState).toBe('saved')
+    expect(merged[0]?.version).toBe(1)
+  })
+
+  it('keeps queued save source when a failed rename reload ignores only rename state', () => {
+    const queuedSource =
+      '<!doctype html><html><head><title>Rename Target</title></head><body><h1 data-marble-id="h1">Queued Save</h1></body></html>'
+    const currentDoc = makeDoc({
+      id: 'doc-failed-rename',
+      source: queuedSource,
+      version: 2,
+      syncState: 'saving',
+    })
+    const serverDoc = makeDoc({
+      id: 'doc-failed-rename',
+      source:
+        '<!doctype html><html><head><title>Doc</title></head><body><h1 data-marble-id="h1">Server</h1></body></html>',
+      syncState: 'saved',
+    })
+
+    const merged = mergeReloadedWorkspaceDocs({
+      reloadedDocs: [serverDoc],
+      currentDocs: [currentDoc],
+      pendingRenameDocIds: new Set(['doc-failed-rename']),
+      heldDocEdits: new Map(),
+      pendingSaveDocIds: new Set(['doc-failed-rename']),
+      ignorePendingRenameDocIds: new Set(['doc-failed-rename']),
+    })
+
+    expect(merged[0]?.source).toBe(queuedSource)
+    expect(merged[0]?.syncState).toBe('saving')
+  })
+
+  it('preserves local documents whose first save is still pending', () => {
+    const localSource =
+      '<!doctype html><html><head><title>Stencil Note</title></head><body><h1 data-marble-id="h1">Copied</h1></body></html>'
+    const localDoc = makeDoc({
+      id: 'doc-first-save',
+      slug: 'stencil-note',
+      title: 'Stencil Note',
+      source: localSource,
+      syncState: 'saved',
+    })
+    const serverDoc = makeDoc({
+      id: 'doc-on-server',
+      slug: 'on-server',
+      title: 'On Server',
+    })
+    const unsavedOrphan = makeDoc({
+      id: 'doc-orphan',
+      slug: 'orphan',
+      title: 'Orphan',
+    })
+
+    const merged = mergeReloadedWorkspaceDocs({
+      reloadedDocs: [serverDoc],
+      currentDocs: [localDoc, serverDoc, unsavedOrphan],
+      pendingRenameDocIds: new Set(),
+      heldDocEdits: new Map(),
+      pendingSaveDocIds: new Set(['doc-first-save']),
+    })
+
+    expect(merged.map((doc) => doc.id)).toEqual([
+      'doc-first-save',
+      'doc-on-server',
+    ])
+    const preserved = merged[0]
+    const syncState: MarbleDocumentFile['syncState'] = preserved.syncState
+    expect(preserved.source).toBe(localSource)
+    expect(syncState).toBe('saving')
+    expect(merged[1]?.title).toBe('On Server')
+  })
 })

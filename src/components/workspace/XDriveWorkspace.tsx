@@ -1075,6 +1075,7 @@ export function XDriveWorkspace({
   const shownSigRef = useRef('')
   const saveTokens = useRef(new Map<string, number>())
   const pendingSaveCountsRef = useRef(new Map<string, number>())
+  const suppressedLocalDocIdsRef = useRef(new Set<string>())
   const pendingRenameDocIdsRef = useRef(new Set<string>())
   const [pendingRenameDocIds, setPendingRenameDocIds] = useState<Set<string>>(
     () => new Set(),
@@ -1349,7 +1350,9 @@ export function XDriveWorkspace({
     setDocs(fallback.docs)
   }
 
-  async function reloadWorkspaceFromServer(): Promise<boolean> {
+  async function reloadWorkspaceFromServer(options?: {
+    ignorePendingRenameDocIds?: ReadonlySet<string>
+  }): Promise<boolean> {
     if (!syncWithServer) return false
     try {
       const response = await fetch('/api/marble?action=workspace', {
@@ -1373,6 +1376,9 @@ export function XDriveWorkspace({
         populateFallbackTemplatesIfEmpty()
         return false
       }
+      for (const doc of data.docs) {
+        suppressedLocalDocIdsRef.current.delete(doc.id)
+      }
       const pendingSaveDocIds = new Set<string>()
       for (const [docId, count] of pendingSaveCountsRef.current) {
         if (count > 0) pendingSaveDocIds.add(docId)
@@ -1384,7 +1390,8 @@ export function XDriveWorkspace({
         heldDocEdits: heldDocEditsRef.current,
         pendingMoveDocIds: pendingMoveDocIdsRef.current,
         pendingSaveDocIds,
-      })
+        ignorePendingRenameDocIds: options?.ignorePendingRenameDocIds,
+      }).filter((doc) => !suppressedLocalDocIdsRef.current.has(doc.id))
       foldersRef.current = data.folders
       allDocsRef.current = mergedDocs
       for (const doc of mergedDocs) {
@@ -2491,6 +2498,40 @@ export function XDriveWorkspace({
     persistDriveSettings({ favoriteModelIds: nextIds })
   }
 
+  function docWriteSettled(id: string): boolean {
+    return (
+      !pendingRenameDocIdsRef.current.has(id) &&
+      !pendingMoveDocIdsRef.current.has(id) &&
+      (pendingSaveCountsRef.current.get(id) ?? 0) === 0 &&
+      (heldDocEditsRef.current.get(id)?.length ?? 0) === 0
+    )
+  }
+
+  function markDocSavedIfSettled(id: string) {
+    if (!docWriteSettled(id)) return
+    patchFile(id, (item) =>
+      item.syncState === 'saving' ? { ...item, syncState: 'saved' } : item,
+    )
+  }
+
+  function upsertDoc(doc: MarbleDocumentFile) {
+    if (suppressedLocalDocIdsRef.current.has(doc.id)) return
+    sourceRef.current.set(doc.id, doc.source)
+    allDocsRef.current = allDocsRef.current.some((item) => item.id === doc.id)
+      ? allDocsRef.current.map((item) => (item.id === doc.id ? doc : item))
+      : [doc, ...allDocsRef.current]
+    setDocs((prev) =>
+      prev.some((item) => item.id === doc.id)
+        ? prev.map((item) => (item.id === doc.id ? doc : item))
+        : [doc, ...prev],
+    )
+  }
+
+  function placePendingFirstSave(doc: MarbleDocumentFile): MarbleDocumentFile {
+    if (!syncWithServer || doc.syncState === 'saving') return doc
+    return { ...doc, syncState: 'saving' }
+  }
+
   function persist(
     id: string,
     slug: string,
@@ -2575,19 +2616,35 @@ export function XDriveWorkspace({
       }
     })
       .then(() => {
-        if (
-          saveTokens.current.get(id) !== token ||
-          pendingRenameDocIdsRef.current.has(id) ||
-          pendingMoveDocIdsRef.current.has(id)
-        ) {
+        if (saveTokens.current.get(id) !== token) return
+        const settled = docWriteSettled(id)
+        const live = allDocsRef.current.find((item) => item.id === id)
+        if (!live) {
+          if (!docOverride) return
+          upsertDoc({
+            ...docOverride,
+            source: nextSource,
+            nodeCount: countMarbleNodes(nextSource),
+            byteSize: byteSizeOf(nextSource),
+            syncState: settled ? 'saved' : 'saving',
+          })
           return
         }
-        patchFile(id, (item) =>
-          item.syncState === 'saving' ? { ...item, syncState: 'saved' } : item,
-        )
+        if (settled) markDocSavedIfSettled(id)
       })
       .catch(() => {
         if (saveTokens.current.get(id) !== token) return
+        const live = allDocsRef.current.find((item) => item.id === id)
+        if (!live && docOverride) {
+          upsertDoc({
+            ...docOverride,
+            source: nextSource,
+            nodeCount: countMarbleNodes(nextSource),
+            byteSize: byteSizeOf(nextSource),
+            syncState: 'retrying',
+          })
+          return
+        }
         patchFile(id, (item) => ({ ...item, syncState: 'retrying' }))
       })
   }
@@ -2993,12 +3050,12 @@ export function XDriveWorkspace({
           ...result.proposal,
           status: 'committed',
         }
-        const created: MarbleDocumentFile = {
+        const created: MarbleDocumentFile = placePendingFirstSave({
           ...adopted,
           folderId: targetFolder ? targetFolder.id : null,
           folder: targetFolder ? targetFolder.name : 'My Drive',
           intentHistory: [committedProposal],
-        }
+        })
         allDocsRef.current = [created, ...allDocsRef.current]
         setDocs((prev) => [created, ...prev])
         openDocument(created.id, { doc: created })
@@ -3160,11 +3217,11 @@ export function XDriveWorkspace({
       ? foldersRef.current.find((f) => f.id === input.folderId)
       : null
     const adopted = adoptDocument(copy, allDocsRef.current)
-    const placed: MarbleDocumentFile = {
+    const placed = placePendingFirstSave({
       ...adopted,
       folderId: targetFolder ? targetFolder.id : null,
       folder: targetFolder ? targetFolder.name : 'My Drive',
-    }
+    })
     allDocsRef.current = [placed, ...allDocsRef.current]
     setDocs((prev) => [placed, ...prev])
     openDocument(placed.id, { doc: placed })
@@ -3336,13 +3393,13 @@ export function XDriveWorkspace({
       (isDocTemplate(sourceDoc) ||
         (targetFolder ? templateFolderIds.has(targetFolder.id) : false))
     const adopted = adoptDocument(copy, allDocsRef.current)
-    const placed: MarbleDocumentFile = {
+    const placed = placePendingFirstSave({
       ...adopted,
       ...(isTemplateCopy ? { id: `tpl-${shortSha()}` } : {}),
       isTemplate: isTemplateCopy,
       folderId: targetFolder ? targetFolder.id : null,
       folder: targetFolder ? targetFolder.name : 'My Drive',
-    }
+    })
     allDocsRef.current = [placed, ...allDocsRef.current]
     setDocs((prev) => [placed, ...prev])
     setNamer(null)
@@ -3572,19 +3629,21 @@ export function XDriveWorkspace({
           const hadHeld =
             (heldDocEditsRef.current.get(liveDoc.id)?.length ?? 0) > 0
           heldDocEditsRef.current.delete(liveDoc.id)
-          const reloaded = await reloadWorkspaceFromServer()
+          const reloaded = await reloadWorkspaceFromServer({
+            ignorePendingRenameDocIds: new Set([liveDoc.id]),
+          })
+          const heldDuringReload =
+            (heldDocEditsRef.current.get(liveDoc.id)?.length ?? 0) > 0
           heldDocEditsRef.current.delete(liveDoc.id)
           setDocRenamePending(liveDoc.id, false)
           if (allDocsRef.current.some((doc) => doc.id === liveDoc.id)) {
             if (reloaded) {
-              if ((pendingSaveCountsRef.current.get(liveDoc.id) ?? 0) === 0) {
-                patchFile(liveDoc.id, (doc) =>
-                  doc.syncState === 'saving'
-                    ? { ...doc, syncState: 'saved' }
-                    : doc,
-                )
+              if (activeTabRef.current === liveDoc.id) {
+                shownSourceRef.current = null
               }
+              markDocSavedIfSettled(liveDoc.id)
             } else {
+              const stillWriting = !docWriteSettled(liveDoc.id)
               sourceRef.current.set(liveDoc.id, confirmedSnapshot.source)
               if (activeTabRef.current === liveDoc.id) {
                 shownSourceRef.current = null
@@ -3599,11 +3658,11 @@ export function XDriveWorkspace({
                 intentHistory: confirmedSnapshot.intentHistory,
                 updatedAt: confirmedSnapshot.updatedAt,
                 lastEditedBy: confirmedSnapshot.lastEditedBy,
-                syncState: 'saved',
+                syncState: stillWriting ? 'saving' : 'saved',
               }))
             }
           }
-          if (hadHeld) {
+          if (hadHeld || heldDuringReload) {
             setAgentStatus(
               `Rename failed (${message}); pending edits were discarded.`,
             )
@@ -4035,7 +4094,10 @@ export function XDriveWorkspace({
         folder: resolvedFolderName,
         isTemplate: nextIsTemplate,
         updatedAt,
-        syncState: doc.syncState === 'saving' ? 'saved' : doc.syncState,
+        syncState:
+          doc.syncState === 'saving' && docWriteSettled(doc.id)
+            ? 'saved'
+            : doc.syncState,
       }))
       return { folderId: resolvedFolderId, folderName: resolvedFolderName }
     }
@@ -4070,9 +4132,7 @@ export function XDriveWorkspace({
           : null
         if (targetFolderId !== null && !liveTargetFolder) {
           setDocMovePending(docId, false)
-          patchFile(docId, (doc) =>
-            doc.syncState === 'saving' ? { ...doc, syncState: 'saved' } : doc,
-          )
+          markDocSavedIfSettled(docId)
           callbacks?.onError?.('Destination folder no longer exists.')
           return null
         }
@@ -4108,11 +4168,7 @@ export function XDriveWorkspace({
         reloadOnError: true,
         onError: (message) => {
           setDocMovePending(docId, false)
-          if ((pendingSaveCountsRef.current.get(docId) ?? 0) === 0) {
-            patchFile(docId, (doc) =>
-              doc.syncState === 'saving' ? { ...doc, syncState: 'saved' } : doc,
-            )
-          }
+          markDocSavedIfSettled(docId)
           callbacks?.onError?.(message)
         },
         onSuccess: () => {
@@ -4152,11 +4208,12 @@ export function XDriveWorkspace({
     bodyOrFactory:
       Record<string, unknown> | (() => Record<string, unknown> | null),
   ) {
-    void syncDriveApi(bodyOrFactory)
+    void syncDriveApi(bodyOrFactory, { reloadOnError: true })
   }
 
   function cleanupRemovedDocIds(removedIds: Set<string>) {
     if (removedIds.size === 0) return
+    for (const id of removedIds) suppressedLocalDocIdsRef.current.add(id)
     setOpenTabIds((prev) => prev.filter((id) => !removedIds.has(id)))
     if (
       activeTabRef.current !== 'home' &&
@@ -4496,7 +4553,7 @@ export function XDriveWorkspace({
           nodeCount,
           byteSize,
           version: 1,
-          syncState: 'saved',
+          syncState: syncWithServer ? 'saving' : 'saved',
           createdAt: now,
           updatedAt: now,
           createdBy: { name: 'Drive Chat', initials: 'AI', isAi: true },

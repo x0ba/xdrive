@@ -379,10 +379,22 @@ export function replayHeldDocEdits(
   return { source: current, ops }
 }
 
+function withSyncState(
+  doc: MarbleDocumentFile,
+  syncState: MarbleDocumentFile['syncState'],
+): MarbleDocumentFile {
+  if (doc.syncState === syncState) return doc
+  return { ...doc, syncState }
+}
+
 /**
  * Merges freshly loaded server documents with in-flight client rename/move/save
  * mutations so workspace reloads preserve queued edits while adopting the
  * server's confirmed folder location and metadata.
+ *
+ * `ignorePendingRenameDocIds` drops a failed rename's held edits so that
+ * document reverts to server source. Local documents whose first save is still
+ * pending are kept even when the server has not seen them yet.
  */
 export function mergeReloadedWorkspaceDocs(input: {
   reloadedDocs: readonly MarbleDocumentFile[]
@@ -391,38 +403,57 @@ export function mergeReloadedWorkspaceDocs(input: {
   heldDocEdits: ReadonlyMap<string, readonly HeldDocEdit[]>
   pendingMoveDocIds?: ReadonlySet<string>
   pendingSaveDocIds?: ReadonlySet<string>
+  ignorePendingRenameDocIds?: ReadonlySet<string>
 }): MarbleDocumentFile[] {
-  return input.reloadedDocs.map((serverDoc) => {
-    const isRenamePending = input.pendingRenameDocIds.has(serverDoc.id)
-    const isMovePending = input.pendingMoveDocIds?.has(serverDoc.id) ?? false
-    const hasPendingSave = input.pendingSaveDocIds?.has(serverDoc.id) ?? false
-    if (!isRenamePending && !isMovePending && !hasPendingSave) {
-      return serverDoc
-    }
-    const held = isRenamePending
-      ? input.heldDocEdits.get(serverDoc.id)
-      : undefined
-    const preserveLocalEdits =
-      Boolean(held && held.length > 0) || hasPendingSave
-    if (preserveLocalEdits) {
-      const currentDoc = input.currentDocs.find(
-        (item) => item.id === serverDoc.id,
-      )
-      if (currentDoc) {
-        return {
-          ...serverDoc,
-          source: currentDoc.source,
-          nodeCount: currentDoc.nodeCount,
-          byteSize: currentDoc.byteSize,
-          version: currentDoc.version,
-          checkpoints: currentDoc.checkpoints,
-          intentHistory: currentDoc.intentHistory,
-          updatedAt: currentDoc.updatedAt,
-          lastEditedBy: currentDoc.lastEditedBy,
-          syncState: 'saving',
+  const mergedFromServer = input.reloadedDocs.map(
+    (serverDoc): MarbleDocumentFile => {
+      const ignoreRename =
+        input.ignorePendingRenameDocIds?.has(serverDoc.id) ?? false
+      const isRenamePending =
+        !ignoreRename && input.pendingRenameDocIds.has(serverDoc.id)
+      const isMovePending = input.pendingMoveDocIds?.has(serverDoc.id) ?? false
+      const hasPendingSave = input.pendingSaveDocIds?.has(serverDoc.id) ?? false
+      if (!isRenamePending && !isMovePending && !hasPendingSave) {
+        return serverDoc
+      }
+      const held = isRenamePending
+        ? input.heldDocEdits.get(serverDoc.id)
+        : undefined
+      const preserveLocalEdits =
+        Boolean(held && held.length > 0) || hasPendingSave
+      if (preserveLocalEdits) {
+        const currentDoc = input.currentDocs.find(
+          (item) => item.id === serverDoc.id,
+        )
+        if (currentDoc) {
+          return withSyncState(
+            {
+              ...serverDoc,
+              source: currentDoc.source,
+              nodeCount: currentDoc.nodeCount,
+              byteSize: currentDoc.byteSize,
+              version: currentDoc.version,
+              checkpoints: currentDoc.checkpoints,
+              intentHistory: currentDoc.intentHistory,
+              updatedAt: currentDoc.updatedAt,
+              lastEditedBy: currentDoc.lastEditedBy,
+            },
+            'saving',
+          )
         }
       }
-    }
-    return { ...serverDoc, syncState: 'saving' }
-  })
+      return withSyncState(serverDoc, 'saving')
+    },
+  )
+
+  const serverIds = new Set(input.reloadedDocs.map((doc) => doc.id))
+  const pendingFirstSaves = input.currentDocs.filter(
+    (doc) =>
+      !serverIds.has(doc.id) && (input.pendingSaveDocIds?.has(doc.id) ?? false),
+  )
+  if (pendingFirstSaves.length === 0) return mergedFromServer
+  return [
+    ...pendingFirstSaves.map((doc) => withSyncState(doc, 'saving')),
+    ...mergedFromServer,
+  ]
 }

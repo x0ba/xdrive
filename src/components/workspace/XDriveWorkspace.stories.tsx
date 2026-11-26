@@ -2295,3 +2295,604 @@ export const MoveLostResponseReloadsActualFolder: Story = {
     })
   },
 }
+
+let rejectRenameDuringReload: ((reason?: unknown) => void) | null = null
+let resolveRenameErrorReload: (() => void) | null = null
+let recordedRenameReloadPosts: RecordedMarblePost[] = []
+
+function RenameFailureDuringReloadHarness(
+  args: ComponentProps<typeof XDriveWorkspace>,
+) {
+  const [ready, setReady] = useState(false)
+
+  useEffect(() => {
+    recordedRenameReloadPosts = []
+    let holdRenameReload = false
+    const originalFetch = window.fetch.bind(window)
+    window.fetch = async (input, init) => {
+      const url =
+        typeof input === 'string'
+          ? input
+          : input instanceof Request
+            ? input.url
+            : String(input)
+      if (url.includes('/api/marble')) {
+        const method = (init?.method ?? 'GET').toUpperCase()
+        if (method === 'GET' && url.includes('action=workspace')) {
+          if (holdRenameReload) {
+            holdRenameReload = false
+            await new Promise<void>((resolve) => {
+              resolveRenameErrorReload = resolve
+            })
+          }
+          return new Response(
+            JSON.stringify({
+              ok: true,
+              folders: [],
+              docs: [{ ...RENAME_RACE_DOC, syncState: 'saved' }],
+            }),
+            {
+              status: 200,
+              headers: { 'content-type': 'application/json' },
+            },
+          )
+        }
+        if (method === 'POST' && typeof init?.body === 'string') {
+          const payload = JSON.parse(init.body) as RecordedMarblePost
+          if (payload.action === 'diff' || payload.action === 'doctor') {
+            return new Response(JSON.stringify({ ok: false }), {
+              status: 404,
+              headers: { 'content-type': 'application/json' },
+            })
+          }
+          recordedRenameReloadPosts.push(payload)
+          if (payload.action === 'rename_document') {
+            holdRenameReload = true
+            await new Promise<void>((_resolve, reject) => {
+              rejectRenameDuringReload = reject
+            })
+          }
+          return new Response(
+            JSON.stringify({ ok: true, slug: payload.slug }),
+            {
+              status: 200,
+              headers: { 'content-type': 'application/json' },
+            },
+          )
+        }
+      }
+      return originalFetch(input, init)
+    }
+    setReady(true)
+    return () => {
+      rejectRenameDuringReload?.(new Error('unmounted'))
+      rejectRenameDuringReload = null
+      resolveRenameErrorReload?.()
+      resolveRenameErrorReload = null
+      window.fetch = originalFetch
+    }
+  }, [])
+
+  if (!ready) return null
+  return <XDriveWorkspace {...args} />
+}
+
+/**
+ * Verifies that edits applied while a failed rename is reloading are discarded with the displayed source, and the document is marked saved only once it matches the server.
+ *
+ * @summary Failed rename reload reverts unwritten edits before marking saved
+ */
+export const RenameFailureDuringReloadRevertsUnwrittenEdits: Story = {
+  name: 'Document · Failed Rename Reload Reverts Unwritten Edits',
+  args: {
+    initialTheme: 'dark',
+    initialActiveTabId: 'doc-rename-race',
+    initialDocs: [RENAME_RACE_DOC],
+    initialOpenDocIds: ['doc-rename-race'],
+    initialMode: 'source',
+    initialAiSidebarOpen: false,
+    syncWithServer: true,
+  },
+  render: (args) => <RenameFailureDuringReloadHarness {...args} />,
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    const sourceTextarea = await canvas.findByLabelText<HTMLTextAreaElement>(
+      'Marble HTML5 source',
+    )
+    await waitFor(() => expect(sourceTextarea.value).toContain('Initial Body'))
+
+    const sidebarNav = canvas.getByRole('navigation', {
+      name: 'Primary Workspace Navigation',
+    })
+    const sidebarContainer = sidebarNav.parentElement
+    expect(sidebarContainer).not.toBeNull()
+    const pinnedLink = await within(sidebarContainer!).findByRole('link', {
+      name: 'Rename Race Doc',
+    })
+    await userEvent.pointer({ keys: '[MouseRight]', target: pinnedLink })
+    const pinnedMenu = await canvas.findByRole('menu', {
+      name: 'Actions for Rename Race Doc',
+    })
+    await userEvent.click(
+      within(pinnedMenu).getByRole('menuitem', { name: 'Rename' }),
+    )
+    const renameDialog = await canvas.findByRole('dialog', {
+      name: 'Rename file',
+    })
+    const nameInput = within(renameDialog).getByLabelText('Document name')
+    await userEvent.clear(nameInput)
+    await userEvent.type(nameInput, 'Renamed Doc')
+    await userEvent.click(
+      within(renameDialog).getByRole('button', { name: 'Save' }),
+    )
+    await waitFor(() => expect(rejectRenameDuringReload).not.toBeNull())
+
+    rejectRenameDuringReload?.(new TypeError('Failed to fetch'))
+    rejectRenameDuringReload = null
+    await waitFor(() => expect(resolveRenameErrorReload).not.toBeNull())
+
+    const bodyStart = sourceTextarea.value.indexOf('Initial Body')
+    expect(bodyStart).toBeGreaterThan(-1)
+    sourceTextarea.focus()
+    await userEvent.type(sourceTextarea, 'Edited During Failed Reload', {
+      initialSelectionStart: bodyStart,
+      initialSelectionEnd: bodyStart + 'Initial Body'.length,
+    })
+    await userEvent.click(canvas.getByRole('button', { name: 'Apply' }))
+    await waitFor(() =>
+      expect(canvas.getByRole('button', { name: 'Apply' })).toBeDisabled(),
+    )
+    expect(sourceTextarea.value).toContain('Edited During Failed Reload')
+    expect(canvas.getByTitle('Saving')).toBeVisible()
+    expect(canvas.queryByTitle('Saved')).toBeNull()
+    expect(
+      recordedRenameReloadPosts.filter(
+        (post) => post.action === 'save' || post.action === 'apply_ops',
+      ),
+    ).toHaveLength(0)
+
+    resolveRenameErrorReload?.()
+    resolveRenameErrorReload = null
+
+    await waitFor(() => {
+      expect(sourceTextarea.value).toContain('Initial Body')
+      expect(sourceTextarea.value).not.toContain('Edited During Failed Reload')
+    })
+    expect(canvas.getByTitle('Saved')).toBeVisible()
+    expect(canvas.queryByTitle('Saving')).toBeNull()
+    expect(
+      recordedRenameReloadPosts.filter(
+        (post) => post.action === 'save' || post.action === 'apply_ops',
+      ),
+    ).toHaveLength(0)
+    expect(
+      await canvas.findByText(/pending edits were discarded/i),
+    ).toBeVisible()
+  },
+}
+
+const STENCIL_TEMPLATE_FOLDER: DriveFolder = {
+  id: 'folder-templates-stencil',
+  name: TEMPLATES_FOLDER_NAME,
+  parentId: null,
+  color: 'accent',
+  isTemplatesFolder: true,
+  createdAt: '2026-11-26T00:00:00.000Z',
+  updatedAt: '2026-11-26T00:00:00.000Z',
+}
+
+const STENCIL_TEMPLATE_DOC: MarbleDocumentFile = {
+  ...INITIAL_WORKSPACE_DOCS[2],
+  id: 'tpl-stencil',
+  slug: 'stencil-template',
+  fileName: 'stencil-template.mrbl',
+  title: 'Stencil Note',
+  category: 'document',
+  isTemplate: true,
+  isEvergreen: false,
+  starred: false,
+  pinned: false,
+  folder: TEMPLATES_FOLDER_NAME,
+  folderId: STENCIL_TEMPLATE_FOLDER.id,
+  trashedAt: null,
+  syncState: 'saved',
+  source:
+    '<!doctype html><html lang="en" data-marble="1"><head><meta charset="utf-8"><title>Stencil Note</title></head><body><main><h1 data-marble-id="h1" data-marble-editable>Stencil Body</h1></main></body></html>',
+}
+
+let rejectCopyMove: ((reason?: unknown) => void) | null = null
+let resolveCopyReload: (() => void) | null = null
+let resolveCopySave: (() => void) | null = null
+let recordedCopyPosts: RecordedMarblePost[] = []
+
+function PendingFirstSaveReloadHarness(
+  args: ComponentProps<typeof XDriveWorkspace>,
+) {
+  const [ready, setReady] = useState(false)
+
+  useEffect(() => {
+    recordedCopyPosts = []
+    let holdCopyReload = false
+    let serverMoveDoc: MarbleDocumentFile = { ...MOVE_RACE_DOC }
+    const originalFetch = window.fetch.bind(window)
+    window.fetch = async (input, init) => {
+      const url =
+        typeof input === 'string'
+          ? input
+          : input instanceof Request
+            ? input.url
+            : String(input)
+      if (url.includes('/api/marble')) {
+        const method = (init?.method ?? 'GET').toUpperCase()
+        if (method === 'GET' && url.includes('action=workspace')) {
+          if (holdCopyReload) {
+            holdCopyReload = false
+            await new Promise<void>((resolve) => {
+              resolveCopyReload = resolve
+            })
+          }
+          return new Response(
+            JSON.stringify({
+              ok: true,
+              folders: [STENCIL_TEMPLATE_FOLDER, MOVE_RACE_ARCHIVE_FOLDER],
+              docs: [serverMoveDoc, STENCIL_TEMPLATE_DOC],
+            }),
+            {
+              status: 200,
+              headers: { 'content-type': 'application/json' },
+            },
+          )
+        }
+        if (method === 'POST' && typeof init?.body === 'string') {
+          const payload = JSON.parse(init.body) as RecordedMarblePost
+          if (payload.action === 'diff' || payload.action === 'doctor') {
+            return new Response(JSON.stringify({ ok: false }), {
+              status: 404,
+              headers: { 'content-type': 'application/json' },
+            })
+          }
+          recordedCopyPosts.push(payload)
+          if (payload.action === 'move_document') {
+            serverMoveDoc = {
+              ...serverMoveDoc,
+              folderId: MOVE_RACE_ARCHIVE_FOLDER.id,
+              folder: MOVE_RACE_ARCHIVE_FOLDER.name,
+            }
+            holdCopyReload = true
+            await new Promise<void>((_resolve, reject) => {
+              rejectCopyMove = reject
+            })
+          }
+          if (payload.action === 'save' || payload.action === 'apply_ops') {
+            await new Promise<void>((resolve) => {
+              resolveCopySave = resolve
+            })
+          }
+          return new Response(
+            JSON.stringify({
+              ok: true,
+              slug: payload.slug,
+              folderPath: payload.folderPath ?? '',
+              source: payload.source,
+            }),
+            {
+              status: 200,
+              headers: { 'content-type': 'application/json' },
+            },
+          )
+        }
+      }
+      return originalFetch(input, init)
+    }
+    setReady(true)
+    return () => {
+      rejectCopyMove?.(new Error('unmounted'))
+      rejectCopyMove = null
+      resolveCopyReload?.()
+      resolveCopyReload = null
+      resolveCopySave?.()
+      resolveCopySave = null
+      window.fetch = originalFetch
+    }
+  }, [])
+
+  if (!ready) return null
+  return <XDriveWorkspace {...args} />
+}
+
+/**
+ * Verifies that a template copy created while a move is pending survives the move's error reload, stays visible before its first save finishes, and is marked saved only after that save.
+ *
+ * @summary Pending first save survives reload and upserts on completion
+ */
+export const PendingFirstSaveSurvivesReload: Story = {
+  name: 'Document · Pending First Save Survives Reload',
+  args: {
+    initialTheme: 'dark',
+    initialNav: 'drive',
+    initialActiveTabId: 'home',
+    initialDocs: [MOVE_RACE_DOC, STENCIL_TEMPLATE_DOC],
+    initialAiSidebarOpen: false,
+    syncWithServer: true,
+  },
+  render: (args) => <PendingFirstSaveReloadHarness {...args} />,
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    const sidebarNav = canvas.getByRole('navigation', {
+      name: 'Primary Workspace Navigation',
+    })
+    const sidebarContainer = sidebarNav.parentElement
+    expect(sidebarContainer).not.toBeNull()
+    await expect(
+      await within(sidebarContainer!).findByRole('link', { name: 'Archive' }),
+    ).toBeVisible()
+
+    const pinnedLink = await within(sidebarContainer!).findByRole('link', {
+      name: 'Move Race Doc',
+    })
+    await userEvent.pointer({ keys: '[MouseRight]', target: pinnedLink })
+    const menu = await canvas.findByRole('menu', {
+      name: 'Actions for Move Race Doc',
+    })
+    await userEvent.click(
+      within(menu).getByRole('menuitem', { name: 'Move to folder…' }),
+    )
+    const dialog = await canvas.findByRole('dialog', {
+      name: 'Move file to folder',
+    })
+    await userEvent.click(
+      within(dialog).getByRole('button', { name: 'Archive' }),
+    )
+    await userEvent.click(
+      within(dialog).getByRole('button', { name: 'Move here' }),
+    )
+    await waitFor(() => expect(rejectCopyMove).not.toBeNull())
+
+    await userEvent.click(canvas.getByRole('button', { name: 'New' }))
+    const createMenu = await canvas.findByRole('menu', {
+      name: 'Create new app or folder',
+    })
+    await userEvent.click(
+      within(createMenu).getByRole('menuitem', { name: 'Stencil Note' }),
+    )
+    await expect(await canvas.findByText('stencil-note.mrbl')).toBeVisible()
+    expect(
+      recordedCopyPosts.filter(
+        (post) => post.action === 'save' || post.action === 'apply_ops',
+      ),
+    ).toHaveLength(0)
+
+    rejectCopyMove?.(new TypeError('Failed to fetch'))
+    rejectCopyMove = null
+    await waitFor(() => expect(resolveCopyReload).not.toBeNull())
+    expect(canvas.getByText('stencil-note.mrbl')).toBeVisible()
+
+    resolveCopyReload?.()
+    resolveCopyReload = null
+    await waitFor(() => expect(resolveCopySave).not.toBeNull())
+    expect(canvas.getByText('stencil-note.mrbl')).toBeVisible()
+    expect(canvas.getByTitle('Saving')).toBeVisible()
+    expect(canvas.queryByTitle('Saved')).toBeNull()
+
+    resolveCopySave?.()
+    resolveCopySave = null
+
+    await waitFor(() => expect(canvas.getByTitle('Saved')).toBeVisible())
+    expect(canvas.getByText('stencil-note.mrbl')).toBeVisible()
+    const savePosts = recordedCopyPosts.filter(
+      (post) => post.action === 'save' || post.action === 'apply_ops',
+    )
+    expect(savePosts).toHaveLength(1)
+    expect(savePosts[0]?.slug).toBe('stencil-note')
+    expect(JSON.stringify(savePosts[0])).toContain('Stencil Note')
+  },
+}
+
+const TRASH_RELOAD_DOC: MarbleDocumentFile = {
+  ...INITIAL_WORKSPACE_DOCS[2],
+  id: 'doc-trash-reload',
+  slug: 'trash-reload-doc',
+  fileName: 'trash-reload-doc.mrbl',
+  title: 'Trash Reload Doc',
+  category: 'document',
+  isTemplate: false,
+  isEvergreen: false,
+  starred: false,
+  pinned: true,
+  folder: 'My Drive',
+  folderId: null,
+  trashedAt: null,
+  syncState: 'saved',
+}
+
+let trashReloadFailAction: 'trash' | 'restore' | 'delete' | null = 'trash'
+let resolveTrashErrorReload: (() => void) | null = null
+let recordedTrashPosts: RecordedMarblePost[] = []
+
+function TrashRestoreDeleteReloadHarness(
+  args: ComponentProps<typeof XDriveWorkspace>,
+) {
+  const [ready, setReady] = useState(false)
+
+  useEffect(() => {
+    recordedTrashPosts = []
+    trashReloadFailAction = 'trash'
+    let holdTrashReload = false
+    let trashed = false
+    let deleted = false
+    const originalFetch = window.fetch.bind(window)
+    window.fetch = async (input, init) => {
+      const url =
+        typeof input === 'string'
+          ? input
+          : input instanceof Request
+            ? input.url
+            : String(input)
+      if (url.includes('/api/marble')) {
+        const method = (init?.method ?? 'GET').toUpperCase()
+        if (method === 'GET' && url.includes('action=workspace')) {
+          if (holdTrashReload) {
+            holdTrashReload = false
+            await new Promise<void>((resolve) => {
+              resolveTrashErrorReload = resolve
+            })
+          }
+          const docs = deleted
+            ? []
+            : [
+                {
+                  ...TRASH_RELOAD_DOC,
+                  trashedAt: trashed ? '2026-11-26T00:04:00.000Z' : null,
+                },
+              ]
+          return new Response(JSON.stringify({ ok: true, folders: [], docs }), {
+            status: 200,
+            headers: { 'content-type': 'application/json' },
+          })
+        }
+        if (method === 'POST' && typeof init?.body === 'string') {
+          const payload = JSON.parse(init.body) as RecordedMarblePost
+          if (payload.action === 'diff' || payload.action === 'doctor') {
+            return new Response(JSON.stringify({ ok: false }), {
+              status: 404,
+              headers: { 'content-type': 'application/json' },
+            })
+          }
+          recordedTrashPosts.push(payload)
+          const action = payload.action
+          if (
+            action === 'trash' ||
+            action === 'restore' ||
+            action === 'delete'
+          ) {
+            if (trashReloadFailAction === action) {
+              trashReloadFailAction = null
+              holdTrashReload = true
+              throw new TypeError('Failed to fetch')
+            }
+            if (action === 'trash') trashed = true
+            if (action === 'restore') trashed = false
+            if (action === 'delete') deleted = true
+          }
+          return new Response(JSON.stringify({ ok: true }), {
+            status: 200,
+            headers: { 'content-type': 'application/json' },
+          })
+        }
+      }
+      return originalFetch(input, init)
+    }
+    setReady(true)
+    return () => {
+      resolveTrashErrorReload?.()
+      resolveTrashErrorReload = null
+      window.fetch = originalFetch
+    }
+  }, [])
+
+  if (!ready) return null
+  return <XDriveWorkspace {...args} />
+}
+
+async function releaseTrashErrorReload() {
+  await waitFor(() => expect(resolveTrashErrorReload).not.toBeNull())
+  const release = resolveTrashErrorReload
+  resolveTrashErrorReload = null
+  release?.()
+}
+
+/**
+ * Verifies that lost trash, restore, and delete responses reload server truth before the workspace treats the optimistic change as final.
+ *
+ * @summary Trash, restore, and delete reload after a lost response
+ */
+export const TrashRestoreDeleteReloadOnError: Story = {
+  name: 'Drive · Trash Restore Delete Reload On Error',
+  args: {
+    initialTheme: 'dark',
+    initialNav: 'drive',
+    initialActiveTabId: 'home',
+    initialDocs: [TRASH_RELOAD_DOC],
+    initialAiSidebarOpen: false,
+    syncWithServer: true,
+  },
+  render: (args) => <TrashRestoreDeleteReloadHarness {...args} />,
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    const sidebarNav = canvas.getByRole('navigation', {
+      name: 'Primary Workspace Navigation',
+    })
+    const sidebarContainer = sidebarNav.parentElement
+    expect(sidebarContainer).not.toBeNull()
+
+    const trashFromSidebar = async () => {
+      const pinnedLink = await within(sidebarContainer!).findByRole('link', {
+        name: 'Trash Reload Doc',
+      })
+      await userEvent.pointer({ keys: '[MouseRight]', target: pinnedLink })
+      const pinnedMenu = await canvas.findByRole('menu', {
+        name: 'Actions for Trash Reload Doc',
+      })
+      await userEvent.click(
+        within(pinnedMenu).getByRole('menuitem', { name: 'Move to trash' }),
+      )
+    }
+
+    await trashFromSidebar()
+    await releaseTrashErrorReload()
+    await expect(
+      await within(sidebarContainer!).findByRole('link', {
+        name: 'Trash Reload Doc',
+      }),
+    ).toBeVisible()
+    expect(recordedTrashPosts.some((post) => post.action === 'trash')).toBe(
+      true,
+    )
+
+    trashReloadFailAction = null
+    await trashFromSidebar()
+    await waitFor(() =>
+      expect(
+        within(sidebarContainer!).queryByRole('link', {
+          name: 'Trash Reload Doc',
+        }),
+      ).toBeNull(),
+    )
+
+    await userEvent.click(
+      within(sidebarNav).getByRole('link', { name: /^Trash/ }),
+    )
+    await expect(await canvas.findByText('trash-reload-doc.mrbl')).toBeVisible()
+
+    trashReloadFailAction = 'restore'
+    await userEvent.click(
+      canvas.getByRole('button', { name: 'Restore Trash Reload Doc' }),
+    )
+    await releaseTrashErrorReload()
+    await expect(await canvas.findByText('trash-reload-doc.mrbl')).toBeVisible()
+    expect(
+      within(sidebarContainer!).queryByRole('link', {
+        name: 'Trash Reload Doc',
+      }),
+    ).toBeNull()
+
+    trashReloadFailAction = 'delete'
+    await userEvent.click(
+      canvas.getByRole('button', { name: 'Delete Trash Reload Doc forever' }),
+    )
+    const deleteDialog = await canvas.findByRole('dialog', {
+      name: 'Delete file forever?',
+    })
+    await userEvent.click(
+      within(deleteDialog).getByRole('button', { name: 'Delete forever' }),
+    )
+    await releaseTrashErrorReload()
+    await expect(await canvas.findByText('trash-reload-doc.mrbl')).toBeVisible()
+    expect(recordedTrashPosts.some((post) => post.action === 'delete')).toBe(
+      true,
+    )
+    expect(recordedTrashPosts.some((post) => post.action === 'restore')).toBe(
+      true,
+    )
+  },
+}
