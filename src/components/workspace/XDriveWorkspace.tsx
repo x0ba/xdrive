@@ -135,6 +135,8 @@ import {
   applyServerSaveAsTemplateReply,
   applyServerTrashDocumentReply,
   deriveDocIsTemplate,
+  chatEditUndoDecision,
+  confirmedEmptyTrashIds,
   docEditDisposition,
   docLifecycleRefusalMessage,
   emptyTrashDocIds,
@@ -3602,9 +3604,18 @@ export function XDriveWorkspace({
     }
 
     const tplId = `tpl-${shortSha()}`
+    const sourceAtTemplateSave = liveSource
     setDocSaveAsTemplatePending(liveSourceDoc.id, true)
     patchFile(liveSourceDoc.id, (doc) => ({ ...doc, syncState: 'saving' }))
     setAgentStatus(`Saving "${cleanTitle}" to ${TEMPLATES_FOLDER_NAME}…`)
+    const settleTemplateSourceIfUnchanged = () => {
+      setDocSaveAsTemplatePending(liveSourceDoc.id, false)
+      const live = allDocsRef.current.find((doc) => doc.id === liveSourceDoc.id)
+      const displayed = sourceRef.current.get(liveSourceDoc.id) ?? live?.source
+      if (displayed === sourceAtTemplateSave) {
+        markDocSavedIfSettled(liveSourceDoc.id)
+      }
+    }
     void syncDriveApi(
       () => {
         const currentSourceDoc =
@@ -3636,8 +3647,7 @@ export function XDriveWorkspace({
       {
         reloadOnError: true,
         onSuccess: (res) => {
-          setDocSaveAsTemplatePending(liveSourceDoc.id, false)
-          markDocSavedIfSettled(liveSourceDoc.id)
+          settleTemplateSourceIfUnchanged()
           const applied = applyServerSaveAsTemplateReply(
             foldersRef.current,
             allDocsRef.current,
@@ -3658,8 +3668,7 @@ export function XDriveWorkspace({
           )
         },
         onError: () => {
-          setDocSaveAsTemplatePending(liveSourceDoc.id, false)
-          markDocSavedIfSettled(liveSourceDoc.id)
+          settleTemplateSourceIfUnchanged()
         },
       },
     )
@@ -4606,17 +4615,38 @@ export function XDriveWorkspace({
       return
     }
     if (decision.ids.length === 0) return
-    const removedIds = new Set(decision.ids)
-    const count = decision.ids.length
-    allDocsRef.current = allDocsRef.current.filter(
-      (doc) => !removedIds.has(doc.id),
+    const requestedIds = decision.ids
+    setAgentStatus('Emptying Trash…')
+    void syncTrashApi(
+      { action: 'empty_trash', ids: requestedIds },
+      {
+        onSuccess: (res) => {
+          const deletedIds = Array.isArray(res.deletedIds)
+            ? res.deletedIds.filter(
+                (id): id is string => typeof id === 'string',
+              )
+            : []
+          const confirmed = confirmedEmptyTrashIds(requestedIds, deletedIds)
+          if (confirmed.length === 0) {
+            setAgentStatus('Nothing in Trash was deleted.')
+            return
+          }
+          const removedIds = new Set(confirmed)
+          allDocsRef.current = allDocsRef.current.filter(
+            (doc) => !removedIds.has(doc.id),
+          )
+          setDocs((prev) => prev.filter((doc) => !removedIds.has(doc.id)))
+          cleanupRemovedDocIds(removedIds)
+          const count = confirmed.length
+          setAgentStatus(
+            `Permanently deleted ${count} ${count === 1 ? 'file' : 'files'} from Trash`,
+          )
+        },
+        onError: () => {
+          setAgentStatus('Could not empty Trash.')
+        },
+      },
     )
-    setDocs((prev) => prev.filter((doc) => !removedIds.has(doc.id)))
-    cleanupRemovedDocIds(removedIds)
-    setAgentStatus(
-      `Permanently deleted ${count} ${count === 1 ? 'file' : 'files'} from Trash`,
-    )
-    void syncTrashApi({ action: 'empty_trash', ids: decision.ids })
   }
 
   useEffect(() => {
@@ -4745,6 +4775,14 @@ export function XDriveWorkspace({
         chatUndoMapRef.current.set(action.id, () => {
           const current = allDocsRef.current.find((d) => d.id === target.id)
           if (!current) return
+          const undoDecision = chatEditUndoDecision(
+            target.id,
+            currentLifecyclePending(),
+          )
+          if (!undoDecision.proceed) {
+            setAgentStatus(undoDecision.message)
+            return false
+          }
           const currentSource =
             sourceRef.current.get(target.id) ?? current.source
           sourceRef.current.set(target.id, priorSource)

@@ -678,6 +678,36 @@ export function docLifecycleRefusalMessage(
   return `Wait for ${docLifecycleKindLabel(current)} to finish before ${action}.`
 }
 
+export function chatEditUndoDecision(
+  docId: string,
+  pending: DocLifecyclePendingSets,
+): { proceed: true } | { proceed: false; message: string } {
+  const message = docLifecycleRefusalMessage(
+    docId,
+    'edit',
+    'editing this file',
+    pending,
+  )
+  if (message) return { proceed: false, message }
+  return { proceed: true }
+}
+
+export function confirmedEmptyTrashIds(
+  requestedIds: readonly string[],
+  deletedIds: readonly string[],
+): string[] {
+  const wanted = new Set(requestedIds)
+  const confirmed: string[] = []
+  const seen = new Set<string>()
+  for (const id of deletedIds) {
+    const trimmed = id.trim()
+    if (!trimmed || !wanted.has(trimmed) || seen.has(trimmed)) continue
+    seen.add(trimmed)
+    confirmed.push(trimmed)
+  }
+  return confirmed
+}
+
 export function emptyTrashDocIds(input: {
   visibleDocIds: readonly string[]
   pending: DocLifecyclePendingSets

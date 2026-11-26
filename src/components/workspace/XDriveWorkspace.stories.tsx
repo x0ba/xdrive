@@ -3420,3 +3420,254 @@ export const PendingRestoreBlocksEmptyTrash: Story = {
     expect(canvas.getByText('idle-trash.mrbl')).toBeVisible()
   },
 }
+
+const CHAT_UNDO_EDITED_SOURCE = LIFECYCLE_GATE_SOURCE.replace(
+  'Gate Body',
+  'Chat Edit Body',
+)
+
+const CHAT_UNDO_GATE_DOC: MarbleDocumentFile = {
+  ...LIFECYCLE_GATE_DOC,
+  id: 'doc-chat-undo-gate',
+  slug: 'chat-undo-gate',
+  fileName: 'chat-undo-gate.mrbl',
+  title: 'Chat Undo Gate',
+}
+
+const CHAT_UNDO_THREAD: DriveChatThread = {
+  id: 'chat-thread-undo-gate',
+  title: 'Edit undo thread',
+  createdAt: '2026-11-26T00:00:00.000Z',
+  updatedAt: '2026-11-26T00:05:00.000Z',
+  modelId: 'claude-sonnet-4-6',
+  reasoningEffort: 'medium',
+  mode: 'review',
+  messages: [
+    {
+      id: 'msg-undo-user',
+      role: 'user',
+      content: 'Edit the gate document',
+      createdAt: '2026-11-26T00:04:00.000Z',
+    },
+    {
+      id: 'msg-undo-assistant',
+      role: 'assistant',
+      content: 'Proposed an edit.',
+      createdAt: '2026-11-26T00:05:00.000Z',
+      actions: [
+        {
+          id: 'act-edit-undo-gate',
+          kind: 'edit_document',
+          label: 'Edit document',
+          summary: 'Replace the gate body',
+          status: 'proposed',
+          docId: CHAT_UNDO_GATE_DOC.id,
+          docTitle: CHAT_UNDO_GATE_DOC.title,
+          fileName: CHAT_UNDO_GATE_DOC.fileName,
+          ops: [],
+          replacementSource: CHAT_UNDO_EDITED_SOURCE,
+        },
+      ],
+    },
+  ],
+}
+
+let resolveChatUndoTemplate: (() => void) | null = null
+let recordedChatUndoPosts: RecordedMarblePost[] = []
+
+function ChatUndoDuringTemplateHarness(
+  args: ComponentProps<typeof XDriveWorkspace>,
+) {
+  const [ready, setReady] = useState(false)
+
+  useEffect(() => {
+    recordedChatUndoPosts = []
+    try {
+      window.localStorage.removeItem('xdrive.drive-chat.threads.v1')
+      window.localStorage.removeItem('xdrive-drive-chat-threads')
+    } catch {
+      // ignore storage errors
+    }
+    const originalFetch = window.fetch.bind(window)
+    window.fetch = async (input, init) => {
+      const url =
+        typeof input === 'string'
+          ? input
+          : input instanceof Request
+            ? input.url
+            : String(input)
+      const method = (init?.method ?? 'GET').toUpperCase()
+      if (url.includes('/api/drive-chat/threads')) {
+        if (method === 'GET' && !url.includes('/api/drive-chat/threads/')) {
+          return new Response(
+            JSON.stringify({ ok: true, threads: [CHAT_UNDO_THREAD] }),
+            {
+              status: 200,
+              headers: { 'content-type': 'application/json' },
+            },
+          )
+        }
+        return new Response(JSON.stringify({ ok: true }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        })
+      }
+      if (url.includes('/api/marble')) {
+        if (method === 'GET' && url.includes('action=workspace')) {
+          return new Response(
+            JSON.stringify({
+              ok: true,
+              folders: [],
+              docs: [CHAT_UNDO_GATE_DOC],
+            }),
+            {
+              status: 200,
+              headers: { 'content-type': 'application/json' },
+            },
+          )
+        }
+        if (method === 'POST' && typeof init?.body === 'string') {
+          const payload = JSON.parse(init.body) as RecordedMarblePost
+          if (payload.action === 'diff' || payload.action === 'doctor') {
+            return new Response(JSON.stringify({ ok: false }), {
+              status: 404,
+              headers: { 'content-type': 'application/json' },
+            })
+          }
+          recordedChatUndoPosts.push(payload)
+          if (payload.action === 'save_as_template') {
+            await new Promise<void>((resolve) => {
+              resolveChatUndoTemplate = resolve
+            })
+            return new Response(JSON.stringify({ ok: true }), {
+              status: 200,
+              headers: { 'content-type': 'application/json' },
+            })
+          }
+          return new Response(JSON.stringify({ ok: true }), {
+            status: 200,
+            headers: { 'content-type': 'application/json' },
+          })
+        }
+      }
+      return originalFetch(input, init)
+    }
+    setReady(true)
+    return () => {
+      resolveChatUndoTemplate?.()
+      resolveChatUndoTemplate = null
+      window.fetch = originalFetch
+    }
+  }, [])
+
+  if (!ready) return null
+  return <XDriveWorkspace {...args} />
+}
+
+/**
+ * Verifies that Drive Chat edit Undo leaves the source unchanged and stays available while save-as-template is pending.
+ *
+ * @summary Chat edit Undo waits while save-as-template is pending
+ */
+export const ChatUndoWaitsDuringSaveAsTemplate: Story = {
+  name: 'Drive Chat · Undo Waits During Save As Template',
+  args: {
+    initialTheme: 'dark',
+    initialNav: 'drive',
+    initialActiveTabId: 'doc-chat-undo-gate',
+    initialOpenDocIds: ['doc-chat-undo-gate'],
+    initialDocs: [CHAT_UNDO_GATE_DOC],
+    initialMode: 'source',
+    initialAiSidebarOpen: false,
+    syncWithServer: true,
+  },
+  render: (args) => <ChatUndoDuringTemplateHarness {...args} />,
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    const openChat = async () => {
+      await userEvent.click(canvas.getAllByRole('link', { name: 'Chat' })[0])
+    }
+    const openDoc = async () => {
+      await userEvent.click(canvas.getAllByRole('link', { name: 'Drive' })[0])
+      const docLinks = await canvas.findAllByRole('link', {
+        name: 'Chat Undo Gate',
+      })
+      await userEvent.click(docLinks[0])
+    }
+
+    const sourceTextarea = await canvas.findByLabelText<HTMLTextAreaElement>(
+      'Marble HTML5 source',
+    )
+    await waitFor(() => expect(sourceTextarea.value).toContain('Gate Body'))
+
+    await openChat()
+    await userEvent.click(await canvas.findByRole('button', { name: 'Apply' }))
+    await waitFor(() =>
+      expect(
+        recordedChatUndoPosts.filter(
+          (post) => post.action === 'save' || post.action === 'apply_ops',
+        ),
+      ).toHaveLength(1),
+    )
+    await expect(
+      await canvas.findByRole('button', { name: 'Undo' }),
+    ).toBeVisible()
+
+    await openDoc()
+    const editedTextarea = await canvas.findByLabelText<HTMLTextAreaElement>(
+      'Marble HTML5 source',
+    )
+    await waitFor(() =>
+      expect(editedTextarea.value).toContain('Chat Edit Body'),
+    )
+    await userEvent.click(
+      canvas.getByRole('button', { name: 'Save as template' }),
+    )
+    const saveTplDialog = await canvas.findByRole('dialog', {
+      name: 'Save as template',
+    })
+    const tplNameInput = within(saveTplDialog).getByLabelText('Template name')
+    await userEvent.clear(tplNameInput)
+    await userEvent.type(tplNameInput, 'Held Gate Template')
+    await userEvent.click(
+      within(saveTplDialog).getByRole('button', { name: 'Save template' }),
+    )
+    await waitFor(() => expect(resolveChatUndoTemplate).not.toBeNull())
+
+    await openChat()
+    await userEvent.click(canvas.getByRole('button', { name: 'Undo' }))
+    expect(canvas.getByRole('button', { name: 'Undo' })).toBeVisible()
+    expect(canvas.queryByText('Undone')).toBeNull()
+    expect(
+      recordedChatUndoPosts.filter(
+        (post) => post.action === 'save' || post.action === 'apply_ops',
+      ),
+    ).toHaveLength(1)
+
+    await openDoc()
+    const unchangedTextarea = await canvas.findByLabelText<HTMLTextAreaElement>(
+      'Marble HTML5 source',
+    )
+    await waitFor(() =>
+      expect(unchangedTextarea.value).toContain('Chat Edit Body'),
+    )
+    expect(unchangedTextarea.value).not.toContain('Gate Body')
+    await expect(
+      await canvas.findByText(
+        'Wait for save as template to finish before editing this file.',
+      ),
+    ).toBeVisible()
+
+    const releaseTemplate = resolveChatUndoTemplate
+    resolveChatUndoTemplate = null
+    releaseTemplate?.()
+    await waitFor(() =>
+      expect(unchangedTextarea.value).toContain('Chat Edit Body'),
+    )
+    expect(
+      recordedChatUndoPosts.filter(
+        (post) => post.action === 'save' || post.action === 'apply_ops',
+      ),
+    ).toHaveLength(1)
+  },
+}

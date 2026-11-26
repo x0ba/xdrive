@@ -412,6 +412,14 @@ function deterministicId(prefix: string, key: string): string {
   return `${prefix}-${digest}`
 }
 
+function trashDocumentId(slug: string, meta: TrashMetaRecord | null): string {
+  const storedId = meta?.meta?.id?.trim()
+  if (storedId) return storedId
+  const recordedId = meta?.docId?.trim()
+  if (recordedId) return recordedId
+  return deterministicId('doc', `trash/${slug}`)
+}
+
 function sanitizeColor(value: unknown): DriveFolderColor {
   if (
     typeof value === 'string' &&
@@ -2087,8 +2095,8 @@ export async function emptyTrashOnDisk(ids: readonly string[]): Promise<{
       const slug = name.slice(0, -'.mrbl'.length)
       if (!SLUG_PATTERN.test(slug) || slug.includes('..')) continue
       const meta = await readTrashMeta(slug)
-      const docId = meta?.docId ?? meta?.meta?.id
-      if (!docId || !wanted.has(docId)) continue
+      const docId = trashDocumentId(slug, meta)
+      if (!wanted.has(docId)) continue
       docIdsToDelete.add(docId)
       purgedSlugs.push(slug)
       await rm(path.resolve(trashDir, name), { force: true })
@@ -2723,10 +2731,7 @@ export async function loadDriveWorkspace(
         ? folderByPath.get(normalizeFolderPath(trashMeta.originalFolderPath))
         : undefined
       const trashedAt = trashMeta?.trashedAt ?? info.mtime.toISOString()
-      const id =
-        stored?.id ??
-        trashMeta?.docId ??
-        deterministicId('doc', `trash/${slug}`)
+      const id = trashDocumentId(slug, trashMeta)
       const history = await readDocumentHistory(id)
       trashedDocs.push({
         id,

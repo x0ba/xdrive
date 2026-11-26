@@ -15,6 +15,8 @@ import {
   applyServerRestoreDocumentReply,
   applyServerSaveAsTemplateReply,
   applyServerTrashDocumentReply,
+  chatEditUndoDecision,
+  confirmedEmptyTrashIds,
   deriveDocIsTemplate,
   docEditDisposition,
   docLifecycleBlocksPermanentDelete,
@@ -840,5 +842,29 @@ describe('pending document lifecycle gate', () => {
     const syncState: MarbleDocumentFile['syncState'] = reloaded.syncState
     expect(syncState).toBe('saving')
     expect(reloaded.source).toBe(serverDoc.source)
+  })
+
+  it('keeps Drive Chat undo available while save-as-template is pending', () => {
+    const pending = { saveAsTemplate: new Set(['doc-race']) }
+    expect(chatEditUndoDecision('doc-race', pending)).toEqual({
+      proceed: false,
+      message: 'Wait for save as template to finish before editing this file.',
+    })
+    expect(chatEditUndoDecision('doc-other', pending)).toEqual({
+      proceed: true,
+    })
+    expect(
+      chatEditUndoDecision('doc-race', { rename: new Set(['doc-race']) }),
+    ).toEqual({ proceed: true })
+  })
+
+  it('removes empty-trash rows only for ids the server confirmed', () => {
+    expect(
+      confirmedEmptyTrashIds(
+        ['shown-a', 'shown-b', 'orphan'],
+        ['shown-b', 'unrequested', 'shown-b', ''],
+      ),
+    ).toEqual(['shown-b'])
+    expect(confirmedEmptyTrashIds(['shown-a'], [])).toEqual([])
   })
 })

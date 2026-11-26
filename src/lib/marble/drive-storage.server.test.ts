@@ -813,4 +813,45 @@ describe('drive-storage templates and seeding', () => {
       await readFile(path.join(tempDir, 'trash-keep.mrbl'), 'utf8'),
     ).toContain('Keep Body')
   })
+
+  it('16. empty_trash deletes trash files that have no stored document id', async () => {
+    await mkdir(getTrashDir(), { recursive: true })
+    const orphanSource = SAMPLE_HTML.replace('Original Heading', 'Orphan Body')
+    const otherSource = SAMPLE_HTML.replace('Original Heading', 'Other Body')
+    await writeFile(path.join(getTrashDir(), 'orphan-note.mrbl'), orphanSource)
+    await writeFile(path.join(getTrashDir(), 'other-note.mrbl'), otherSource)
+
+    const workspace = await loadDriveWorkspace(countMarbleNodes)
+    const orphan = workspace.docs.find((doc) => doc.slug === 'orphan-note')
+    const other = workspace.docs.find((doc) => doc.slug === 'other-note')
+    expect(orphan?.trashedAt).toBeTruthy()
+    expect(other?.trashedAt).toBeTruthy()
+    expect(orphan?.id).toBeTruthy()
+    expect(other?.id).toBeTruthy()
+    expect(orphan?.id).not.toBe(other?.id)
+
+    const missed = await emptyTrashOnDisk(['doc-not-in-trash'])
+    expect(missed.deletedIds).toEqual([])
+    expect(
+      await readFile(path.join(getTrashDir(), 'orphan-note.mrbl'), 'utf8'),
+    ).toBe(orphanSource)
+
+    const emptied = await emptyTrashOnDisk([orphan!.id])
+    expect(emptied.deletedCount).toBe(1)
+    expect(emptied.deletedIds).toEqual([orphan!.id])
+    await expect(
+      readFile(path.join(getTrashDir(), 'orphan-note.mrbl'), 'utf8'),
+    ).rejects.toThrow()
+    expect(
+      await readFile(path.join(getTrashDir(), 'other-note.mrbl'), 'utf8'),
+    ).toBe(otherSource)
+
+    const reloaded = await loadDriveWorkspace(countMarbleNodes)
+    expect(
+      reloaded.docs.find((doc) => doc.slug === 'orphan-note'),
+    ).toBeUndefined()
+    expect(reloaded.docs.find((doc) => doc.slug === 'other-note')?.id).toBe(
+      other!.id,
+    )
+  })
 })
