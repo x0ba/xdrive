@@ -3,27 +3,25 @@ import { describe, expect, it } from 'vitest'
 import {
   TEMPLATES_FOLDER_ID,
   TEMPLATES_FOLDER_NAME,
+  applyMarbleOpsClient,
   byteSizeOf,
   countMarbleNodes,
   isTemplatesRootFolder,
+  updateMarbleSourceTitle,
 } from '#/lib/marble'
 import type { DriveFolder, MarbleDocumentFile } from '#/lib/types'
 import {
+  applyServerRenameDocumentReply,
+  applyServerSaveAsTemplateReply,
   deriveDocIsTemplate,
   ensureClientTemplatesFolder,
-  mergeRenameDocumentReply,
-  mergeRenameFolderReply,
-  mergeSaveAsTemplateDocReply,
-  mergeSaveAsTemplateFolderReply,
   mintClientFolderId,
   reconcileFolderRename,
-  recordDocSlugRemap,
-  remapSerializedDocMetaSlug,
-  resolveCanonicalDocSlug,
+  replayHeldDocEdits,
 } from './template-workspace-helpers'
-import type { DocSlugRemapStore } from './template-workspace-helpers'
+import type { HeldDocEdit } from './template-workspace-helpers'
 
-const NOW = '2026-11-25T23:00:00.000Z'
+const NOW = '2026-11-26T00:00:00.000Z'
 
 function makeFolder(
   overrides: Partial<DriveFolder> & Pick<DriveFolder, 'id' | 'name'>,
@@ -40,12 +38,13 @@ function makeFolder(
 function makeDoc(
   overrides: Partial<MarbleDocumentFile> & Pick<MarbleDocumentFile, 'id'>,
 ): MarbleDocumentFile {
+  const slug = overrides.slug ?? 'doc'
   const source =
     overrides.source ??
     '<!doctype html><html><head><title>Doc</title></head><body><h1 data-marble-id="h1">Body</h1></body></html>'
   return {
-    slug: overrides.slug ?? 'doc',
-    fileName: overrides.fileName ?? `${overrides.slug ?? 'doc'}.mrbl`,
+    slug,
+    fileName: overrides.fileName ?? `${slug}.mrbl`,
     title: overrides.title ?? 'Doc',
     description: '',
     category: 'document',
@@ -67,7 +66,7 @@ function makeDoc(
     trashedAt: null,
     share: {
       isPublicLinkEnabled: false,
-      publicLinkUrl: 'https://xdrive.app/d/doc',
+      publicLinkUrl: `https://xdrive.app/d/${slug}`,
       publicPermission: 'view_only',
       allowDuplication: true,
       sharedAiDailyLimit: 40,
@@ -111,7 +110,7 @@ describe('template-workspace-helpers', () => {
     expect(isTemplatesRootFolder(ensured.folder)).toBe(true)
   })
 
-  it('reconciles folder renames immediately across direct docs, nested subfolders, and nested folders named Templates', () => {
+  it('reconciles folder renames and optional server folder IDs across direct docs and nested subfolders', () => {
     const templatesRoot = makeFolder({
       id: TEMPLATES_FOLDER_ID,
       name: TEMPLATES_FOLDER_NAME,
@@ -181,18 +180,23 @@ describe('template-workspace-helpers', () => {
       ),
     ).toBe(false)
 
-    // Rename Templates -> Archived Templates
+    // Rename Templates -> Archived Templates (with canonical server folder ID update)
     const afterRenameOut = reconcileFolderRename(initialFolders, initialDocs, {
       folderId: TEMPLATES_FOLDER_ID,
+      nextFolderId: 'folder-archived-srv',
       name: 'Archived Templates',
-      color: 'accent',
+      color: 'sketch',
       updatedAt: NOW,
     })
 
+    expect(afterRenameOut.resolvedFolderId).toBe('folder-archived-srv')
     expect(
-      afterRenameOut.folders.find((f) => f.id === TEMPLATES_FOLDER_ID)
+      afterRenameOut.folders.find((f) => f.id === 'folder-archived-srv')
         ?.isTemplatesFolder,
     ).toBe(false)
+    expect(
+      afterRenameOut.folders.find((f) => f.id === 'folder-sub')?.parentId,
+    ).toBe('folder-archived-srv')
     expect(
       afterRenameOut.docs.find((d) => d.id === 'tpl-direct')?.isTemplate,
     ).toBe(false)
@@ -203,12 +207,12 @@ describe('template-workspace-helpers', () => {
       afterRenameOut.docs.find((d) => d.id === 'tpl-nested')?.isTemplate,
     ).toBe(false)
 
-    // Renaming back to Templates at root restores template membership for direct + subfolder docs
+    // Renaming back to Templates at root restores template membership
     const afterRenameBack = reconcileFolderRename(
       afterRenameOut.folders,
       afterRenameOut.docs,
       {
-        folderId: TEMPLATES_FOLDER_ID,
+        folderId: 'folder-archived-srv',
         name: TEMPLATES_FOLDER_NAME,
         color: 'accent',
         updatedAt: NOW,
@@ -216,7 +220,7 @@ describe('template-workspace-helpers', () => {
     )
 
     expect(
-      afterRenameBack.folders.find((f) => f.id === TEMPLATES_FOLDER_ID)
+      afterRenameBack.folders.find((f) => f.id === 'folder-archived-srv')
         ?.isTemplatesFolder,
     ).toBe(true)
     expect(
@@ -231,436 +235,134 @@ describe('template-workspace-helpers', () => {
     ).toBe(false)
   })
 
-  it('preserves newer local source edits when an in-flight rename reply arrives', () => {
-    const optimisticSource =
-      '<!doctype html><html><head><title>New Name</title></head><body><h1 data-marble-id="h1">Original Body</h1></body></html>'
-    const newerLocalSource =
-      '<!doctype html><html><head><title>New Name</title></head><body><h1 data-marble-id="h1">Edited While Saving</h1></body></html>'
-    const folders = [
-      makeFolder({
-        id: TEMPLATES_FOLDER_ID,
-        name: 'Renamed Folder',
-        isTemplatesFolder: false,
-      }),
-    ]
-
-    // Case 1: newer local edit arrived while rename request was in flight
-    const editedDoc = makeDoc({
-      id: 'doc-1',
-      slug: 'new-name',
-      title: 'New Name',
-      source: newerLocalSource,
-      version: 3,
-      folderId: TEMPLATES_FOLDER_ID,
-      folder: 'Renamed Folder',
+  it('applies server-confirmed save_as_template replies with canonical slug and live folder membership', () => {
+    const existingOther = makeDoc({
+      id: 'tpl-existing',
+      slug: 'example',
+      fileName: 'example.mrbl',
+      title: 'Example',
+      folderId: 'folder-templates',
+      folder: TEMPLATES_FOLDER_NAME,
+      isTemplate: true,
+    })
+    const serverFolder = makeFolder({
+      id: 'folder-templates',
+      name: TEMPLATES_FOLDER_NAME,
+      color: 'accent',
+      isTemplatesFolder: true,
+    })
+    const serverDoc = makeDoc({
+      id: 'tpl-new',
+      slug: 'example-2',
+      fileName: 'example-2.mrbl',
+      title: 'Example',
+      folderId: 'folder-templates',
+      folder: TEMPLATES_FOLDER_NAME,
       isTemplate: false,
     })
-    const preserved = mergeRenameDocumentReply({
-      currentDoc: editedDoc,
-      currentLiveSource: newerLocalSource,
-      optimisticSource,
-      expectedVersion: 2,
-      saveTokenAtRename: 1,
-      currentSaveToken: 2,
-      renameToken: 1,
-      currentRenameToken: 1,
-      serverReply: {
-        slug: 'new-name-2',
-        fileName: 'new-name-2.mrbl',
-        source: optimisticSource,
-        isTemplate: true,
-        updatedAt: '2026-11-25T23:05:00.000Z',
-      },
-      folders,
-      countNodes: countMarbleNodes,
-      byteSize: byteSizeOf,
+
+    const applied = applyServerSaveAsTemplateReply([], [existingOther], {
+      folder: serverFolder,
+      doc: serverDoc,
     })
 
-    expect(preserved).not.toBeNull()
-    expect(preserved?.shouldUpdateSourceRef).toBe(false)
-    expect(preserved?.doc.source).toBe(newerLocalSource)
-    expect(preserved?.doc.version).toBe(3)
-    expect(preserved?.doc.slug).toBe('new-name-2')
-    expect(preserved?.doc.fileName).toBe('new-name-2.mrbl')
-    expect(preserved?.doc.isTemplate).toBe(false)
-
-    // Case 2: no concurrent edits -> applies server canonical source
-    const uneditedDoc = makeDoc({
-      id: 'doc-1',
-      slug: 'new-name',
-      title: 'New Name',
-      source: optimisticSource,
-      version: 2,
-      folderId: null,
-      isTemplate: false,
-    })
-    const serverCanonicalSource = `${optimisticSource}\n<!-- canonical -->`
-    const accepted = mergeRenameDocumentReply({
-      currentDoc: uneditedDoc,
-      currentLiveSource: optimisticSource,
-      optimisticSource,
-      expectedVersion: 2,
-      saveTokenAtRename: 1,
-      currentSaveToken: 1,
-      renameToken: 1,
-      currentRenameToken: 1,
-      serverReply: {
-        slug: 'new-name',
-        fileName: 'new-name.mrbl',
-        source: serverCanonicalSource,
-        isTemplate: false,
-        updatedAt: '2026-11-25T23:05:00.000Z',
-      },
-      folders,
-      countNodes: countMarbleNodes,
-      byteSize: byteSizeOf,
-    })
-
-    expect(accepted?.shouldUpdateSourceRef).toBe(true)
-    expect(accepted?.doc.source).toBe(serverCanonicalSource)
-
-    // Case 3: superseded by a newer rename -> reply ignored
-    const superseded = mergeRenameDocumentReply({
-      currentDoc: uneditedDoc,
-      currentLiveSource: optimisticSource,
-      optimisticSource,
-      expectedVersion: 2,
-      saveTokenAtRename: 1,
-      currentSaveToken: 1,
-      renameToken: 1,
-      currentRenameToken: 2,
-      serverReply: {
-        slug: 'stale-slug',
-        fileName: 'stale-slug.mrbl',
-        source: optimisticSource,
-      },
-      folders,
-      countNodes: countMarbleNodes,
-      byteSize: byteSizeOf,
-    })
-    expect(superseded).toBeNull()
+    expect(applied.folders).toHaveLength(1)
+    expect(applied.folders[0]?.id).toBe('folder-templates')
+    expect(applied.folders[0]?.isTemplatesFolder).toBe(true)
+    expect(applied.doc?.slug).toBe('example-2')
+    expect(applied.doc?.fileName).toBe('example-2.mrbl')
+    expect(applied.doc?.isTemplate).toBe(true)
+    expect(applied.docs[0]?.id).toBe('tpl-new')
   })
 
-  it('records canonical doc slug remaps transitively and rewrites serialized meta slugs', () => {
-    const store: DocSlugRemapStore = new Map()
-    recordDocSlugRemap(store, 'doc-1', 'example', 'example-2')
-    expect(resolveCanonicalDocSlug(store, 'doc-1', 'example')).toBe('example-2')
-    expect(resolveCanonicalDocSlug(store, 'doc-1', 'unrelated')).toBe(
-      'unrelated',
-    )
-
-    // Subsequent server-deduped rename chains transitively: example -> example-2 -> renamed-3
-    recordDocSlugRemap(store, 'doc-1', 'example-2', 'renamed-3')
-    expect(resolveCanonicalDocSlug(store, 'doc-1', 'example')).toBe('renamed-3')
-    expect(resolveCanonicalDocSlug(store, 'doc-1', 'example-2')).toBe(
-      'renamed-3',
-    )
-
-    // Cycle safety
-    store.get('doc-1')?.set('renamed-3', 'example')
-    expect(() =>
-      resolveCanonicalDocSlug(store, 'doc-1', 'example'),
-    ).not.toThrow()
-
-    const remapped = remapSerializedDocMetaSlug(
-      {
-        id: 'doc-1',
-        slug: 'example',
-        title: 'Example',
-        share: {
-          isPublicLinkEnabled: false,
-          publicLinkUrl: 'https://xdrive.app/d/example',
-        },
-      },
-      'example',
-      'example-2',
-    )
-    expect(remapped.slug).toBe('example-2')
-    expect(remapped.share.publicLinkUrl).toBe('https://xdrive.app/d/example-2')
-
-    const customShare = remapSerializedDocMetaSlug(
-      {
-        id: 'doc-1',
-        slug: 'example',
-        share: {
-          publicLinkUrl: 'https://custom.example.com/shared',
-        },
-      },
-      'example',
-      'example-2',
-    )
-    expect(customShare.slug).toBe('example-2')
-    expect(customShare.share.publicLinkUrl).toBe(
-      'https://custom.example.com/shared',
-    )
-  })
-
-  it('reconciles save_as_template canonical slug while preserving newer local edits and renames', () => {
-    const optimisticSource =
-      '<!doctype html><html><head><title>Example</title></head><body><h1 data-marble-id="h1">Original</h1></body></html>'
-    const locallyEditedSource =
-      '<!doctype html><html><head><title>Example</title></head><body><h1 data-marble-id="h1">Edited In Flight</h1></body></html>'
+  it('applies server rename replies (including reclaimed slugs) and replays held edits', () => {
     const templatesFolder = makeFolder({
       id: TEMPLATES_FOLDER_ID,
       name: TEMPLATES_FOLDER_NAME,
       isTemplatesFolder: true,
     })
+    const initialSource =
+      '<!doctype html><html><head><title>Example</title></head><body><h1 data-marble-id="h1">Initial Body</h1></body></html>'
+    const serverRenamedSource =
+      '<!doctype html><html><head><title>Renamed Example</title></head><body><h1 data-marble-id="h1">Initial Body</h1></body></html>'
 
-    const currentEditedDoc = makeDoc({
-      id: 'tpl-1',
-      slug: 'example',
-      fileName: 'example.mrbl',
-      title: 'Example',
-      isTemplate: true,
-      source: locallyEditedSource,
-      version: 2,
-      syncState: 'saving',
-      folderId: TEMPLATES_FOLDER_ID,
-      folder: TEMPLATES_FOLDER_NAME,
-      share: {
-        isPublicLinkEnabled: false,
-        publicLinkUrl: 'https://xdrive.app/d/example',
-        publicPermission: 'view_only',
-        allowDuplication: true,
-        sharedAiDailyLimit: 40,
-        sharedAiUsedToday: 0,
-        collaborators: [],
-      },
-    })
-    const serverDedupedDoc = makeDoc({
+    // Step 1: doc started with deduped slug 'example-2'; server confirms rename to 'renamed-example-2'
+    const initialDoc = makeDoc({
       id: 'tpl-1',
       slug: 'example-2',
       fileName: 'example-2.mrbl',
       title: 'Example',
-      isTemplate: true,
-      source: optimisticSource,
-      version: 1,
-      syncState: 'saved',
+      source: initialSource,
+      version: 2,
       folderId: TEMPLATES_FOLDER_ID,
       folder: TEMPLATES_FOLDER_NAME,
+      isTemplate: true,
     })
 
-    const mergedWithEdits = mergeSaveAsTemplateDocReply({
-      currentDoc: currentEditedDoc,
-      currentLiveSource: locallyEditedSource,
-      optimisticSlug: 'example',
-      optimisticSource,
-      optimisticFolderId: TEMPLATES_FOLDER_ID,
-      resolvedFolderId: TEMPLATES_FOLDER_ID,
-      expectedVersion: 1,
-      saveTokenAtCreate: 0,
-      currentSaveToken: 1,
-      renameTokenAtCreate: 0,
-      currentRenameToken: 0,
-      serverDoc: serverDedupedDoc,
-      folders: [templatesFolder],
-      countNodes: countMarbleNodes,
-      byteSize: byteSizeOf,
-    })
-
-    expect(mergedWithEdits.shouldUpdateSourceRef).toBe(false)
-    expect(mergedWithEdits.doc.slug).toBe('example-2')
-    expect(mergedWithEdits.doc.fileName).toBe('example-2.mrbl')
-    expect(mergedWithEdits.doc.share.publicLinkUrl).toBe(
-      'https://xdrive.app/d/example-2',
-    )
-    expect(mergedWithEdits.doc.source).toBe(locallyEditedSource)
-    expect(mergedWithEdits.doc.version).toBe(2)
-    expect(mergedWithEdits.doc.syncState).toBe('saving')
-
-    // Case 2: renamed locally while save_as_template was pending -> keeps newer local rename
-    const renamedDoc = makeDoc({
-      ...currentEditedDoc,
-      slug: 'custom-renamed',
-      fileName: 'custom-renamed.mrbl',
-      title: 'Custom Renamed',
-      share: {
-        ...currentEditedDoc.share,
-        publicLinkUrl: 'https://xdrive.app/d/custom-renamed',
+    const confirmed = applyServerRenameDocumentReply({
+      currentDoc: initialDoc,
+      serverReply: {
+        slug: 'renamed-example-2',
+        fileName: 'renamed-example-2.mrbl',
+        title: 'Renamed Example',
+        source: serverRenamedSource,
+        updatedAt: '2026-11-26T00:05:00.000Z',
       },
-    })
-    const mergedWithRename = mergeSaveAsTemplateDocReply({
-      currentDoc: renamedDoc,
-      currentLiveSource: locallyEditedSource,
-      optimisticSlug: 'example',
-      optimisticSource,
-      optimisticFolderId: TEMPLATES_FOLDER_ID,
-      resolvedFolderId: TEMPLATES_FOLDER_ID,
-      expectedVersion: 1,
-      saveTokenAtCreate: 0,
-      currentSaveToken: 0,
-      renameTokenAtCreate: 0,
-      currentRenameToken: 1,
-      serverDoc: serverDedupedDoc,
+      fallbackTitle: 'Renamed Example',
+      fallbackDescription: '',
       folders: [templatesFolder],
       countNodes: countMarbleNodes,
       byteSize: byteSizeOf,
     })
-    expect(mergedWithRename.shouldUpdateSourceRef).toBe(false)
-    expect(mergedWithRename.doc.slug).toBe('custom-renamed')
-    expect(mergedWithRename.doc.fileName).toBe('custom-renamed.mrbl')
-    expect(mergedWithRename.doc.title).toBe('Custom Renamed')
 
-    // Case 3: flagged/moved/trashed with no source edit -> keeps flags/move/trash + adopts server canonical slug
-    const otherFolder = makeFolder({ id: 'folder-work', name: 'Work' })
-    const movedTrashedDoc = makeDoc({
-      id: 'tpl-1',
-      slug: 'example',
-      fileName: 'example.mrbl',
-      title: 'Example',
-      isTemplate: false,
-      source: optimisticSource,
-      version: 1,
-      starred: true,
-      pinned: true,
-      folderId: 'folder-work',
-      folder: 'Work',
-      trashedAt: NOW,
-    })
-    const mergedWithFlags = mergeSaveAsTemplateDocReply({
-      currentDoc: movedTrashedDoc,
-      currentLiveSource: optimisticSource,
-      optimisticSlug: 'example',
-      optimisticSource,
-      optimisticFolderId: TEMPLATES_FOLDER_ID,
-      resolvedFolderId: TEMPLATES_FOLDER_ID,
-      expectedVersion: 1,
-      saveTokenAtCreate: 0,
-      currentSaveToken: 0,
-      renameTokenAtCreate: 0,
-      currentRenameToken: 0,
-      serverDoc: serverDedupedDoc,
-      folders: [templatesFolder, otherFolder],
+    expect(confirmed.slug).toBe('renamed-example-2')
+    expect(confirmed.fileName).toBe('renamed-example-2.mrbl')
+    expect(confirmed.share.publicLinkUrl).toBe(
+      'https://xdrive.app/d/renamed-example-2',
+    )
+    expect(confirmed.version).toBe(3)
+    expect(confirmed.syncState).toBe('saved')
+
+    // Replay held edit onto the confirmed server source
+    const held: HeldDocEdit[] = [
+      {
+        ops: [{ type: 'setText', id: 'h1', text: 'Replayed Held Edit' }],
+        nextSource: initialSource.replace('Initial Body', 'Replayed Held Edit'),
+        lastEditedBy: { name: 'You', initials: 'YO' },
+        updatedAt: '2026-11-26T00:05:01.000Z',
+      },
+    ]
+    const replayed = replayHeldDocEdits(
+      confirmed.source,
+      confirmed.title,
+      held,
+      applyMarbleOpsClient,
+      updateMarbleSourceTitle,
+    )
+    expect(replayed.ops).toHaveLength(1)
+    expect(replayed.source).toContain('<title>Renamed Example</title>')
+    expect(replayed.source).toContain('Replayed Held Edit')
+
+    // Step 2: original 'example' is later gone and user renames to reclaim 'example'
+    const reclaimed = applyServerRenameDocumentReply({
+      currentDoc: { ...confirmed, source: replayed.source },
+      serverReply: {
+        slug: 'example',
+        fileName: 'example.mrbl',
+        title: 'Example',
+        source: updateMarbleSourceTitle(replayed.source, 'Example'),
+        updatedAt: '2026-11-26T00:06:00.000Z',
+      },
+      fallbackTitle: 'Example',
+      fallbackDescription: '',
+      folders: [templatesFolder],
       countNodes: countMarbleNodes,
       byteSize: byteSizeOf,
     })
-    expect(mergedWithFlags.shouldUpdateSourceRef).toBe(true)
-    expect(mergedWithFlags.doc.slug).toBe('example-2')
-    expect(mergedWithFlags.doc.fileName).toBe('example-2.mrbl')
-    expect(mergedWithFlags.doc.starred).toBe(true)
-    expect(mergedWithFlags.doc.pinned).toBe(true)
-    expect(mergedWithFlags.doc.folderId).toBe('folder-work')
-    expect(mergedWithFlags.doc.folder).toBe('Work')
-    expect(mergedWithFlags.doc.trashedAt).toBe(NOW)
-  })
 
-  it('merges save_as_template folder replies without undoing concurrent folder renames or deletions', () => {
-    // Renamed Templates -> Archived Templates while save_as_template was in flight,
-    // and server returned a canonical server folder ID.
-    const renamedOriginal = makeFolder({
-      id: 'folder-opt-1',
-      name: 'Archived Templates',
-      color: 'sketch',
-      isTemplatesFolder: false,
-      updatedAt: '2026-11-25T23:05:00.000Z',
-    })
-    const secondTemplates = makeFolder({
-      id: 'folder-new-templates',
-      name: TEMPLATES_FOLDER_NAME,
-      color: 'accent',
-      isTemplatesFolder: true,
-    })
-    const nestedChild = makeFolder({
-      id: 'folder-child',
-      name: 'Nested',
-      parentId: 'folder-opt-1',
-    })
-    const docInRenamed = makeDoc({
-      id: 'tpl-in-renamed',
-      folderId: 'folder-opt-1',
-      folder: 'Archived Templates',
-      isTemplate: false,
-    })
-    const serverFolderReply = makeFolder({
-      id: 'folder-server-1',
-      name: TEMPLATES_FOLDER_NAME,
-      color: 'accent',
-      isTemplatesFolder: true,
-    })
-
-    const renamedMerge = mergeSaveAsTemplateFolderReply({
-      folders: [renamedOriginal, secondTemplates, nestedChild],
-      docs: [docInRenamed],
-      optimisticFolderId: 'folder-opt-1',
-      folderTokenAtCreate: 0,
-      currentFolderToken: 1,
-      wasDeletedLocally: false,
-      serverFolder: serverFolderReply,
-    })
-
-    expect(renamedMerge.resolvedFolderId).toBe('folder-server-1')
-    expect(renamedMerge.didRemapFolderId).toBe(true)
-    const updatedRenamed = renamedMerge.folders.find(
-      (f) => f.id === 'folder-server-1',
-    )
-    expect(updatedRenamed?.name).toBe('Archived Templates')
-    expect(updatedRenamed?.color).toBe('sketch')
-    expect(updatedRenamed?.isTemplatesFolder).toBe(false)
-    // Leaves unrelated newly created Templates folder untouched
-    expect(
-      renamedMerge.folders.find((f) => f.id === 'folder-new-templates')
-        ?.isTemplatesFolder,
-    ).toBe(true)
-    expect(
-      renamedMerge.folders.find((f) => f.id === 'folder-child')?.parentId,
-    ).toBe('folder-server-1')
-    const updatedDoc = renamedMerge.docs.find((d) => d.id === 'tpl-in-renamed')
-    expect(updatedDoc?.folderId).toBe('folder-server-1')
-    expect(updatedDoc?.folder).toBe('Archived Templates')
-    expect(updatedDoc?.isTemplate).toBe(false)
-
-    // Deleted locally while in flight -> never resurrects Templates
-    const deletedMerge = mergeSaveAsTemplateFolderReply({
-      folders: [],
-      docs: [],
-      optimisticFolderId: 'folder-opt-1',
-      folderTokenAtCreate: 0,
-      currentFolderToken: 1,
-      wasDeletedLocally: true,
-      serverFolder: serverFolderReply,
-    })
-    expect(deletedMerge.resolvedFolderId).toBeNull()
-    expect(deletedMerge.folders).toHaveLength(0)
-
-    // mergeRenameFolderReply ignores stale replies when token changed, accepts matching token
-    expect(
-      mergeRenameFolderReply({
-        folders: [renamedOriginal],
-        docs: [docInRenamed],
-        folderId: 'folder-opt-1',
-        renameToken: 1,
-        currentFolderToken: 2,
-        serverFolder: makeFolder({
-          id: 'folder-server-2',
-          name: 'Stale Name',
-        }),
-      }),
-    ).toBeNull()
-
-    const acceptedFolderIdMerge = mergeRenameFolderReply({
-      folders: [renamedOriginal, nestedChild],
-      docs: [docInRenamed],
-      folderId: 'folder-opt-1',
-      renameToken: 2,
-      currentFolderToken: 2,
-      serverFolder: makeFolder({
-        id: 'folder-server-2',
-        name: 'Ignored Server Name',
-        isTemplatesFolder: true,
-      }),
-    })
-    expect(acceptedFolderIdMerge?.resolvedFolderId).toBe('folder-server-2')
-    expect(
-      acceptedFolderIdMerge?.folders.find((f) => f.id === 'folder-server-2')
-        ?.name,
-    ).toBe('Archived Templates')
-    expect(
-      acceptedFolderIdMerge?.folders.find((f) => f.id === 'folder-server-2')
-        ?.isTemplatesFolder,
-    ).toBe(false)
-    expect(
-      acceptedFolderIdMerge?.docs.find((d) => d.id === 'tpl-in-renamed')
-        ?.folderId,
-    ).toBe('folder-server-2')
+    expect(reclaimed.slug).toBe('example')
+    expect(reclaimed.fileName).toBe('example.mrbl')
+    expect(reclaimed.share.publicLinkUrl).toBe('https://xdrive.app/d/example')
+    expect(reclaimed.source).toContain('Replayed Held Edit')
   })
 })

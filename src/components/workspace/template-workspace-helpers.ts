@@ -3,11 +3,15 @@ import {
   TEMPLATES_FOLDER_ID,
   TEMPLATES_FOLDER_NAME,
   isTemplatesRootFolder,
+  updateMarbleSourceTitle,
 } from '#/lib/marble'
 import type {
   DriveFolder,
   DriveFolderColor,
+  MarbleCheckpoint,
   MarbleDocumentFile,
+  MarbleOp,
+  MarbleOpProposal,
 } from '#/lib/types'
 
 export function getTemplateFolderIds(
@@ -46,27 +50,53 @@ export function reconcileFolderRename(
   docs: readonly MarbleDocumentFile[],
   input: {
     folderId: string
+    nextFolderId?: string
     name: string
     color: DriveFolderColor
     updatedAt: string
   },
-): { folders: DriveFolder[]; docs: MarbleDocumentFile[] } {
-  const nextFolders = folders.map((folder) =>
-    folder.id === input.folderId
-      ? {
-          ...folder,
-          name: input.name,
-          color: input.color,
-          updatedAt: input.updatedAt,
-          isTemplatesFolder:
-            folder.parentId === null && input.name === TEMPLATES_FOLDER_NAME,
-        }
-      : folder,
-  )
+): {
+  folders: DriveFolder[]
+  docs: MarbleDocumentFile[]
+  resolvedFolderId: string
+} {
+  const candidateId = input.nextFolderId?.trim()
+  const resolvedFolderId =
+    candidateId &&
+    candidateId !== input.folderId &&
+    !folders.some(
+      (folder) => folder.id === candidateId && folder.id !== input.folderId,
+    )
+      ? candidateId
+      : input.folderId
+  const didRemapId = resolvedFolderId !== input.folderId
+
+  const nextFolders = folders.map((folder) => {
+    if (folder.id === input.folderId) {
+      return {
+        ...folder,
+        id: resolvedFolderId,
+        name: input.name,
+        color: input.color,
+        updatedAt: input.updatedAt,
+        isTemplatesFolder:
+          folder.parentId === null && input.name === TEMPLATES_FOLDER_NAME,
+      }
+    }
+    if (didRemapId && folder.parentId === input.folderId) {
+      return {
+        ...folder,
+        parentId: resolvedFolderId,
+      }
+    }
+    return folder
+  })
   const nextTemplateFolderIds = getTemplateFolderIds(nextFolders)
   const nextDocs = docs.map((doc) => {
     const updatedFolder =
-      doc.folderId === input.folderId ? { ...doc, folder: input.name } : doc
+      doc.folderId === input.folderId
+        ? { ...doc, folderId: resolvedFolderId, folder: input.name }
+        : doc
     if (updatedFolder.trashedAt) return updatedFolder
     const nextIsTemplate = deriveDocIsTemplate(
       updatedFolder,
@@ -79,7 +109,7 @@ export function reconcileFolderRename(
       isTemplate: nextIsTemplate,
     }
   })
-  return { folders: nextFolders, docs: nextDocs }
+  return { folders: nextFolders, docs: nextDocs, resolvedFolderId }
 }
 
 export function mintClientFolderId(
@@ -121,396 +151,162 @@ export function ensureClientTemplatesFolder(
   return { folder: created, folders: [...folders, created], created: true }
 }
 
-export type DocSlugRemapStore = Map<string, Map<string, string>>
+export interface HeldDocEdit {
+  ops: MarbleOp[]
+  nextSource: string
+  checkpoint?: MarbleCheckpoint
+  lastEditedBy: MarbleDocumentFile['lastEditedBy']
+  updatedAt: string
+  intentHistory?: MarbleOpProposal[]
+}
 
 /**
- * Records that an optimistic or superseded slug for `docId` maps to the
- * server-canonical `canonicalSlug`, flattening any prior chained remaps so
- * follow-up queued mutations never target an outdated path.
+ * Applies a server-confirmed `save_as_template` response directly to the
+ * workspace folder and document lists, deriving live template membership.
  */
-export function recordDocSlugRemap(
-  store: DocSlugRemapStore,
-  docId: string,
-  optimisticSlug: string,
-  canonicalSlug: string,
-): void {
-  if (!docId || !optimisticSlug || !canonicalSlug) return
-  if (optimisticSlug === canonicalSlug) return
-  let byDoc = store.get(docId)
-  if (!byDoc) {
-    byDoc = new Map<string, string>()
-    store.set(docId, byDoc)
-  }
-  for (const [key, target] of byDoc.entries()) {
-    if (target === optimisticSlug) {
-      byDoc.set(key, canonicalSlug)
+export function applyServerSaveAsTemplateReply(
+  folders: readonly DriveFolder[],
+  docs: readonly MarbleDocumentFile[],
+  reply: {
+    folder?: DriveFolder
+    doc?: MarbleDocumentFile
+  },
+): {
+  folders: DriveFolder[]
+  docs: MarbleDocumentFile[]
+  doc: MarbleDocumentFile | null
+} {
+  let nextFolders = [...folders]
+  let replacedRootId: string | null = null
+
+  if (reply.folder) {
+    const serverFolder: DriveFolder = {
+      ...reply.folder,
+      isTemplatesFolder:
+        reply.folder.parentId === null &&
+        reply.folder.name === TEMPLATES_FOLDER_NAME,
     }
-  }
-  byDoc.set(optimisticSlug, canonicalSlug)
-}
-
-/**
- * Resolves `slug` to the newest server-canonical slug known for `docId`.
- */
-export function resolveCanonicalDocSlug(
-  store: DocSlugRemapStore,
-  docId: string,
-  slug: string,
-): string {
-  const byDoc = store.get(docId)
-  if (!byDoc || byDoc.size === 0) return slug
-  let current = slug
-  const visited = new Set<string>()
-  while (byDoc.has(current) && !visited.has(current)) {
-    visited.add(current)
-    const next = byDoc.get(current)
-    if (!next) break
-    current = next
-  }
-  return current
-}
-
-/**
- * Rewrites `meta.slug` (and a matching default `share.publicLinkUrl`) when a
- * queued mutation was captured before an earlier server slug deduplication.
- */
-export function remapSerializedDocMetaSlug<T extends Record<string, unknown>>(
-  meta: T,
-  previousSlug: string,
-  canonicalSlug: string,
-): T {
-  if (!canonicalSlug || canonicalSlug === previousSlug) {
-    return meta
-  }
-  const share = meta.share
-  if (share && typeof share === 'object' && !Array.isArray(share)) {
-    const shareObj = share as Record<string, unknown>
-    const defaultPrevUrl = `https://xdrive.app/d/${previousSlug}`
-    if (shareObj.publicLinkUrl === defaultPrevUrl) {
-      return {
-        ...meta,
-        slug: canonicalSlug,
-        share: {
-          ...shareObj,
-          publicLinkUrl: `https://xdrive.app/d/${canonicalSlug}`,
-        },
+    const byIdIndex = nextFolders.findIndex((f) => f.id === serverFolder.id)
+    if (byIdIndex >= 0) {
+      nextFolders = nextFolders.map((f, index) =>
+        index === byIdIndex ? serverFolder : f,
+      )
+    } else if (isTemplatesRootFolder(serverFolder)) {
+      const existingRoot = nextFolders.find(isTemplatesRootFolder)
+      if (existingRoot) {
+        replacedRootId = existingRoot.id
+        nextFolders = nextFolders.map((f) => {
+          if (f.id === existingRoot.id) return serverFolder
+          if (f.parentId === existingRoot.id) {
+            return { ...f, parentId: serverFolder.id }
+          }
+          return f
+        })
+      } else {
+        nextFolders = [...nextFolders, serverFolder]
       }
+    } else {
+      nextFolders = [...nextFolders, serverFolder]
     }
   }
-  return {
-    ...meta,
-    slug: canonicalSlug,
+
+  let nextDocs = [...docs]
+  if (reply.folder && replacedRootId && replacedRootId !== reply.folder.id) {
+    const confirmedFolder = reply.folder
+    nextDocs = nextDocs.map((doc) =>
+      doc.folderId === replacedRootId
+        ? { ...doc, folderId: confirmedFolder.id, folder: confirmedFolder.name }
+        : doc,
+    )
   }
-}
 
-function shareWithReconciledSlug(
-  doc: MarbleDocumentFile,
-  previousSlugs: readonly string[],
-  nextSlug: string,
-): MarbleDocumentFile['share'] {
-  const currentUrl = doc.share.publicLinkUrl
-  const matchesPrevious = previousSlugs.some(
-    (slug) => slug && currentUrl === `https://xdrive.app/d/${slug}`,
-  )
-  if (!matchesPrevious) return doc.share
-  return {
-    ...doc.share,
-    publicLinkUrl: `https://xdrive.app/d/${nextSlug}`,
+  const templateFolderIds = getTemplateFolderIds(nextFolders)
+  if (!reply.doc) {
+    return { folders: nextFolders, docs: nextDocs, doc: null }
   }
+
+  const liveFolder = reply.doc.folderId
+    ? nextFolders.find((folder) => folder.id === reply.doc?.folderId)
+    : undefined
+  const docWithLiveFolder: MarbleDocumentFile = {
+    ...reply.doc,
+    folder: liveFolder ? liveFolder.name : reply.doc.folder,
+  }
+  const normalizedDoc: MarbleDocumentFile = docWithLiveFolder.trashedAt
+    ? docWithLiveFolder
+    : {
+        ...docWithLiveFolder,
+        isTemplate: deriveDocIsTemplate(
+          docWithLiveFolder,
+          nextFolders,
+          templateFolderIds,
+        ),
+      }
+
+  const existingIndex = nextDocs.findIndex((doc) => doc.id === normalizedDoc.id)
+  if (existingIndex >= 0) {
+    nextDocs = nextDocs.map((doc, index) =>
+      index === existingIndex ? normalizedDoc : doc,
+    )
+  } else {
+    nextDocs = [normalizedDoc, ...nextDocs]
+  }
+
+  return { folders: nextFolders, docs: nextDocs, doc: normalizedDoc }
 }
 
-export interface RenameReplyServerPayload {
-  slug: string
-  fileName?: unknown
-  source?: unknown
-  isTemplate?: unknown
-  updatedAt?: unknown
-}
-
-export function mergeRenameDocumentReply(input: {
+/**
+ * Applies a server-confirmed `rename_document` reply as the canonical state for
+ * `currentDoc`, deriving `isTemplate` from the live folder tree and updating
+ * default public share links to the confirmed slug.
+ */
+export function applyServerRenameDocumentReply(input: {
   currentDoc: MarbleDocumentFile
-  currentLiveSource: string | undefined
-  optimisticSource: string
-  expectedVersion: number
-  saveTokenAtRename: number
-  currentSaveToken: number
-  renameToken: number
-  currentRenameToken: number
-  serverReply: RenameReplyServerPayload
+  serverReply: {
+    slug: string
+    fileName?: unknown
+    title?: unknown
+    description?: unknown
+    source?: unknown
+    updatedAt?: unknown
+  }
+  fallbackTitle: string
+  fallbackDescription: string
   folders: readonly DriveFolder[]
   countNodes: (source: string) => number
   byteSize: (source: string) => number
-}): {
-  doc: MarbleDocumentFile
-  shouldUpdateSourceRef: boolean
-  nextSourceRefValue?: string
-} | null {
-  if (input.currentRenameToken !== input.renameToken) {
-    return null
-  }
-
+}): MarbleDocumentFile {
   const serverSlug = input.serverReply.slug
   const serverFileName =
     typeof input.serverReply.fileName === 'string'
       ? input.serverReply.fileName
       : `${serverSlug}.mrbl`
-  const nextShare = shareWithReconciledSlug(
-    input.currentDoc,
-    [input.currentDoc.slug],
-    serverSlug,
-  )
-
-  const preserveLocalSource =
-    input.currentSaveToken !== input.saveTokenAtRename ||
-    input.currentDoc.version !== input.expectedVersion ||
-    input.currentDoc.source !== input.optimisticSource ||
-    (input.currentLiveSource !== undefined &&
-      input.currentLiveSource !== input.optimisticSource)
-
-  const hasKnownFolder =
-    input.currentDoc.folderId === null ||
-    Boolean(
-      input.currentDoc.folderId &&
-      input.folders.some((folder) => folder.id === input.currentDoc.folderId),
-    )
-
-  const nextIsTemplate = hasKnownFolder
-    ? deriveDocIsTemplate(
-        input.currentDoc,
-        input.folders,
-        getTemplateFolderIds(input.folders),
-      )
-    : typeof input.serverReply.isTemplate === 'boolean'
-      ? input.serverReply.isTemplate
-      : input.currentDoc.isTemplate
-
-  if (preserveLocalSource) {
-    return {
-      doc: {
-        ...input.currentDoc,
-        slug: serverSlug,
-        fileName: serverFileName,
-        isTemplate: nextIsTemplate,
-        share: nextShare,
-      },
-      shouldUpdateSourceRef: false,
-    }
-  }
-
-  const serverSource =
+  const nextTitle =
+    typeof input.serverReply.title === 'string' &&
+    input.serverReply.title.trim()
+      ? input.serverReply.title.trim()
+      : input.fallbackTitle
+  const nextDescription =
+    typeof input.serverReply.description === 'string'
+      ? input.serverReply.description
+      : input.fallbackDescription
+  const nextSource =
     typeof input.serverReply.source === 'string'
       ? input.serverReply.source
-      : input.optimisticSource
-  return {
-    doc: {
-      ...input.currentDoc,
-      slug: serverSlug,
-      fileName: serverFileName,
-      source: serverSource,
-      nodeCount: input.countNodes(serverSource),
-      byteSize: input.byteSize(serverSource),
-      isTemplate: nextIsTemplate,
-      share: nextShare,
-      updatedAt:
-        typeof input.serverReply.updatedAt === 'string'
-          ? input.serverReply.updatedAt
-          : input.currentDoc.updatedAt,
-    },
-    shouldUpdateSourceRef: true,
-    nextSourceRefValue: serverSource,
-  }
-}
+      : updateMarbleSourceTitle(input.currentDoc.source, nextTitle)
 
-/**
- * Merges a `save_as_template` folder reply against the current folder tree so
- * concurrent local folder renames or deletions are never overwritten by an
- * earlier server response.
- */
-export function mergeSaveAsTemplateFolderReply(input: {
-  folders: readonly DriveFolder[]
-  docs: readonly MarbleDocumentFile[]
-  optimisticFolderId: string
-  folderTokenAtCreate: number
-  currentFolderToken: number
-  wasDeletedLocally: boolean
-  serverFolder: DriveFolder
-}): {
-  folders: DriveFolder[]
-  docs: MarbleDocumentFile[]
-  resolvedFolderId: string | null
-  didRemapFolderId: boolean
-} {
-  const targetFolder = input.folders.find(
-    (folder) => folder.id === input.optimisticFolderId,
-  )
-
-  if (!targetFolder) {
-    if (
-      input.wasDeletedLocally ||
-      input.currentFolderToken !== input.folderTokenAtCreate
-    ) {
-      return {
-        folders: [...input.folders],
-        docs: [...input.docs],
-        resolvedFolderId: null,
-        didRemapFolderId: false,
-      }
-    }
-    const existingRoot =
-      input.folders.find((folder) => folder.id === input.serverFolder.id) ??
-      input.folders.find(isTemplatesRootFolder)
-    if (existingRoot) {
-      return {
-        folders: [...input.folders],
-        docs: [...input.docs],
-        resolvedFolderId: existingRoot.id,
-        didRemapFolderId: false,
-      }
-    }
-    const adopted: DriveFolder = {
-      ...input.serverFolder,
-      isTemplatesFolder: true,
-    }
-    return {
-      folders: [...input.folders, adopted],
-      docs: [...input.docs],
-      resolvedFolderId: adopted.id,
-      didRemapFolderId: false,
-    }
-  }
-
-  const serverIdTakenByOther =
-    input.serverFolder.id !== input.optimisticFolderId &&
-    input.folders.some(
-      (folder) =>
-        folder.id === input.serverFolder.id &&
-        folder.id !== input.optimisticFolderId,
-    )
-  const resolvedFolderId = serverIdTakenByOther
-    ? input.optimisticFolderId
-    : input.serverFolder.id
-  const didRemapFolderId = resolvedFolderId !== input.optimisticFolderId
-
-  const hasLocalFolderChanges =
-    input.currentFolderToken !== input.folderTokenAtCreate ||
-    targetFolder.name !== TEMPLATES_FOLDER_NAME ||
-    targetFolder.isTemplatesFolder !== true ||
-    targetFolder.parentId !== null
-
-  const mergedFolder: DriveFolder = hasLocalFolderChanges
-    ? {
-        ...targetFolder,
-        id: resolvedFolderId,
-      }
-    : {
-        ...input.serverFolder,
-        id: resolvedFolderId,
-        isTemplatesFolder: true,
-      }
-
-  const nextFolders = input.folders.map((folder) => {
-    if (folder.id === input.optimisticFolderId) {
-      return mergedFolder
-    }
-    if (didRemapFolderId && folder.parentId === input.optimisticFolderId) {
-      return {
-        ...folder,
-        parentId: resolvedFolderId,
-      }
-    }
-    return folder
-  })
-
-  const nextTemplateFolderIds = getTemplateFolderIds(nextFolders)
-  const nextDocs = input.docs.map((doc) => {
-    const folderChanged =
-      didRemapFolderId && doc.folderId === input.optimisticFolderId
-    const remappedDoc = folderChanged
-      ? {
-          ...doc,
-          folderId: resolvedFolderId,
-          folder: mergedFolder.name,
-        }
-      : doc
-    if (remappedDoc.trashedAt) return remappedDoc
-    if (!folderChanged && remappedDoc.folderId !== resolvedFolderId) {
-      return remappedDoc
-    }
-    const nextIsTemplate = deriveDocIsTemplate(
-      remappedDoc,
-      nextFolders,
-      nextTemplateFolderIds,
-    )
-    if (remappedDoc.isTemplate === nextIsTemplate) return remappedDoc
-    return {
-      ...remappedDoc,
-      isTemplate: nextIsTemplate,
-    }
-  })
-
-  return {
-    folders: nextFolders,
-    docs: nextDocs,
-    resolvedFolderId,
-    didRemapFolderId,
-  }
-}
-
-/**
- * Merges a `save_as_template` document reply against the live workspace state
- * so server slug deduplication updates the doc's canonical path while newer
- * local edits, moves, renames, flags, and trash state are preserved.
- */
-export function mergeSaveAsTemplateDocReply(input: {
-  currentDoc: MarbleDocumentFile
-  currentLiveSource: string | undefined
-  optimisticSlug: string
-  optimisticSource: string
-  optimisticFolderId: string
-  resolvedFolderId: string | null
-  expectedVersion: number
-  saveTokenAtCreate: number
-  currentSaveToken: number
-  renameTokenAtCreate: number
-  currentRenameToken: number
-  serverDoc: MarbleDocumentFile
-  folders: readonly DriveFolder[]
-  countNodes: (source: string) => number
-  byteSize: (source: string) => number
-}): {
-  doc: MarbleDocumentFile
-  shouldUpdateSourceRef: boolean
-  nextSourceRefValue?: string
-} {
-  const hasNewerRename = input.currentRenameToken !== input.renameTokenAtCreate
-  const preserveLocalSource =
-    hasNewerRename ||
-    input.currentSaveToken !== input.saveTokenAtCreate ||
-    input.currentDoc.version !== input.expectedVersion ||
-    input.currentDoc.source !== input.optimisticSource ||
-    (input.currentLiveSource !== undefined &&
-      input.currentLiveSource !== input.optimisticSource)
-
-  const shouldRemapFolder =
-    input.currentDoc.folderId === input.optimisticFolderId &&
-    input.resolvedFolderId !== null
-  const nextFolderId = shouldRemapFolder
-    ? input.resolvedFolderId
-    : input.currentDoc.folderId
-  const liveFolder = nextFolderId
-    ? input.folders.find((folder) => folder.id === nextFolderId)
+  const liveFolder = input.currentDoc.folderId
+    ? input.folders.find((folder) => folder.id === input.currentDoc.folderId)
     : undefined
   const nextFolderName = liveFolder ? liveFolder.name : input.currentDoc.folder
-
   const docWithFolder: MarbleDocumentFile = {
     ...input.currentDoc,
-    folderId: nextFolderId,
     folder: nextFolderName,
   }
   const hasKnownFolder =
-    nextFolderId === null || Boolean(nextFolderId && liveFolder !== undefined)
-  const nextIsTemplate = docWithFolder.trashedAt
-    ? docWithFolder.isTemplate
+    input.currentDoc.folderId === null || liveFolder !== undefined
+  const nextIsTemplate = input.currentDoc.trashedAt
+    ? input.currentDoc.isTemplate
     : hasKnownFolder
       ? deriveDocIsTemplate(
           docWithFolder,
@@ -519,123 +315,66 @@ export function mergeSaveAsTemplateDocReply(input: {
         )
       : input.currentDoc.isTemplate
 
-  const serverFileName =
-    input.serverDoc.fileName || `${input.serverDoc.slug}.mrbl`
-  const nextSlug = hasNewerRename ? input.currentDoc.slug : input.serverDoc.slug
-  const nextFileName = hasNewerRename
-    ? input.currentDoc.fileName
-    : serverFileName
-  const nextShare = hasNewerRename
-    ? input.currentDoc.share
-    : shareWithReconciledSlug(
-        input.currentDoc,
-        [input.optimisticSlug, input.currentDoc.slug],
-        nextSlug,
-      )
+  const nextShare =
+    input.currentDoc.share.publicLinkUrl ===
+    `https://xdrive.app/d/${input.currentDoc.slug}`
+      ? {
+          ...input.currentDoc.share,
+          publicLinkUrl: `https://xdrive.app/d/${serverSlug}`,
+        }
+      : input.currentDoc.share
 
-  if (preserveLocalSource) {
-    return {
-      doc: {
-        ...docWithFolder,
-        slug: nextSlug,
-        fileName: nextFileName,
-        isTemplate: nextIsTemplate,
-        share: nextShare,
-      },
-      shouldUpdateSourceRef: false,
-    }
-  }
-
-  const serverSource = input.serverDoc.source
   return {
-    doc: {
-      ...docWithFolder,
-      slug: nextSlug,
-      fileName: nextFileName,
-      isTemplate: nextIsTemplate,
-      share: nextShare,
-      source: serverSource,
-      nodeCount: input.countNodes(serverSource),
-      byteSize: input.byteSize(serverSource),
-      updatedAt: input.serverDoc.updatedAt || input.currentDoc.updatedAt,
-    },
-    shouldUpdateSourceRef: true,
-    nextSourceRefValue: serverSource,
+    ...docWithFolder,
+    slug: serverSlug,
+    fileName: serverFileName,
+    title: nextTitle,
+    description: nextDescription,
+    source: nextSource,
+    nodeCount: input.countNodes(nextSource),
+    byteSize: input.byteSize(nextSource),
+    version: input.currentDoc.version + 1,
+    syncState: 'saved',
+    isTemplate: nextIsTemplate,
+    share: nextShare,
+    updatedAt:
+      typeof input.serverReply.updatedAt === 'string'
+        ? input.serverReply.updatedAt
+        : input.currentDoc.updatedAt,
   }
 }
 
 /**
- * Reconciles a `rename_folder` server reply when no newer local folder
- * mutation supersedes it and the server minted a different canonical folder ID.
+ * Replays edits captured while a rename request was pending against the
+ * server-confirmed document source.
  */
-export function mergeRenameFolderReply(input: {
-  folders: readonly DriveFolder[]
-  docs: readonly MarbleDocumentFile[]
-  folderId: string
-  renameToken: number
-  currentFolderToken: number
-  serverFolder: DriveFolder
-}): {
-  folders: DriveFolder[]
-  docs: MarbleDocumentFile[]
-  resolvedFolderId: string
-} | null {
-  if (input.currentFolderToken !== input.renameToken) {
-    return null
-  }
-  const target = input.folders.find((folder) => folder.id === input.folderId)
-  if (!target) {
-    return null
-  }
-  const canonicalId = input.serverFolder.id
-  if (
-    !canonicalId ||
-    canonicalId === input.folderId ||
-    input.folders.some(
-      (folder) => folder.id === canonicalId && folder.id !== input.folderId,
-    )
-  ) {
-    return null
-  }
+export function replayHeldDocEdits(
+  baseSource: string,
+  title: string,
+  heldEdits: readonly HeldDocEdit[],
+  applyOps: (source: string, ops: MarbleOp[]) => { source: string },
+  retitle: (source: string, title: string) => string = updateMarbleSourceTitle,
+): { source: string; ops: MarbleOp[] } {
+  let current = baseSource
+  const ops: MarbleOp[] = []
+  let hasSnapshotReset = false
 
-  const nextFolders = input.folders.map((folder) => {
-    if (folder.id === input.folderId) {
-      return {
-        ...folder,
-        id: canonicalId,
+  for (const edit of heldEdits) {
+    if (edit.ops.length > 0) {
+      try {
+        current = applyOps(current, edit.ops).source
+        if (!hasSnapshotReset) {
+          ops.push(...edit.ops)
+        }
+        continue
+      } catch {
+        // Fall back to full source snapshot when prior ops no longer apply cleanly.
       }
     }
-    if (folder.parentId === input.folderId) {
-      return {
-        ...folder,
-        parentId: canonicalId,
-      }
-    }
-    return folder
-  })
-
-  const nextTemplateFolderIds = getTemplateFolderIds(nextFolders)
-  const nextDocs = input.docs.map((doc) => {
-    if (doc.folderId !== input.folderId) return doc
-    const updated = {
-      ...doc,
-      folderId: canonicalId,
-      folder: target.name,
-    }
-    if (updated.trashedAt) return updated
-    return {
-      ...updated,
-      isTemplate: deriveDocIsTemplate(
-        updated,
-        nextFolders,
-        nextTemplateFolderIds,
-      ),
-    }
-  })
-
-  return {
-    folders: nextFolders,
-    docs: nextDocs,
-    resolvedFolderId: canonicalId,
+    current = retitle(edit.nextSource, title)
+    ops.length = 0
+    hasSnapshotReset = true
   }
+
+  return { source: current, ops }
 }

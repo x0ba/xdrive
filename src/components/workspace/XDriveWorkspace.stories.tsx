@@ -413,7 +413,15 @@ export const RenameTemplatesFolderAndRecreate: Story = {
   },
 }
 
-let resolveInFlightRename: (() => void) | null = null
+interface RecordedMarblePost {
+  action?: string
+  slug?: string
+  folderPath?: string
+  oldPath?: string
+  newName?: string
+  meta?: { slug?: string }
+  [key: string]: unknown
+}
 
 const RENAME_RACE_DOC: MarbleDocumentFile = {
   ...INITIAL_WORKSPACE_DOCS[2],
@@ -433,12 +441,18 @@ const RENAME_RACE_DOC: MarbleDocumentFile = {
     '<!doctype html><html lang="en" data-marble="1"><head><meta charset="utf-8"><title>Rename Race Doc</title></head><body><main><h1 data-marble-id="h1" data-marble-editable>Initial Body</h1></main></body></html>',
 }
 
-function RenameInFlightStoryHarness(
+let rejectFirstRename: ((reason?: unknown) => void) | null = null
+let resolveSecondRename: (() => void) | null = null
+let recordedRenamePosts: RecordedMarblePost[] = []
+
+function RenameFailureStoryHarness(
   args: ComponentProps<typeof XDriveWorkspace>,
 ) {
   const [ready, setReady] = useState(false)
 
   useEffect(() => {
+    recordedRenamePosts = []
+    let renameAttempt = 0
     const originalFetch = window.fetch.bind(window)
     window.fetch = async (input, init) => {
       const url =
@@ -463,17 +477,27 @@ function RenameInFlightStoryHarness(
           )
         }
         if (method === 'POST' && typeof init?.body === 'string') {
-          const payload = JSON.parse(init.body) as {
-            action?: string
-            title?: string
-            description?: string
-          }
-          if (payload.action === 'rename_document') {
-            await new Promise<void>((resolve) => {
-              resolveInFlightRename = resolve
+          const payload = JSON.parse(init.body) as RecordedMarblePost
+          if (payload.action === 'diff' || payload.action === 'doctor') {
+            return new Response(JSON.stringify({ ok: false }), {
+              status: 404,
+              headers: { 'content-type': 'application/json' },
             })
-            const nextTitle = payload.title ?? 'Renamed Doc'
-            const staleServerSource = RENAME_RACE_DOC.source.replace(
+          }
+          recordedRenamePosts.push(payload)
+          if (payload.action === 'rename_document') {
+            renameAttempt += 1
+            if (renameAttempt === 1) {
+              await new Promise<void>((_resolve, reject) => {
+                rejectFirstRename = reject
+              })
+            }
+            await new Promise<void>((resolve) => {
+              resolveSecondRename = resolve
+            })
+            const nextTitle =
+              typeof payload.title === 'string' ? payload.title : 'Renamed Doc'
+            const serverSource = RENAME_RACE_DOC.source.replace(
               '<title>Rename Race Doc</title>',
               `<title>${nextTitle}</title>`,
             )
@@ -482,27 +506,24 @@ function RenameInFlightStoryHarness(
                 ok: true,
                 id: RENAME_RACE_DOC.id,
                 oldSlug: RENAME_RACE_DOC.slug,
-                slug: 'renamed-doc',
-                fileName: 'renamed-doc.mrbl',
+                slug: 'renamed-doc-2',
+                fileName: 'renamed-doc-2.mrbl',
                 folderPath: '',
-                relPath: 'renamed-doc.mrbl',
+                relPath: 'renamed-doc-2.mrbl',
                 isTemplate: false,
                 title: nextTitle,
-                description: payload.description ?? '',
-                source: staleServerSource,
-                updatedAt: '2026-11-25T23:30:00.000Z',
+                description:
+                  typeof payload.description === 'string'
+                    ? payload.description
+                    : '',
+                source: serverSource,
+                updatedAt: '2026-11-26T00:05:00.000Z',
               }),
               {
                 status: 200,
                 headers: { 'content-type': 'application/json' },
               },
             )
-          }
-          if (payload.action === 'diff' || payload.action === 'doctor') {
-            return new Response(JSON.stringify({ ok: false }), {
-              status: 404,
-              headers: { 'content-type': 'application/json' },
-            })
           }
           return new Response(JSON.stringify({ ok: true }), {
             status: 200,
@@ -514,8 +535,10 @@ function RenameInFlightStoryHarness(
     }
     setReady(true)
     return () => {
-      resolveInFlightRename?.()
-      resolveInFlightRename = null
+      rejectFirstRename?.(new Error('unmounted'))
+      rejectFirstRename = null
+      resolveSecondRename?.()
+      resolveSecondRename = null
       window.fetch = originalFetch
     }
   }, [])
@@ -525,12 +548,12 @@ function RenameInFlightStoryHarness(
 }
 
 /**
- * Verifies that local edits made while a rename_document request is in flight are preserved when the server reply resolves.
+ * Verifies that thrown/failed rename requests discard held edits cleanly without saving to a stale path, while confirmed renames replay held edits onto the server-deduped slug.
  *
- * @summary Rename request in flight preserves newer local document edits
+ * @summary Thrown rename failure discards pending edits; confirmed rename replays on server-deduped slug
  */
-export const RenameDocumentPreservesInFlightEdits: Story = {
-  name: 'Document · Preserve Edits During In-Flight Rename',
+export const RenameFailureDiscardsPendingEdits: Story = {
+  name: 'Document · Failed Rename Discards Pending Edits',
   args: {
     initialTheme: 'dark',
     initialActiveTabId: 'doc-rename-race',
@@ -540,7 +563,7 @@ export const RenameDocumentPreservesInFlightEdits: Story = {
     initialAiSidebarOpen: false,
     syncWithServer: true,
   },
-  render: (args) => <RenameInFlightStoryHarness {...args} />,
+  render: (args) => <RenameFailureStoryHarness {...args} />,
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
     const sourceTextarea = await canvas.findByLabelText<HTMLTextAreaElement>(
@@ -553,59 +576,112 @@ export const RenameDocumentPreservesInFlightEdits: Story = {
     })
     const sidebarContainer = sidebarNav.parentElement
     expect(sidebarContainer).not.toBeNull()
-    const pinnedLink = await within(sidebarContainer!).findByRole('link', {
-      name: 'Rename Race Doc',
-    })
 
-    await userEvent.pointer({ keys: '[MouseRight]', target: pinnedLink })
-    const pinnedMenu = await canvas.findByRole('menu', {
-      name: 'Actions for Rename Race Doc',
-    })
-    await userEvent.click(
-      within(pinnedMenu).getByRole('menuitem', { name: 'Rename' }),
-    )
+    const triggerRename = async () => {
+      const pinnedLink = await within(sidebarContainer!).findByRole('link', {
+        name: 'Rename Race Doc',
+      })
+      await userEvent.pointer({ keys: '[MouseRight]', target: pinnedLink })
+      const pinnedMenu = await canvas.findByRole('menu', {
+        name: 'Actions for Rename Race Doc',
+      })
+      await userEvent.click(
+        within(pinnedMenu).getByRole('menuitem', { name: 'Rename' }),
+      )
+      const renameDialog = await canvas.findByRole('dialog', {
+        name: 'Rename file',
+      })
+      const nameInput = within(renameDialog).getByLabelText('Document name')
+      await userEvent.clear(nameInput)
+      await userEvent.type(nameInput, 'Renamed Doc')
+      await userEvent.click(
+        within(renameDialog).getByRole('button', { name: 'Save' }),
+      )
+    }
 
-    const renameDialog = await canvas.findByRole('dialog', {
-      name: 'Rename file',
-    })
-    const nameInput = within(renameDialog).getByLabelText('Document name')
-    await userEvent.clear(nameInput)
-    await userEvent.type(nameInput, 'Renamed Doc')
-    await userEvent.click(
-      within(renameDialog).getByRole('button', { name: 'Save' }),
-    )
-
-    await waitFor(() => expect(resolveInFlightRename).not.toBeNull())
-    await waitFor(() =>
-      expect(sourceTextarea.value).toContain('<title>Renamed Doc</title>'),
-    )
+    // Attempt 1: trigger rename and hold an edit while the request is pending.
+    await triggerRename()
+    await waitFor(() => expect(rejectFirstRename).not.toBeNull())
+    expect(await canvas.findByText('Renaming "Rename Race Doc"…')).toBeVisible()
 
     const bodyStart = sourceTextarea.value.indexOf('Initial Body')
     expect(bodyStart).toBeGreaterThan(-1)
     sourceTextarea.focus()
-    await userEvent.type(sourceTextarea, 'Fresh Local Edit', {
+    await userEvent.type(sourceTextarea, 'Held Unconfirmed Edit', {
       initialSelectionStart: bodyStart,
       initialSelectionEnd: bodyStart + 'Initial Body'.length,
     })
     await userEvent.click(canvas.getByRole('button', { name: 'Apply' }))
-    await waitFor(() => {
-      expect(sourceTextarea.value).toContain('Fresh Local Edit')
-      expect(canvas.getByRole('button', { name: 'Apply' })).toBeDisabled()
-    })
+    await waitFor(() =>
+      expect(canvas.getByRole('button', { name: 'Apply' })).toBeDisabled(),
+    )
+    expect(
+      recordedRenamePosts.filter(
+        (post) => post.action === 'save' || post.action === 'apply_ops',
+      ),
+    ).toHaveLength(0)
 
-    // Release the delayed rename_document response containing stale Initial Body.
-    resolveInFlightRename?.()
-    resolveInFlightRename = null
+    // Throw inside fetch -> pending edit must be discarded and zero save POSTs fired.
+    rejectFirstRename?.(new TypeError('Network error'))
+    rejectFirstRename = null
+
+    await waitFor(() => {
+      expect(sourceTextarea.value).toContain('Initial Body')
+      expect(sourceTextarea.value).not.toContain('Held Unconfirmed Edit')
+    })
+    expect(
+      await canvas.findByText(/pending edits were discarded/i),
+    ).toBeVisible()
+    expect(
+      recordedRenamePosts.filter(
+        (post) => post.action === 'save' || post.action === 'apply_ops',
+      ),
+    ).toHaveLength(0)
+
+    // Attempt 2: rename succeeds with server-deduped slug; held edit replays onto renamed-doc-2.
+    await triggerRename()
+    await waitFor(() => expect(resolveSecondRename).not.toBeNull())
+
+    const secondStart = sourceTextarea.value.indexOf('Initial Body')
+    expect(secondStart).toBeGreaterThan(-1)
+    sourceTextarea.focus()
+    await userEvent.type(sourceTextarea, 'Replayed Held Edit', {
+      initialSelectionStart: secondStart,
+      initialSelectionEnd: secondStart + 'Initial Body'.length,
+    })
+    await userEvent.click(canvas.getByRole('button', { name: 'Apply' }))
+    await waitFor(() =>
+      expect(canvas.getByRole('button', { name: 'Apply' })).toBeDisabled(),
+    )
+    expect(
+      recordedRenamePosts.filter(
+        (post) => post.action === 'save' || post.action === 'apply_ops',
+      ),
+    ).toHaveLength(0)
+
+    resolveSecondRename?.()
+    resolveSecondRename = null
 
     await expect(
       await within(sidebarContainer!).findByRole('link', {
         name: 'Renamed Doc',
       }),
     ).toBeVisible()
+    await waitFor(() =>
+      expect(
+        canvas.getAllByText('renamed-doc-2.mrbl').length,
+      ).toBeGreaterThanOrEqual(1),
+    )
     await waitFor(() => {
-      expect(sourceTextarea.value).toContain('Fresh Local Edit')
-      expect(sourceTextarea.value).not.toContain('Initial Body')
+      const savePosts = recordedRenamePosts.filter(
+        (post) => post.action === 'save' || post.action === 'apply_ops',
+      )
+      expect(savePosts).toHaveLength(1)
+      expect(savePosts[0]?.slug).toBe('renamed-doc-2')
+      expect(savePosts[0]?.meta?.slug).toBe('renamed-doc-2')
     })
+    expect(sourceTextarea.value).toContain('<title>Renamed Doc</title>')
+    expect(sourceTextarea.value).toContain('Replayed Held Edit')
   },
 }
 
@@ -627,26 +703,17 @@ const TEMPLATE_RACE_SOURCE_DOC: MarbleDocumentFile = {
     '<!doctype html><html lang="en" data-marble="1"><head><meta charset="utf-8"><title>Source Bench Note</title></head><body><main><h1 data-marble-id="h1" data-marble-editable>Initial Body</h1></main></body></html>',
 }
 
-interface RecordedMarblePost {
-  action?: string
-  slug?: string
-  folderPath?: string
-  oldPath?: string
-  newName?: string
-  meta?: { slug?: string }
-  [key: string]: unknown
-}
-
 let resolveInFlightSaveTemplateDedupe: (() => void) | null = null
 let recordedSaveDedupePosts: RecordedMarblePost[] = []
 
-function SaveAsTemplateDedupeStoryHarness(
+function SaveAsTemplateDedupeAndReclaimHarness(
   args: ComponentProps<typeof XDriveWorkspace>,
 ) {
   const [ready, setReady] = useState(false)
 
   useEffect(() => {
     recordedSaveDedupePosts = []
+    let latestServerSource = TEMPLATE_RACE_SOURCE_DOC.source
     const originalFetch = window.fetch.bind(window)
     window.fetch = async (input, init) => {
       const url =
@@ -683,7 +750,7 @@ function SaveAsTemplateDedupeStoryHarness(
             await new Promise<void>((resolve) => {
               resolveInFlightSaveTemplateDedupe = resolve
             })
-            const now = '2026-11-25T23:52:00.000Z'
+            const now = '2026-11-26T00:05:00.000Z'
             const folder: DriveFolder = {
               id: 'folder-templates-srv',
               name: TEMPLATES_FOLDER_NAME,
@@ -697,7 +764,7 @@ function SaveAsTemplateDedupeStoryHarness(
               typeof payload.title === 'string'
                 ? payload.title
                 : 'Bench Template'
-            const staleServerSource = TEMPLATE_RACE_SOURCE_DOC.source.replace(
+            latestServerSource = TEMPLATE_RACE_SOURCE_DOC.source.replace(
               '<title>Source Bench Note</title>',
               `<title>${title}</title>`,
             )
@@ -715,7 +782,7 @@ function SaveAsTemplateDedupeStoryHarness(
               isTemplate: true,
               folderId: folder.id,
               folder: TEMPLATES_FOLDER_NAME,
-              source: staleServerSource,
+              source: latestServerSource,
               version: 1,
               syncState: 'saved',
               createdAt: now,
@@ -723,6 +790,60 @@ function SaveAsTemplateDedupeStoryHarness(
             }
             return new Response(
               JSON.stringify({ ok: true, folder, doc: dedupedDoc }),
+              {
+                status: 200,
+                headers: { 'content-type': 'application/json' },
+              },
+            )
+          }
+          if (
+            (payload.action === 'save' || payload.action === 'apply_ops') &&
+            typeof payload.meta === 'object'
+          ) {
+            const nextTextMatch = Array.isArray(payload.ops)
+              ? (payload.ops[0] as { text?: string } | undefined)?.text
+              : undefined
+            if (nextTextMatch) {
+              latestServerSource = latestServerSource.replace(
+                />[^<]+<\/h1>/,
+                `>${nextTextMatch}</h1>`,
+              )
+            }
+            return new Response(
+              JSON.stringify({
+                ok: true,
+                slug: payload.slug,
+                source: latestServerSource,
+              }),
+              {
+                status: 200,
+                headers: { 'content-type': 'application/json' },
+              },
+            )
+          }
+          if (payload.action === 'rename_document') {
+            const title =
+              typeof payload.title === 'string'
+                ? payload.title
+                : 'Bench Template'
+            return new Response(
+              JSON.stringify({
+                ok: true,
+                id: 'tpl-deduped-id',
+                oldSlug: payload.slug,
+                slug: 'bench-template',
+                fileName: 'bench-template.mrbl',
+                folderPath: TEMPLATES_FOLDER_NAME,
+                relPath: `${TEMPLATES_FOLDER_NAME}/bench-template.mrbl`,
+                isTemplate: true,
+                title,
+                description:
+                  typeof payload.description === 'string'
+                    ? payload.description
+                    : '',
+                source: latestServerSource,
+                updatedAt: '2026-11-26T00:06:00.000Z',
+              }),
               {
                 status: 200,
                 headers: { 'content-type': 'application/json' },
@@ -750,12 +871,12 @@ function SaveAsTemplateDedupeStoryHarness(
 }
 
 /**
- * Verifies that server slug deduplication on save_as_template reconciles UI state and re-targets queued saves instead of overwriting the optimistic slug.
+ * Verifies server-confirmed template creation with deduped slug usage on edits, followed by reclaiming the base slug via rename.
  *
- * @summary Reconcile deduped template slug and re-target in-flight saves
+ * @summary Server-confirmed deduped template slug for edits and slug reclaim via rename
  */
-export const SaveAsTemplateSlugDedupePreservesInFlightEdits: Story = {
-  name: 'Template · Slug Dedupe Reconciles In-Flight Edits',
+export const SaveAsTemplateDedupedSlugAndReclaim: Story = {
+  name: 'Template · Deduped Slug & Reclaim Rename',
   args: {
     initialTheme: 'dark',
     initialNav: 'drive',
@@ -764,7 +885,7 @@ export const SaveAsTemplateSlugDedupePreservesInFlightEdits: Story = {
     initialAiSidebarOpen: false,
     syncWithServer: true,
   },
-  render: (args) => <SaveAsTemplateDedupeStoryHarness {...args} />,
+  render: (args) => <SaveAsTemplateDedupeAndReclaimHarness {...args} />,
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
     const docMenuBtn = await canvas.findByRole('button', {
@@ -791,15 +912,31 @@ export const SaveAsTemplateSlugDedupePreservesInFlightEdits: Story = {
     await waitFor(() =>
       expect(resolveInFlightSaveTemplateDedupe).not.toBeNull(),
     )
+    expect(
+      await canvas.findByText('Saving "Bench Template" to Templates…'),
+    ).toBeVisible()
+    // Pessimistic creation waits for server reply before adding the Templates item.
+    expect(canvas.queryByText('Bench Template')).toBeNull()
+
+    resolveInFlightSaveTemplateDedupe?.()
+    resolveInFlightSaveTemplateDedupe = null
+
+    await expect(
+      await canvas.findByText('Saved "Bench Template" to Templates'),
+    ).toBeVisible()
 
     const sidebarNav = canvas.getByRole('navigation', {
       name: 'Primary Workspace Navigation',
     })
-    const templatesNavLink = within(sidebarNav)
-      .getAllByRole('link', { name: TEMPLATES_FOLDER_NAME })
-      .find((link) => link.getAttribute('href') === '/templates')
-    expect(templatesNavLink).toBeDefined()
-    await userEvent.click(templatesNavLink!)
+    const clickTemplatesNav = async () => {
+      const link = within(sidebarNav)
+        .getAllByRole('link', { name: TEMPLATES_FOLDER_NAME })
+        .find((el) => el.getAttribute('href') === '/templates')
+      expect(link).toBeDefined()
+      await userEvent.click(link!)
+    }
+
+    await clickTemplatesNav()
 
     const tplMenuBtn = await canvas.findByRole('button', {
       name: 'Actions for Bench Template',
@@ -812,50 +949,105 @@ export const SaveAsTemplateSlugDedupePreservesInFlightEdits: Story = {
       within(tplMenu).getByRole('menuitem', { name: 'Edit template' }),
     )
 
+    await waitFor(() =>
+      expect(
+        canvas.getAllByText('bench-template-2.mrbl').length,
+      ).toBeGreaterThanOrEqual(1),
+    )
     await userEvent.click(await canvas.findByTitle('Source (4)'))
     const sourceTextarea = await canvas.findByLabelText<HTMLTextAreaElement>(
       'Marble HTML5 source',
     )
     await waitFor(() => expect(sourceTextarea.value).toContain('Initial Body'))
 
-    const bodyStart = sourceTextarea.value.indexOf('Initial Body')
-    expect(bodyStart).toBeGreaterThan(-1)
+    const firstStart = sourceTextarea.value.indexOf('Initial Body')
+    expect(firstStart).toBeGreaterThan(-1)
     sourceTextarea.focus()
-    await userEvent.type(sourceTextarea, 'Edited Before Reply', {
-      initialSelectionStart: bodyStart,
-      initialSelectionEnd: bodyStart + 'Initial Body'.length,
+    await userEvent.type(sourceTextarea, 'Saved On Deduped', {
+      initialSelectionStart: firstStart,
+      initialSelectionEnd: firstStart + 'Initial Body'.length,
     })
     await userEvent.click(canvas.getByRole('button', { name: 'Apply' }))
-    await waitFor(() => {
-      expect(sourceTextarea.value).toContain('Edited Before Reply')
-      expect(canvas.getByRole('button', { name: 'Apply' })).toBeDisabled()
-    })
-
-    resolveInFlightSaveTemplateDedupe?.()
-    resolveInFlightSaveTemplateDedupe = null
-
     await waitFor(() =>
-      expect(
-        canvas.getAllByText('bench-template-2.mrbl').length,
-      ).toBeGreaterThanOrEqual(1),
+      expect(canvas.getByRole('button', { name: 'Apply' })).toBeDisabled(),
     )
+
     await waitFor(() => {
       const savePosts = recordedSaveDedupePosts.filter(
         (post) => post.action === 'save' || post.action === 'apply_ops',
       )
-      expect(savePosts.length).toBeGreaterThanOrEqual(1)
-      expect(savePosts.some((post) => post.slug === 'bench-template-2')).toBe(
-        true,
-      )
-      expect(savePosts.some((post) => post.slug === 'bench-template')).toBe(
-        false,
-      )
-      expect(
-        savePosts.every((post) => post.meta?.slug === 'bench-template-2'),
-      ).toBe(true)
+      expect(savePosts).toHaveLength(1)
+      expect(savePosts[0]?.slug).toBe('bench-template-2')
+      expect(savePosts[0]?.meta?.slug).toBe('bench-template-2')
     })
-    expect(sourceTextarea.value).toContain('Edited Before Reply')
-    expect(sourceTextarea.value).not.toContain('Initial Body')
+
+    // Rename template to reclaim 'bench-template' and verify later saves use it.
+    await clickTemplatesNav()
+    await userEvent.click(
+      await canvas.findByRole('button', {
+        name: 'Actions for Bench Template',
+      }),
+    )
+    const reclaimMenu = await canvas.findByRole('menu', {
+      name: 'Actions for Bench Template',
+    })
+    await userEvent.click(
+      within(reclaimMenu).getByRole('menuitem', { name: 'Rename' }),
+    )
+    const reclaimDialog = await canvas.findByRole('dialog', {
+      name: 'Rename template',
+    })
+    await userEvent.click(
+      within(reclaimDialog).getByRole('button', { name: 'Save' }),
+    )
+
+    await expect(
+      await canvas.findByText('Renamed to "Bench Template"'),
+    ).toBeVisible()
+
+    await userEvent.click(
+      await canvas.findByRole('button', {
+        name: 'Actions for Bench Template',
+      }),
+    )
+    const editAgainMenu = await canvas.findByRole('menu', {
+      name: 'Actions for Bench Template',
+    })
+    await userEvent.click(
+      within(editAgainMenu).getByRole('menuitem', { name: 'Edit template' }),
+    )
+
+    await waitFor(() =>
+      expect(
+        canvas.getAllByText('bench-template.mrbl').length,
+      ).toBeGreaterThanOrEqual(1),
+    )
+    const reclaimedTextarea = await canvas.findByLabelText<HTMLTextAreaElement>(
+      'Marble HTML5 source',
+    )
+    await waitFor(() =>
+      expect(reclaimedTextarea.value).toContain('Saved On Deduped'),
+    )
+    const secondStart = reclaimedTextarea.value.indexOf('Saved On Deduped')
+    expect(secondStart).toBeGreaterThan(-1)
+    reclaimedTextarea.focus()
+    await userEvent.type(reclaimedTextarea, 'Saved On Reclaimed', {
+      initialSelectionStart: secondStart,
+      initialSelectionEnd: secondStart + 'Saved On Deduped'.length,
+    })
+    await userEvent.click(canvas.getByRole('button', { name: 'Apply' }))
+    await waitFor(() =>
+      expect(canvas.getByRole('button', { name: 'Apply' })).toBeDisabled(),
+    )
+
+    await waitFor(() => {
+      const savePosts = recordedSaveDedupePosts.filter(
+        (post) => post.action === 'save' || post.action === 'apply_ops',
+      )
+      expect(savePosts).toHaveLength(2)
+      expect(savePosts[1]?.slug).toBe('bench-template')
+      expect(savePosts[1]?.meta?.slug).toBe('bench-template')
+    })
   },
 }
 
@@ -876,8 +1068,8 @@ function SaveAsTemplateFolderRenameHarness(
       parentId: null,
       color: 'accent',
       isTemplatesFolder: true,
-      createdAt: '2026-11-25T23:00:00.000Z',
-      updatedAt: '2026-11-25T23:00:00.000Z',
+      createdAt: '2026-11-26T00:00:00.000Z',
+      updatedAt: '2026-11-26T00:00:00.000Z',
     }
     window.fetch = async (input, init) => {
       const url =
@@ -914,7 +1106,7 @@ function SaveAsTemplateFolderRenameHarness(
             await new Promise<void>((resolve) => {
               resolveInFlightSaveFolderRace = resolve
             })
-            const now = '2026-11-25T23:53:00.000Z'
+            const now = '2026-11-26T00:05:00.000Z'
             const title =
               typeof payload.title === 'string'
                 ? payload.title
@@ -963,7 +1155,7 @@ function SaveAsTemplateFolderRenameHarness(
                       ? payload.newName
                       : 'Archived Templates',
                   isTemplatesFolder: false,
-                  updatedAt: '2026-11-25T23:54:00.000Z',
+                  updatedAt: '2026-11-26T00:06:00.000Z',
                 },
               }),
               {
@@ -995,10 +1187,10 @@ function SaveAsTemplateFolderRenameHarness(
 /**
  * Verifies that renaming the Templates folder while save_as_template is in flight preserves the renamed folder and routes later edits into it.
  *
- * @summary Preserve folder rename when in-flight save_as_template replies
+ * @summary Folder rename during pending save_as_template is preserved
  */
 export const SaveAsTemplateReplyPreservesFolderRename: Story = {
-  name: 'Template · Preserve Folder Rename During In-Flight Save',
+  name: 'Template · Folder Rename During Pending Save',
   args: {
     initialTheme: 'dark',
     initialNav: 'drive',
@@ -1037,7 +1229,7 @@ export const SaveAsTemplateReplyPreservesFolderRename: Story = {
 
     await waitFor(() => expect(resolveInFlightSaveFolderRace).not.toBeNull())
 
-    // Rename Templates -> Archived Templates while save_as_template is still pending
+    // Rename Templates -> Archived Templates while save_as_template is still pending.
     await userEvent.click(
       canvas.getByRole('button', { name: 'Actions for Templates' }),
     )
@@ -1058,7 +1250,6 @@ export const SaveAsTemplateReplyPreservesFolderRename: Story = {
       within(renameDialog).getByRole('button', { name: 'Save name' }),
     )
 
-    // Resolve the earlier save_as_template reply; renamed folder and non-template state must survive
     resolveInFlightSaveFolderRace?.()
     resolveInFlightSaveFolderRace = null
 
@@ -1087,7 +1278,7 @@ export const SaveAsTemplateReplyPreservesFolderRename: Story = {
     await userEvent.click(templatesNavLink!)
     await expect(await canvas.findByText('No templates yet')).toBeVisible()
 
-    // Open Archived Templates -> open Race Template -> edit -> ensure save goes to Archived Templates
+    // Open Archived Templates -> open Race Template -> edit -> ensure save goes to Archived Templates.
     await userEvent.click(
       within(sidebarNav).getByRole('link', { name: 'Archived Templates' }),
     )
@@ -1123,17 +1314,9 @@ export const SaveAsTemplateReplyPreservesFolderRename: Story = {
       const savePosts = recordedFolderRacePosts.filter(
         (post) => post.action === 'save' || post.action === 'apply_ops',
       )
-      expect(savePosts.length).toBeGreaterThanOrEqual(1)
-      expect(
-        savePosts.some(
-          (post) =>
-            post.slug === 'race-template' &&
-            post.folderPath === 'Archived Templates',
-        ),
-      ).toBe(true)
-      expect(
-        savePosts.some((post) => post.folderPath === TEMPLATES_FOLDER_NAME),
-      ).toBe(false)
+      expect(savePosts).toHaveLength(1)
+      expect(savePosts[0]?.slug).toBe('race-template')
+      expect(savePosts[0]?.folderPath).toBe('Archived Templates')
     })
   },
 }
