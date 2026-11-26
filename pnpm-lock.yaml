@@ -4,6 +4,9 @@ settings:
   autoInstallPeers: true
   excludeLinksFromLockfile: false
 
+overrides:
+  react-intl: 12.2.1
+
 importers:
 
   .:
@@ -5195,8 +5198,8 @@ packages:
     peerDependencies:
       react: ^19.3.1
 
-  react-intl@12.2.2:
-    resolution: {integrity: sha512-98Cf56W6JvChOHLdqgPi5PenkptaBh364rDbt/bUAHSAdFTVTrwvYYyVUvAxI0IoHTFwtQgHhMuMoYYY7LRdRg==}
+  react-intl@12.2.1:
+    resolution: {integrity: sha512-RAvv36BaFDw/4HAUDmTBStvdfrKxmg0UOMv3ojeB4qPBs7tXbv8qeSThKrpe3MeSaRijJtUeZK9SP/WBcFoKDg==}
     peerDependencies:
       '@types/react': '>=18.0.0'
       react: '>=18.0.0'
@@ -11340,7 +11343,7 @@ snapshots:
       react: 19.3.1
       scheduler: 0.28.0
 
-  react-intl@12.2.2(@types/react@19.3.0)(react@19.3.1):
+  react-intl@12.2.1(@types/react@19.3.0)(react@19.3.1):
     dependencies:
       '@formatjs/icu-messageformat-parser': 3.5.23
       '@formatjs/intl': 6.2.1
@@ -11790,7 +11793,7 @@ snapshots:
       radix-ui: 1.8.1(@types/react-dom@19.3.0(@types/react@19.3.0))(@types/react@19.3.0)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
       react: 19.3.1
       react-dom: 19.3.1(react@19.3.1)
-      react-intl: 12.2.2(@types/react@19.3.0)(react@19.3.1)
+      react-intl: 12.2.1(@types/react@19.3.0)(react@19.3.1)
     transitivePeerDependencies:
       - '@floating-ui/dom'
       - '@types/react'

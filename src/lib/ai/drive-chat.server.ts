@@ -13,6 +13,7 @@ import {
   sanitizeTextWithDonts,
 } from '#/lib/marble/ai-collaborator'
 import type { DriveFolderColor, MarbleAppCategory, MarbleOp } from '#/lib/types'
+import { categoryForAiWhiteboard } from '#/lib/marble/whiteboard-document'
 import type {
   DriveChatAction,
   DriveChatApiRequest,
@@ -505,9 +506,12 @@ export function parseDriveChatResponse(
         const rawCategory = (
           typeof item.category === 'string' ? item.category : 'document'
         ) as MarbleAppCategory
-        const category: MarbleAppCategory = VALID_CATEGORIES.has(rawCategory)
+        const allowedCategory: MarbleAppCategory = VALID_CATEGORIES.has(
+          rawCategory,
+        )
           ? rawCategory
           : 'document'
+        const category = categoryForAiWhiteboard(allowedCategory, source)
         const slug = slugify(
           typeof item.slug === 'string' && item.slug.trim()
             ? item.slug.trim()

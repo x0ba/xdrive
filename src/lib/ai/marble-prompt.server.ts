@@ -25,6 +25,7 @@ import {
   sanitizeHtmlWithEvergreenRules,
   sanitizeTextWithDonts,
 } from '#/lib/marble/ai-collaborator'
+import { categoryForAiWhiteboard } from '#/lib/marble/whiteboard-document'
 
 const checkShapes = marbleGuard.checkShapes as (ops: readonly unknown[]) => void
 const guardOps = marbleGuard.guardOps as (
@@ -209,6 +210,12 @@ export function buildMarbleAcpPrompt(input: ServerCollaborateInput): string {
       '    "source": "<!DOCTYPE html>\\n<html lang=\\"en\\">...complete interactive .mrbl HTML5 document with data-marble-id on key elements, data-marble-editable on editable prose, and clean <style> using xDrive tokens...</html>"',
       '  }',
       '}',
+      '',
+      'WHITEBOARD CATEGORY:',
+      '- Use category "whiteboard" only when source contains one <script type="application/json" data-marble-whiteboard-state="1">...</script>.',
+      '- The script body must be a tldraw editor snapshot: {"document":{...},"session":{...}}. document must be an object.',
+      '- That snapshot is the only drawing. Do not put shapes in the HTML. JSON null is a blank board and is not accepted here.',
+      '- If you cannot emit that snapshot, use category "document" or "custom". A whiteboard label without the snapshot is stored as a normal app instead of an empty canvas.',
     )
   } else {
     sections.push(
@@ -396,16 +403,17 @@ function buildDocumentFromAi(
   const provider = providerMeta(providerId)
   const title = (docPayload.title || 'Untitled Research App').trim()
   const slug = slugify(docPayload.slug || title, provider.defaultSlug)
-  const rawCategory = (docPayload.category || 'custom') as MarbleAppCategory
-  const category: MarbleAppCategory = VALID_CATEGORIES.has(rawCategory)
-    ? rawCategory
-    : 'custom'
   const rawSource = (docPayload.source || '').trim()
   const source = sanitizeHtmlWithEvergreenRules(
     rawSource.startsWith('<!') || rawSource.startsWith('<html')
       ? rawSource
       : `<!DOCTYPE html>\n<html lang="en">\n<head><meta charset="utf-8" /><title>${title}</title></head>\n<body data-marble-id="app-root">${rawSource}</body>\n</html>`,
   )
+  const rawCategory = (docPayload.category || 'custom') as MarbleAppCategory
+  const allowedCategory: MarbleAppCategory = VALID_CATEGORIES.has(rawCategory)
+    ? rawCategory
+    : 'custom'
+  const category = categoryForAiWhiteboard(allowedCategory, source)
   const now = new Date().toISOString()
   const nodeCount = listKnownIds(source).length
   const byteSize = new TextEncoder().encode(source).byteLength

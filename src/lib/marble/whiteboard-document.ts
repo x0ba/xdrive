@@ -1,3 +1,5 @@
+import type { MarbleAppCategory } from '#/lib/types'
+
 /**
  * Whiteboard bytes inside a .mrbl file.
  *
@@ -45,15 +47,65 @@ export function readWhiteboardSnapshot(source: string): unknown | null {
   }
 }
 
+/**
+ * A replacement string would treat `$&`, `$'`, and `$$` inside drawing JSON
+ * as special patterns and corrupt the file. A function return is literal.
+ */
+function literalReplace(replacement: string): () => string {
+  return () => replacement
+}
+
 /** Replace the snapshot script and leave the rest of the file untouched. */
 export function withWhiteboardSnapshot(
   source: string,
   snapshot: unknown,
 ): string {
   const script = whiteboardStateScript(snapshot)
-  if (SCRIPT_RE.test(source)) return source.replace(SCRIPT_RE, script)
+  if (SCRIPT_RE.test(source)) {
+    return source.replace(SCRIPT_RE, literalReplace(script))
+  }
   if (/<\/body>/i.test(source)) {
-    return source.replace(/<\/body>/i, `${script}\n</body>`)
+    return source.replace(/<\/body>/i, literalReplace(`${script}\n</body>`))
   }
   return `${source}\n${script}\n`
+}
+
+export type WhiteboardSnapshotSync = 'keep' | 'blank' | 'load'
+
+/**
+ * How an open canvas should follow the file.
+ * JSON `null`, a missing script, and unreadable JSON are a blank board.
+ * Ignoring them leaves old shapes on screen, and the next edit writes those
+ * shapes back over the blank file.
+ */
+export function whiteboardSnapshotSync(
+  fileSnapshot: unknown,
+  canvasSnapshot: unknown,
+): WhiteboardSnapshotSync {
+  if (!isWhiteboardEditorSnapshot(fileSnapshot)) {
+    return isWhiteboardEditorSnapshot(canvasSnapshot) ? 'blank' : 'keep'
+  }
+  const fileDocument = (fileSnapshot as { document: unknown }).document
+  const canvasDocument = isWhiteboardEditorSnapshot(canvasSnapshot)
+    ? (canvasSnapshot as { document: unknown }).document
+    : null
+  if (JSON.stringify(fileDocument) === JSON.stringify(canvasDocument)) {
+    return 'keep'
+  }
+  return 'load'
+}
+
+/**
+ * An AI file is a whiteboard only when it carries a tldraw editor snapshot.
+ * HTML with no snapshot would open as an empty canvas, so it stays a normal app.
+ */
+export function categoryForAiWhiteboard(
+  category: MarbleAppCategory,
+  source: string,
+): MarbleAppCategory {
+  if (category !== 'whiteboard') return category
+  if (isWhiteboardEditorSnapshot(readWhiteboardSnapshot(source))) {
+    return 'whiteboard'
+  }
+  return 'custom'
 }

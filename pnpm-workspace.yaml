@@ -1,8 +1,10 @@
+overrides:
+  react-intl: 12.2.1
 allowBuilds:
   esbuild: true
   lightningcss: true
   '@sentry/cli': true
-  "@google/genai": true
+  '@google/genai': true
   protobufjs: true
 packages:
   - .

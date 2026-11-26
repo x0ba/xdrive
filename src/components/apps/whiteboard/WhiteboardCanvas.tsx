@@ -5,6 +5,7 @@ import 'tldraw/tldraw.css'
 import {
   isWhiteboardEditorSnapshot,
   readWhiteboardSnapshot,
+  whiteboardSnapshotSync,
   withWhiteboardSnapshot,
 } from '#/lib/marble/whiteboard-document'
 
@@ -149,14 +150,8 @@ export function WhiteboardCanvas({
   useEffect(() => {
     if (!editorRef.current || dirtyRef.current) return
     const incoming = readWhiteboardSnapshot(marbleSource)
-    if (!isWhiteboardEditorSnapshot(incoming)) return
-    const incomingDocument = JSON.stringify(
-      (incoming as TLEditorSnapshot).document,
-    )
-    const currentDocument = JSON.stringify(
-      latestSnapshotRef.current?.document ?? null,
-    )
-    if (incomingDocument === currentDocument) return
+    const action = whiteboardSnapshotSync(incoming, latestSnapshotRef.current)
+    if (action === 'keep') return
     revertRef.current(marbleSource)
   }, [marbleSource])
 
