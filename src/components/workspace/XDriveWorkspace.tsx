@@ -131,7 +131,9 @@ import {
 } from '#/lib/marble'
 import {
   applyServerRenameDocumentReply,
+  applyServerRestoreDocumentReply,
   applyServerSaveAsTemplateReply,
+  applyServerTrashDocumentReply,
   deriveDocIsTemplate,
   ensureClientTemplatesFolder,
   getTemplateFolderIds,
@@ -298,7 +300,7 @@ type FolderModalState =
   | { mode: 'rename'; folder: DriveFolder }
 type PermanentDeleteTarget =
   { mode: 'single'; doc: MarbleDocumentFile } | { mode: 'empty' }
-type TrashUndoBanner = { docId: string; title: string }
+type TrashUndoBanner = { docId: string; title: string; pending?: boolean }
 type PaletteItem = { id: string; label: string; hint: string; run: () => void }
 
 const YOU = { name: 'You', initials: 'YO' }
@@ -1085,6 +1087,12 @@ export function XDriveWorkspace({
   const [pendingMoveDocIds, setPendingMoveDocIds] = useState<Set<string>>(
     () => new Set(),
   )
+  const pendingTrashDocIdsRef = useRef(new Set<string>())
+  const pendingRestoreDocIdsRef = useRef(new Set<string>())
+  const [pendingRestoreDocIds, setPendingRestoreDocIds] = useState<Set<string>>(
+    () => new Set(),
+  )
+  const pendingPermanentDeleteDocIdsRef = useRef(new Set<string>())
   const pendingFolderIdsRef = useRef(new Set<string>())
   const [pendingFolderIds, setPendingFolderIds] = useState<Set<string>>(
     () => new Set(),
@@ -1101,6 +1109,22 @@ export function XDriveWorkspace({
     if (pending) pendingMoveDocIdsRef.current.add(docId)
     else pendingMoveDocIdsRef.current.delete(docId)
     setPendingMoveDocIds(new Set(pendingMoveDocIdsRef.current))
+  }
+
+  function setDocTrashPending(docId: string, pending: boolean): void {
+    if (pending) pendingTrashDocIdsRef.current.add(docId)
+    else pendingTrashDocIdsRef.current.delete(docId)
+  }
+
+  function setDocRestorePending(docId: string, pending: boolean): void {
+    if (pending) pendingRestoreDocIdsRef.current.add(docId)
+    else pendingRestoreDocIdsRef.current.delete(docId)
+    setPendingRestoreDocIds(new Set(pendingRestoreDocIdsRef.current))
+  }
+
+  function setDocPermanentDeletePending(docId: string, pending: boolean): void {
+    if (pending) pendingPermanentDeleteDocIdsRef.current.add(docId)
+    else pendingPermanentDeleteDocIdsRef.current.delete(docId)
   }
 
   function setFoldersPending(ids: Iterable<string>, pending: boolean): void {
@@ -1390,6 +1414,9 @@ export function XDriveWorkspace({
         heldDocEdits: heldDocEditsRef.current,
         pendingMoveDocIds: pendingMoveDocIdsRef.current,
         pendingSaveDocIds,
+        pendingTrashDocIds: pendingTrashDocIdsRef.current,
+        pendingRestoreDocIds: pendingRestoreDocIdsRef.current,
+        pendingPermanentDeleteDocIds: pendingPermanentDeleteDocIdsRef.current,
         ignorePendingRenameDocIds: options?.ignorePendingRenameDocIds,
       }).filter((doc) => !suppressedLocalDocIdsRef.current.has(doc.id))
       foldersRef.current = data.folders
@@ -2502,6 +2529,9 @@ export function XDriveWorkspace({
     return (
       !pendingRenameDocIdsRef.current.has(id) &&
       !pendingMoveDocIdsRef.current.has(id) &&
+      !pendingTrashDocIdsRef.current.has(id) &&
+      !pendingRestoreDocIdsRef.current.has(id) &&
+      !pendingPermanentDeleteDocIdsRef.current.has(id) &&
       (pendingSaveCountsRef.current.get(id) ?? 0) === 0 &&
       (heldDocEditsRef.current.get(id)?.length ?? 0) === 0
     )
@@ -4207,8 +4237,29 @@ export function XDriveWorkspace({
   function syncTrashApi(
     bodyOrFactory:
       Record<string, unknown> | (() => Record<string, unknown> | null),
+    options?: {
+      onSuccess?: (data: Record<string, unknown>) => void | Promise<void>
+      onError?: (message: string) => void | Promise<void>
+    },
   ) {
-    void syncDriveApi(bodyOrFactory, { reloadOnError: true })
+    return syncDriveApi(bodyOrFactory, {
+      reloadOnError: true,
+      onSuccess: options?.onSuccess,
+      onError: options?.onError,
+    })
+  }
+
+  function dismissTrashChrome(docId: string) {
+    if (openTabIds.includes(docId)) closeTab(docId)
+    if (livePreview?.docId === docId) setLivePreview(null)
+    if (shareId === docId) setShareId(null)
+    if (moveDocId === docId) setMoveDocId(null)
+  }
+
+  function confirmedTrashSyncState(
+    docId: string,
+  ): MarbleDocumentFile['syncState'] {
+    return docWriteSettled(docId) ? 'saved' : 'saving'
   }
 
   function cleanupRemovedDocIds(removedIds: Set<string>) {
@@ -4268,57 +4319,173 @@ export function XDriveWorkspace({
     }
     const target = allDocsRef.current.find((doc) => doc.id === docId)
     if (!target || target.trashedAt) return
-    const trashedAt = new Date().toISOString()
-    patchFile(docId, (doc) => ({ ...doc, trashedAt }))
-    if (openTabIds.includes(docId)) {
-      closeTab(docId)
+    if (pendingRestoreDocIdsRef.current.has(docId)) {
+      setAgentStatus('Wait for restore to finish before trashing this file.')
+      return
     }
-    if (livePreview?.docId === docId) setLivePreview(null)
-    if (shareId === docId) setShareId(null)
-    if (moveDocId === docId) setMoveDocId(null)
-    setTrashUndo({ docId: target.id, title: target.title })
-    syncTrashApi(() => {
-      const live = allDocsRef.current.find((doc) => doc.id === docId) ?? target
-      return {
-        action: 'trash',
-        slug: live.slug,
-        folderPath: folderDiskPath(foldersRef.current, live.folderId),
-        trashedAt,
-        retentionDays: effectiveTrashRetentionDays,
-        meta: serializeDocMeta(live),
-        checkpoints: live.checkpoints,
-        intentHistory: live.intentHistory,
-      }
-    })
+    const trashedAt = new Date().toISOString()
+    if (!syncWithServer) {
+      patchFile(docId, (doc) => ({ ...doc, trashedAt }))
+      dismissTrashChrome(docId)
+      setTrashUndo({ docId: target.id, title: target.title })
+      void syncTrashApi(() => {
+        const live =
+          allDocsRef.current.find((doc) => doc.id === docId) ?? target
+        return {
+          action: 'trash',
+          slug: live.slug,
+          folderPath: folderDiskPath(foldersRef.current, live.folderId),
+          trashedAt,
+          retentionDays: effectiveTrashRetentionDays,
+          meta: serializeDocMeta(live),
+          checkpoints: live.checkpoints,
+          intentHistory: live.intentHistory,
+        }
+      })
+      return
+    }
+    if (pendingTrashDocIdsRef.current.has(docId)) {
+      setAgentStatus('Trash is already in progress.')
+      return
+    }
+
+    setDocTrashPending(docId, true)
+    patchFile(docId, (doc) => ({ ...doc, syncState: 'saving' }))
+    setTrashUndo({ docId: target.id, title: target.title, pending: true })
+    setAgentStatus(`Moving "${target.title}" to Trash…`)
+    void syncTrashApi(
+      () => {
+        const live =
+          allDocsRef.current.find((doc) => doc.id === docId) ?? target
+        return {
+          action: 'trash',
+          slug: live.slug,
+          folderPath: folderDiskPath(foldersRef.current, live.folderId),
+          trashedAt,
+          retentionDays: effectiveTrashRetentionDays,
+          meta: serializeDocMeta({ ...live, trashedAt }),
+          checkpoints: live.checkpoints,
+          intentHistory: live.intentHistory,
+        }
+      },
+      {
+        onSuccess: (res) => {
+          setDocTrashPending(docId, false)
+          const confirmedAt =
+            typeof res.trashedAt === 'string' ? res.trashedAt : trashedAt
+          const live =
+            allDocsRef.current.find((doc) => doc.id === docId) ?? target
+          const confirmed = applyServerTrashDocumentReply({
+            doc: live,
+            trashedAt: confirmedAt,
+            syncState: confirmedTrashSyncState(docId),
+          })
+          upsertDoc(confirmed)
+          if (pendingRestoreDocIdsRef.current.has(docId)) return
+          dismissTrashChrome(docId)
+          setTrashUndo({ docId: confirmed.id, title: confirmed.title })
+          setAgentStatus(`Moved "${confirmed.title}" to Trash`)
+        },
+        onError: () => {
+          setDocTrashPending(docId, false)
+          const live = allDocsRef.current.find((doc) => doc.id === docId)
+          if (live?.trashedAt && !pendingRestoreDocIdsRef.current.has(docId)) {
+            dismissTrashChrome(docId)
+            setTrashUndo({ docId: live.id, title: live.title })
+            setAgentStatus(`Moved "${live.title}" to Trash`)
+          } else if (!pendingRestoreDocIdsRef.current.has(docId)) {
+            setTrashUndo((prev) => (prev?.docId === docId ? null : prev))
+          }
+          markDocSavedIfSettled(docId)
+        },
+      },
+    )
   }
 
   function restoreDocumentFromTrash(docId: string) {
     const target = allDocsRef.current.find((doc) => doc.id === docId)
-    if (!target || !target.trashedAt) return
+    if (!target) return
+    const trashPending = pendingTrashDocIdsRef.current.has(docId)
+    if (!target.trashedAt && !trashPending) return
+    if (pendingRestoreDocIdsRef.current.has(docId)) {
+      setAgentStatus('Restore already in progress.')
+      return
+    }
+    if (pendingPermanentDeleteDocIdsRef.current.has(docId)) {
+      setAgentStatus('Wait for delete to finish before restoring this file.')
+      return
+    }
     const parentFolder = target.folderId
       ? foldersRef.current.find((folder) => folder.id === target.folderId)
       : null
     const restoredFolderId = parentFolder ? parentFolder.id : null
     const restoredFolderName = parentFolder ? parentFolder.name : 'My Drive'
-    const nextIsTemplate = deriveDocIsTemplate(
-      { ...target, folderId: restoredFolderId, folder: restoredFolderName },
+    if (!syncWithServer) {
+      const nextIsTemplate = deriveDocIsTemplate(
+        {
+          ...target,
+          folderId: restoredFolderId,
+          folder: restoredFolderName,
+        },
+        foldersRef.current,
+        getTemplateFolderIds(foldersRef.current),
+      )
+      patchFile(docId, (doc) => ({
+        ...doc,
+        trashedAt: null,
+        folderId: restoredFolderId,
+        folder: restoredFolderName,
+        isTemplate: nextIsTemplate,
+      }))
+      setTrashUndo((prev) => (prev?.docId === docId ? null : prev))
+      setAgentStatus(`Restored "${target.title}" to ${restoredFolderName}`)
+      void syncTrashApi({
+        action: 'restore',
+        slug: target.slug,
+        targetFolderPath: folderDiskPath(foldersRef.current, restoredFolderId),
+      })
+      return
+    }
+
+    const targetFolderPath = folderDiskPath(
       foldersRef.current,
-      getTemplateFolderIds(foldersRef.current),
+      restoredFolderId,
     )
-    patchFile(docId, (doc) => ({
-      ...doc,
-      trashedAt: null,
-      folderId: restoredFolderId,
-      folder: restoredFolderName,
-      isTemplate: nextIsTemplate,
-    }))
+    setDocRestorePending(docId, true)
+    patchFile(docId, (doc) => ({ ...doc, syncState: 'saving' }))
     setTrashUndo((prev) => (prev?.docId === docId ? null : prev))
-    setAgentStatus(`Restored "${target.title}" to ${restoredFolderName}`)
-    syncTrashApi({
-      action: 'restore',
-      slug: target.slug,
-      targetFolderPath: folderDiskPath(foldersRef.current, restoredFolderId),
-    })
+    setAgentStatus(`Restoring "${target.title}"…`)
+    void syncTrashApi(
+      {
+        action: 'restore',
+        slug: target.slug,
+        targetFolderPath,
+      },
+      {
+        onSuccess: (res) => {
+          setDocRestorePending(docId, false)
+          const live =
+            allDocsRef.current.find((doc) => doc.id === docId) ?? target
+          const folderPath =
+            typeof res.folderPath === 'string'
+              ? res.folderPath
+              : targetFolderPath
+          const restored = applyServerRestoreDocumentReply({
+            doc: live,
+            folders: foldersRef.current,
+            folderPath,
+            syncState: confirmedTrashSyncState(docId),
+          })
+          upsertDoc(restored)
+          setTrashUndo((prev) => (prev?.docId === docId ? null : prev))
+          setAgentStatus(`Restored "${restored.title}" to ${restored.folder}`)
+        },
+        onError: () => {
+          setDocRestorePending(docId, false)
+          markDocSavedIfSettled(docId)
+        },
+      },
+    )
   }
 
   function permanentlyDeleteDocument(docId: string) {
@@ -4332,30 +4499,77 @@ export function XDriveWorkspace({
       setAgentStatus('Wait for move to finish before deleting this file.')
       return
     }
+    if (pendingRestoreDocIdsRef.current.has(docId)) {
+      setPermanentDeleteTarget(null)
+      setAgentStatus('Wait for restore to finish before deleting this file.')
+      return
+    }
     const target = allDocsRef.current.find((doc) => doc.id === docId)
     if (!target) {
       setPermanentDeleteTarget(null)
       return
     }
-    allDocsRef.current = allDocsRef.current.filter((doc) => doc.id !== docId)
-    setDocs((prev) => prev.filter((doc) => doc.id !== docId))
-    cleanupRemovedDocIds(new Set([docId]))
+    if (!syncWithServer) {
+      allDocsRef.current = allDocsRef.current.filter((doc) => doc.id !== docId)
+      setDocs((prev) => prev.filter((doc) => doc.id !== docId))
+      cleanupRemovedDocIds(new Set([docId]))
+      setPermanentDeleteTarget(null)
+      setAgentStatus(`Permanently deleted "${target.title}"`)
+      void syncTrashApi({
+        action: 'delete',
+        slug: target.slug,
+        folderPath: folderDiskPath(foldersRef.current, target.folderId),
+      })
+      return
+    }
+    if (pendingPermanentDeleteDocIdsRef.current.has(docId)) {
+      setPermanentDeleteTarget(null)
+      setAgentStatus('Delete already in progress.')
+      return
+    }
+
+    setDocPermanentDeletePending(docId, true)
+    patchFile(docId, (doc) => ({ ...doc, syncState: 'saving' }))
     setPermanentDeleteTarget(null)
-    setAgentStatus(`Permanently deleted "${target.title}"`)
-    syncTrashApi({
-      action: 'delete',
-      slug: target.slug,
-      folderPath: folderDiskPath(foldersRef.current, target.folderId),
-    })
+    setAgentStatus(`Deleting "${target.title}"…`)
+    void syncTrashApi(
+      {
+        action: 'delete',
+        slug: target.slug,
+        folderPath: folderDiskPath(foldersRef.current, target.folderId),
+      },
+      {
+        onSuccess: () => {
+          setDocPermanentDeletePending(docId, false)
+          if (!allDocsRef.current.some((doc) => doc.id === docId)) return
+          allDocsRef.current = allDocsRef.current.filter(
+            (doc) => doc.id !== docId,
+          )
+          setDocs((prev) => prev.filter((doc) => doc.id !== docId))
+          cleanupRemovedDocIds(new Set([docId]))
+          setAgentStatus(`Permanently deleted "${target.title}"`)
+        },
+        onError: () => {
+          setDocPermanentDeletePending(docId, false)
+          markDocSavedIfSettled(docId)
+        },
+      },
+    )
   }
 
   function emptyTrash() {
-    if (trashedDocs.length === 0) {
+    const removable = trashedDocs.filter(
+      (doc) => !pendingRestoreDocIdsRef.current.has(doc.id),
+    )
+    if (removable.length === 0) {
       setPermanentDeleteTarget(null)
+      if (trashedDocs.length > 0) {
+        setAgentStatus('Wait for restore to finish before emptying Trash.')
+      }
       return
     }
-    const removedIds = new Set(trashedDocs.map((doc) => doc.id))
-    const count = trashedDocs.length
+    const removedIds = new Set(removable.map((doc) => doc.id))
+    const count = removable.length
     allDocsRef.current = allDocsRef.current.filter(
       (doc) => !removedIds.has(doc.id),
     )
@@ -4365,7 +4579,7 @@ export function XDriveWorkspace({
     setAgentStatus(
       `Permanently deleted ${count} ${count === 1 ? 'file' : 'files'} from Trash`,
     )
-    syncTrashApi({ action: 'empty_trash' })
+    void syncTrashApi({ action: 'empty_trash' })
   }
 
   useEffect(() => {
@@ -4382,7 +4596,7 @@ export function XDriveWorkspace({
         return result.docs
       })
       if (purgedDocs.length > 0) {
-        syncTrashApi({
+        void syncTrashApi({
           action: 'purge_expired',
           retentionDays: effectiveTrashRetentionDays,
         })
@@ -4609,7 +4823,7 @@ export function XDriveWorkspace({
           )
           setDocs((prev) => prev.filter((d) => d.id !== created.id))
           cleanupRemovedDocIds(new Set([created.id]))
-          syncTrashApi({
+          void syncTrashApi({
             action: 'delete',
             slug: created.slug,
             folderPath: folderDiskPath(foldersRef.current, created.folderId),
@@ -6888,9 +7102,16 @@ export function XDriveWorkspace({
                     }
                     formatTrashedAt={relativeTime}
                     onRestoreDoc={(doc) => restoreDocumentFromTrash(doc.id)}
-                    onDeleteForeverDoc={(doc) =>
+                    deleteForeverBlockedDocIds={pendingRestoreDocIds}
+                    onDeleteForeverDoc={(doc) => {
+                      if (pendingRestoreDocIdsRef.current.has(doc.id)) {
+                        setAgentStatus(
+                          'Wait for restore to finish before deleting this file.',
+                        )
+                        return
+                      }
                       setPermanentDeleteTarget({ mode: 'single', doc })
-                    }
+                    }}
                     onEmptyTrash={() =>
                       setPermanentDeleteTarget({ mode: 'empty' })
                     }
@@ -7350,8 +7571,9 @@ export function XDriveWorkspace({
           className="fixed bottom-4 left-1/2 z-40 flex -translate-x-1/2 items-center gap-3 rounded-lg border border-[var(--xd-border-strong)] bg-[var(--xd-elevated)] px-3.5 py-2 text-[12px] text-[var(--xd-ink)] shadow-xl"
         >
           <span className="max-w-[260px] truncate">
-            Moved <strong className="font-medium">{trashUndo.title}</strong> to
-            Trash
+            {trashUndo.pending ? 'Moving' : 'Moved'}{' '}
+            <strong className="font-medium">{trashUndo.title}</strong>{' '}
+            {trashUndo.pending ? 'to Trash…' : 'to Trash'}
           </span>
           <button
             type="button"

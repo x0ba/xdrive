@@ -12,7 +12,9 @@ import {
 import type { DriveFolder, MarbleDocumentFile } from '#/lib/types'
 import {
   applyServerRenameDocumentReply,
+  applyServerRestoreDocumentReply,
   applyServerSaveAsTemplateReply,
+  applyServerTrashDocumentReply,
   deriveDocIsTemplate,
   ensureClientTemplatesFolder,
   mergeReloadedWorkspaceDocs,
@@ -632,5 +634,80 @@ describe('template-workspace-helpers', () => {
     expect(preserved.source).toBe(localSource)
     expect(syncState).toBe('saving')
     expect(merged[1]?.title).toBe('On Server')
+  })
+
+  it('keeps server trash membership while a later restore is pending, then applies the confirmed restore', () => {
+    const trashedAt = '2026-11-26T00:04:00.000Z'
+    const archive = makeFolder({ id: 'folder-archive', name: 'Archive' })
+    const localRestored = makeDoc({
+      id: 'doc-undo',
+      slug: 'undo-doc',
+      title: 'Undo Doc',
+      folder: 'Archive',
+      folderId: 'folder-archive',
+      trashedAt: null,
+      syncState: 'saving',
+    })
+    const serverTrashed = makeDoc({
+      id: 'doc-undo',
+      slug: 'undo-doc',
+      title: 'Undo Doc',
+      folder: 'Archive',
+      folderId: 'folder-archive',
+      trashedAt,
+      syncState: 'saved',
+    })
+
+    const merged = mergeReloadedWorkspaceDocs({
+      reloadedDocs: [serverTrashed],
+      currentDocs: [localRestored],
+      pendingRenameDocIds: new Set(),
+      heldDocEdits: new Map(),
+      pendingRestoreDocIds: new Set(['doc-undo']),
+    })
+
+    expect(merged).toHaveLength(1)
+    const reloaded = merged[0]
+    const reloadedSync: MarbleDocumentFile['syncState'] = reloaded.syncState
+    expect(reloaded.trashedAt).toBe(trashedAt)
+    expect(reloadedSync).toBe('saving')
+
+    const restored = applyServerRestoreDocumentReply({
+      doc: reloaded,
+      folders: [archive],
+      folderPath: 'Archive',
+      syncState: 'saved',
+    })
+    const replaceExisting = merged.map((doc) =>
+      doc.id === restored.id ? restored : doc,
+    )
+    const insertMissing = [restored]
+    const confirmed = replaceExisting[0]
+    const confirmedSync: MarbleDocumentFile['syncState'] = confirmed.syncState
+    expect(confirmed.trashedAt).toBeNull()
+    expect(confirmed.folderId).toBe('folder-archive')
+    expect(confirmed.folder).toBe('Archive')
+    expect(confirmedSync).toBe('saved')
+    expect(replaceExisting).toHaveLength(1)
+    expect(insertMissing[0]?.trashedAt).toBeNull()
+    expect(insertMissing).toHaveLength(1)
+  })
+
+  it('marks a server-confirmed trash without treating an unconfirmed restore as saved', () => {
+    const doc = makeDoc({
+      id: 'doc-trash',
+      slug: 'trash-doc',
+      title: 'Trash Doc',
+      trashedAt: null,
+      syncState: 'saving',
+    })
+    const trashed = applyServerTrashDocumentReply({
+      doc,
+      trashedAt: '2026-11-26T00:04:00.000Z',
+      syncState: 'saving',
+    })
+    const syncState: MarbleDocumentFile['syncState'] = trashed.syncState
+    expect(trashed.trashedAt).toBe('2026-11-26T00:04:00.000Z')
+    expect(syncState).toBe('saving')
   })
 })

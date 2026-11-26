@@ -2137,6 +2137,7 @@ export interface DriveTrashListProps {
   formatTrashedAt?: (iso: string) => string
   onRestoreDoc?: (doc: MarbleDocumentFile) => void
   onDeleteForeverDoc?: (doc: MarbleDocumentFile) => void
+  deleteForeverBlockedDocIds?: ReadonlySet<string>
   onEmptyTrash?: () => void
 }
 
@@ -2148,6 +2149,7 @@ export function DriveTrashList({
   formatTrashedAt,
   onRestoreDoc,
   onDeleteForeverDoc,
+  deleteForeverBlockedDocIds,
   onEmptyTrash,
 }: DriveTrashListProps) {
   const effectiveTotal = totalCount ?? docs.length
@@ -2242,6 +2244,8 @@ export function DriveTrashList({
                       : `${daysLeft} days left`
                 const urgent = daysLeft <= 5
 
+                const deleteForeverBlocked =
+                  deleteForeverBlockedDocIds?.has(doc.id) ?? false
                 const menuItems: ActionMenuItem[] = [
                   ...(onRestoreDoc
                     ? [
@@ -2253,7 +2257,7 @@ export function DriveTrashList({
                         },
                       ]
                     : []),
-                  ...(onDeleteForeverDoc
+                  ...(onDeleteForeverDoc && !deleteForeverBlocked
                     ? [
                         {
                           id: 'delete-forever',
@@ -2345,9 +2349,14 @@ export function DriveTrashList({
                           <button
                             type="button"
                             onClick={() => onDeleteForeverDoc(doc)}
+                            disabled={deleteForeverBlocked}
                             aria-label={`Delete ${doc.title} forever`}
-                            title="Delete forever"
-                            className="inline-flex h-7 w-7 items-center justify-center rounded border border-[var(--xd-border)] text-[var(--xd-ink-muted)] transition-colors hover:border-[var(--xd-danger)]/45 hover:bg-[var(--xd-danger-soft)] hover:text-[var(--xd-danger)]"
+                            title={
+                              deleteForeverBlocked
+                                ? 'Wait for restore to finish'
+                                : 'Delete forever'
+                            }
+                            className="inline-flex h-7 w-7 items-center justify-center rounded border border-[var(--xd-border)] text-[var(--xd-ink-muted)] transition-colors hover:border-[var(--xd-danger)]/45 hover:bg-[var(--xd-danger-soft)] hover:text-[var(--xd-danger)] disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:border-[var(--xd-border)] disabled:hover:bg-transparent disabled:hover:text-[var(--xd-ink-muted)]"
                           >
                             <Trash2 className="h-3.5 w-3.5" />
                           </button>

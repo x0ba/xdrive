@@ -387,6 +387,80 @@ function withSyncState(
   return { ...doc, syncState }
 }
 
+function folderForDiskPath(
+  folders: readonly DriveFolder[],
+  folderPath: string,
+): DriveFolder | null {
+  const parts = folderPath.split('/').filter((part) => part.length > 0)
+  if (parts.length === 0) return null
+  let parentId: string | null = null
+  let match: DriveFolder | null = null
+  for (const name of parts) {
+    const next =
+      folders.find(
+        (folder) => folder.parentId === parentId && folder.name === name,
+      ) ?? null
+    if (!next) return null
+    match = next
+    parentId = next.id
+  }
+  return match
+}
+
+/**
+ * Applies a server-confirmed trash reply. Trash membership changes only after
+ * the server accepts it.
+ */
+export function applyServerTrashDocumentReply(input: {
+  doc: MarbleDocumentFile
+  trashedAt: string
+  syncState?: MarbleDocumentFile['syncState']
+}): MarbleDocumentFile {
+  return withSyncState(
+    { ...input.doc, trashedAt: input.trashedAt },
+    input.syncState ?? 'saved',
+  )
+}
+
+/**
+ * Applies a server-confirmed restore reply. Clears `trashedAt` so the caller
+ * can upsert the document and leave Trash after the server accepts the restore.
+ */
+export function applyServerRestoreDocumentReply(input: {
+  doc: MarbleDocumentFile
+  folders: readonly DriveFolder[]
+  folderPath: string
+  syncState?: MarbleDocumentFile['syncState']
+}): MarbleDocumentFile {
+  const matched =
+    input.folderPath.length > 0
+      ? folderForDiskPath(input.folders, input.folderPath)
+      : null
+  const folderId =
+    input.folderPath.length === 0 ? null : (matched?.id ?? input.doc.folderId)
+  const folder =
+    input.folderPath.length === 0
+      ? 'My Drive'
+      : (matched?.name ?? input.doc.folder)
+  const placed: MarbleDocumentFile = {
+    ...input.doc,
+    trashedAt: null,
+    folderId,
+    folder,
+  }
+  return withSyncState(
+    {
+      ...placed,
+      isTemplate: deriveDocIsTemplate(
+        placed,
+        input.folders,
+        getTemplateFolderIds(input.folders),
+      ),
+    },
+    input.syncState ?? 'saved',
+  )
+}
+
 /**
  * Merges freshly loaded server documents with in-flight client rename/move/save
  * mutations so workspace reloads preserve queued edits while adopting the
@@ -395,6 +469,10 @@ function withSyncState(
  * `ignorePendingRenameDocIds` drops a failed rename's held edits so that
  * document reverts to server source. Local documents whose first save is still
  * pending are kept even when the server has not seen them yet.
+ *
+ * In-flight trash, restore, and permanent-delete mutations keep the server's
+ * trash membership (that is what is on disk at reload time) and stay `saving`
+ * until the queued mutation's own success applies the confirmed change.
  */
 export function mergeReloadedWorkspaceDocs(input: {
   reloadedDocs: readonly MarbleDocumentFile[]
@@ -403,6 +481,9 @@ export function mergeReloadedWorkspaceDocs(input: {
   heldDocEdits: ReadonlyMap<string, readonly HeldDocEdit[]>
   pendingMoveDocIds?: ReadonlySet<string>
   pendingSaveDocIds?: ReadonlySet<string>
+  pendingTrashDocIds?: ReadonlySet<string>
+  pendingRestoreDocIds?: ReadonlySet<string>
+  pendingPermanentDeleteDocIds?: ReadonlySet<string>
   ignorePendingRenameDocIds?: ReadonlySet<string>
 }): MarbleDocumentFile[] {
   const mergedFromServer = input.reloadedDocs.map(
@@ -413,8 +494,14 @@ export function mergeReloadedWorkspaceDocs(input: {
         !ignoreRename && input.pendingRenameDocIds.has(serverDoc.id)
       const isMovePending = input.pendingMoveDocIds?.has(serverDoc.id) ?? false
       const hasPendingSave = input.pendingSaveDocIds?.has(serverDoc.id) ?? false
+      const hasPendingTrashMutation =
+        (input.pendingTrashDocIds?.has(serverDoc.id) ?? false) ||
+        (input.pendingRestoreDocIds?.has(serverDoc.id) ?? false) ||
+        (input.pendingPermanentDeleteDocIds?.has(serverDoc.id) ?? false)
       if (!isRenamePending && !isMovePending && !hasPendingSave) {
-        return serverDoc
+        return hasPendingTrashMutation
+          ? withSyncState(serverDoc, 'saving')
+          : serverDoc
       }
       const held = isRenamePending
         ? input.heldDocEdits.get(serverDoc.id)

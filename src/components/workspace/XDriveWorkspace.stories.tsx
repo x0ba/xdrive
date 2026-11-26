@@ -2802,7 +2802,7 @@ async function releaseTrashErrorReload() {
 }
 
 /**
- * Verifies that lost trash, restore, and delete responses reload server truth before the workspace treats the optimistic change as final.
+ * Verifies that a lost trash, restore, or delete response reloads server truth instead of keeping a change the server rejected.
  *
  * @summary Trash, restore, and delete reload after a lost response
  */
@@ -2894,5 +2894,203 @@ export const TrashRestoreDeleteReloadOnError: Story = {
     expect(recordedTrashPosts.some((post) => post.action === 'restore')).toBe(
       true,
     )
+  },
+}
+
+const LOST_TRASH_UNDO_DOC: MarbleDocumentFile = {
+  ...TRASH_RELOAD_DOC,
+  id: 'doc-lost-trash-undo',
+  slug: 'lost-trash-undo',
+  fileName: 'lost-trash-undo.mrbl',
+  title: 'Lost Trash Undo',
+}
+
+let resolveLostTrashReload: (() => void) | null = null
+let resolveLostTrashRestore: (() => void) | null = null
+let recordedLostTrashPosts: RecordedMarblePost[] = []
+
+function LostTrashUndoHarness(args: ComponentProps<typeof XDriveWorkspace>) {
+  const [ready, setReady] = useState(false)
+
+  useEffect(() => {
+    recordedLostTrashPosts = []
+    let trashed = false
+    let holdReload = false
+    const originalFetch = window.fetch.bind(window)
+    window.fetch = async (input, init) => {
+      const url =
+        typeof input === 'string'
+          ? input
+          : input instanceof Request
+            ? input.url
+            : String(input)
+      if (url.includes('/api/marble')) {
+        const method = (init?.method ?? 'GET').toUpperCase()
+        if (method === 'GET' && url.includes('action=workspace')) {
+          if (holdReload) {
+            holdReload = false
+            await new Promise<void>((resolve) => {
+              resolveLostTrashReload = resolve
+            })
+          }
+          return new Response(
+            JSON.stringify({
+              ok: true,
+              folders: [],
+              docs: [
+                {
+                  ...LOST_TRASH_UNDO_DOC,
+                  trashedAt: trashed ? '2026-11-26T00:04:00.000Z' : null,
+                },
+              ],
+            }),
+            {
+              status: 200,
+              headers: { 'content-type': 'application/json' },
+            },
+          )
+        }
+        if (method === 'POST' && typeof init?.body === 'string') {
+          const payload = JSON.parse(init.body) as RecordedMarblePost
+          if (payload.action === 'diff' || payload.action === 'doctor') {
+            return new Response(JSON.stringify({ ok: false }), {
+              status: 404,
+              headers: { 'content-type': 'application/json' },
+            })
+          }
+          recordedLostTrashPosts.push(payload)
+          if (payload.action === 'trash') {
+            trashed = true
+            holdReload = true
+            throw new TypeError('Failed to fetch')
+          }
+          if (payload.action === 'restore') {
+            await new Promise<void>((resolve) => {
+              resolveLostTrashRestore = resolve
+            })
+            trashed = false
+            return new Response(
+              JSON.stringify({
+                ok: true,
+                slug: payload.slug,
+                restoredOnDisk: true,
+                folderPath: '',
+              }),
+              {
+                status: 200,
+                headers: { 'content-type': 'application/json' },
+              },
+            )
+          }
+          return new Response(JSON.stringify({ ok: true }), {
+            status: 200,
+            headers: { 'content-type': 'application/json' },
+          })
+        }
+      }
+      return originalFetch(input, init)
+    }
+    setReady(true)
+    return () => {
+      resolveLostTrashReload?.()
+      resolveLostTrashReload = null
+      resolveLostTrashRestore?.()
+      resolveLostTrashRestore = null
+      window.fetch = originalFetch
+    }
+  }, [])
+
+  if (!ready) return null
+  return <XDriveWorkspace {...args} />
+}
+
+/**
+ * Verifies that Undo during a lost trash response still leaves Trash after the queued restore is confirmed, and that Delete forever stays blocked while that restore is pending.
+ *
+ * @summary Undo after a lost trash response restores the file
+ */
+export const UndoDuringLostTrashReload: Story = {
+  name: 'Drive · Undo During Lost Trash Reload',
+  args: {
+    initialTheme: 'dark',
+    initialNav: 'drive',
+    initialActiveTabId: 'home',
+    initialDocs: [LOST_TRASH_UNDO_DOC],
+    initialAiSidebarOpen: false,
+    syncWithServer: true,
+  },
+  render: (args) => <LostTrashUndoHarness {...args} />,
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    const sidebarNav = canvas.getByRole('navigation', {
+      name: 'Primary Workspace Navigation',
+    })
+    const sidebarContainer = sidebarNav.parentElement
+    expect(sidebarContainer).not.toBeNull()
+
+    const pinnedLink = await within(sidebarContainer!).findByRole('link', {
+      name: 'Lost Trash Undo',
+    })
+    await userEvent.pointer({ keys: '[MouseRight]', target: pinnedLink })
+    const pinnedMenu = await canvas.findByRole('menu', {
+      name: 'Actions for Lost Trash Undo',
+    })
+    await userEvent.click(
+      within(pinnedMenu).getByRole('menuitem', { name: 'Move to trash' }),
+    )
+
+    await userEvent.click(await canvas.findByRole('button', { name: 'Undo' }))
+    await waitFor(() => expect(resolveLostTrashReload).not.toBeNull())
+    const releaseReload = resolveLostTrashReload
+    resolveLostTrashReload = null
+    releaseReload?.()
+
+    await userEvent.click(
+      within(sidebarNav).getByRole('link', { name: /^Trash/ }),
+    )
+    await expect(await canvas.findByText('lost-trash-undo.mrbl')).toBeVisible()
+    expect(
+      canvas.getByRole('button', { name: 'Delete Lost Trash Undo forever' }),
+    ).toBeDisabled()
+    await userEvent.click(
+      canvas.getByRole('button', { name: 'Trash actions for Lost Trash Undo' }),
+    )
+    const trashMenu = await canvas.findByRole('menu', {
+      name: 'Trash actions for Lost Trash Undo',
+    })
+    expect(
+      within(trashMenu).queryByRole('menuitem', { name: 'Delete forever' }),
+    ).toBeNull()
+    expect(
+      within(trashMenu).getByRole('menuitem', { name: 'Restore' }),
+    ).toBeVisible()
+    expect(
+      recordedLostTrashPosts.some((post) => post.action === 'delete'),
+    ).toBe(false)
+
+    await waitFor(() => expect(resolveLostTrashRestore).not.toBeNull())
+    const releaseRestore = resolveLostTrashRestore
+    resolveLostTrashRestore = null
+    releaseRestore?.()
+
+    await waitFor(() =>
+      expect(canvas.queryByText('lost-trash-undo.mrbl')).toBeNull(),
+    )
+    await expect(
+      await within(sidebarContainer!).findByRole('link', {
+        name: 'Lost Trash Undo',
+      }),
+    ).toBeVisible()
+    expect(
+      recordedLostTrashPosts
+        .map((post) => post.action)
+        .filter(
+          (action) =>
+            action === 'trash' || action === 'restore' || action === 'delete',
+        ),
+    ).toEqual(['trash', 'restore'])
+    expect(
+      canvas.queryByRole('button', { name: 'Delete Lost Trash Undo forever' }),
+    ).toBeNull()
   },
 }
