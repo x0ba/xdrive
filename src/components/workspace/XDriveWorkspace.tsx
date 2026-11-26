@@ -136,8 +136,10 @@ import {
   applyServerTrashDocumentReply,
   deriveDocIsTemplate,
   chatEditUndoDecision,
-  confirmedEmptyTrashIds,
   docEditDisposition,
+  emptyTrashRowsToRemove,
+  restoreLandedOnDisk,
+  templateSourceErrorSyncState,
   docLifecycleRefusalMessage,
   emptyTrashDocIds,
   ensureClientTemplatesFolder,
@@ -1454,15 +1456,15 @@ export function XDriveWorkspace({
 
   async function reloadWorkspaceFromServer(options?: {
     ignorePendingRenameDocIds?: ReadonlySet<string>
-  }): Promise<boolean> {
-    if (!syncWithServer) return false
+  }): Promise<readonly MarbleDocumentFile[] | null> {
+    if (!syncWithServer) return null
     try {
       const response = await fetch('/api/marble?action=workspace', {
         cache: 'no-store',
       })
       if (!response.ok) {
         populateFallbackTemplatesIfEmpty()
-        return false
+        return null
       }
       const data = (await response.json()) as {
         ok?: boolean
@@ -1476,7 +1478,7 @@ export function XDriveWorkspace({
         !Array.isArray(data.docs)
       ) {
         populateFallbackTemplatesIfEmpty()
-        return false
+        return null
       }
       for (const doc of data.docs) {
         suppressedLocalDocIdsRef.current.delete(doc.id)
@@ -1562,11 +1564,11 @@ export function XDriveWorkspace({
           }
         }
       }
-      return true
+      return data.docs
     } catch {
       // Static/Storybook environments do not expose /api/marble.
       populateFallbackTemplatesIfEmpty()
-      return false
+      return null
     } finally {
       setDriveLoading(false)
     }
@@ -2507,10 +2509,20 @@ export function XDriveWorkspace({
     options?: {
       reloadOnError?: boolean
       onSuccess?: (data: Record<string, unknown>) => void | Promise<void>
-      onError?: (message: string) => void | Promise<void>
+      onError?: (
+        message: string,
+        recoveredDocs?: readonly MarbleDocumentFile[] | null,
+      ) => void | Promise<void>
     },
   ) {
     return enqueueDriveMutation(async () => {
+      const reportError = async (message: string) => {
+        let recoveredDocs: readonly MarbleDocumentFile[] | null = null
+        if (syncWithServer && options?.reloadOnError) {
+          recoveredDocs = await reloadWorkspaceFromServer()
+        }
+        await options?.onError?.(message, recoveredDocs)
+      }
       try {
         const body =
           typeof bodyOrFactory === 'function' ? bodyOrFactory() : bodyOrFactory
@@ -2533,10 +2545,7 @@ export function XDriveWorkspace({
           if (syncWithServer) {
             setAgentStatus(message)
           }
-          if (syncWithServer && options?.reloadOnError) {
-            await reloadWorkspaceFromServer()
-          }
-          await options?.onError?.(message)
+          await reportError(message)
           return null
         }
         await options?.onSuccess?.(data)
@@ -2549,10 +2558,7 @@ export function XDriveWorkspace({
         if (syncWithServer) {
           setAgentStatus(message)
         }
-        if (syncWithServer && options?.reloadOnError) {
-          await reloadWorkspaceFromServer()
-        }
-        await options?.onError?.(message)
+        await reportError(message)
         return null
       }
     })
@@ -3616,6 +3622,26 @@ export function XDriveWorkspace({
         markDocSavedIfSettled(liveSourceDoc.id)
       }
     }
+    const settleTemplateSourceAfterError = (
+      recoveredDocs: readonly MarbleDocumentFile[] | null,
+    ) => {
+      setDocSaveAsTemplatePending(liveSourceDoc.id, false)
+      const live = allDocsRef.current.find((doc) => doc.id === liveSourceDoc.id)
+      const displayed = sourceRef.current.get(liveSourceDoc.id) ?? live?.source
+      const recovered = recoveredDocs?.find(
+        (doc) => doc.id === liveSourceDoc.id,
+      )?.source
+      const next = templateSourceErrorSyncState({
+        displayedSource: displayed,
+        recoveredSource: recovered,
+        writeStillPending: !docWriteSettled(liveSourceDoc.id),
+      })
+      if (next === 'saving') return
+      patchFile(liveSourceDoc.id, (item) =>
+        item.syncState === 'saving' ? { ...item, syncState: next } : item,
+      )
+      setDocs(allDocsRef.current)
+    }
     void syncDriveApi(
       () => {
         const currentSourceDoc =
@@ -3667,8 +3693,8 @@ export function XDriveWorkspace({
             `Saved "${applied.doc?.title ?? cleanTitle}" to ${TEMPLATES_FOLDER_NAME}`,
           )
         },
-        onError: () => {
-          settleTemplateSourceIfUnchanged()
+        onError: (_message, recoveredDocs) => {
+          settleTemplateSourceAfterError(recoveredDocs ?? null)
         },
       },
     )
@@ -4522,6 +4548,11 @@ export function XDriveWorkspace({
       {
         onSuccess: (res) => {
           setDocRestorePending(docId, false)
+          if (!restoreLandedOnDisk(res)) {
+            markDocSavedIfSettled(docId)
+            setAgentStatus(`Could not restore "${target.title}".`)
+            return
+          }
           const live =
             allDocsRef.current.find((doc) => doc.id === docId) ?? target
           const folderPath =
@@ -4616,33 +4647,62 @@ export function XDriveWorkspace({
     }
     if (decision.ids.length === 0) return
     const requestedIds = decision.ids
+    const releaseEmptyTrashLock = () => {
+      for (const id of requestedIds) {
+        setDocPermanentDeletePending(id, false)
+        markDocSavedIfSettled(id)
+      }
+    }
+    const removeEmptiedTrashRows = (ids: readonly string[]) => {
+      if (ids.length === 0) {
+        setAgentStatus('Nothing in Trash was deleted.')
+        return
+      }
+      const removedIds = new Set(ids)
+      allDocsRef.current = allDocsRef.current.filter(
+        (doc) => !removedIds.has(doc.id),
+      )
+      setDocs((prev) => prev.filter((doc) => !removedIds.has(doc.id)))
+      cleanupRemovedDocIds(removedIds)
+      const count = ids.length
+      setAgentStatus(
+        `Permanently deleted ${count} ${count === 1 ? 'file' : 'files'} from Trash`,
+      )
+    }
+    if (!syncWithServer) {
+      removeEmptiedTrashRows(
+        emptyTrashRowsToRemove({
+          syncWithServer: false,
+          requestedIds,
+        }),
+      )
+      return
+    }
+    for (const id of requestedIds) {
+      setDocPermanentDeletePending(id, true)
+      patchFile(id, (doc) => ({ ...doc, syncState: 'saving' }))
+    }
     setAgentStatus('Emptying Trash…')
     void syncTrashApi(
       { action: 'empty_trash', ids: requestedIds },
       {
         onSuccess: (res) => {
+          releaseEmptyTrashLock()
           const deletedIds = Array.isArray(res.deletedIds)
             ? res.deletedIds.filter(
                 (id): id is string => typeof id === 'string',
               )
             : []
-          const confirmed = confirmedEmptyTrashIds(requestedIds, deletedIds)
-          if (confirmed.length === 0) {
-            setAgentStatus('Nothing in Trash was deleted.')
-            return
-          }
-          const removedIds = new Set(confirmed)
-          allDocsRef.current = allDocsRef.current.filter(
-            (doc) => !removedIds.has(doc.id),
-          )
-          setDocs((prev) => prev.filter((doc) => !removedIds.has(doc.id)))
-          cleanupRemovedDocIds(removedIds)
-          const count = confirmed.length
-          setAgentStatus(
-            `Permanently deleted ${count} ${count === 1 ? 'file' : 'files'} from Trash`,
+          removeEmptiedTrashRows(
+            emptyTrashRowsToRemove({
+              syncWithServer: true,
+              requestedIds,
+              deletedIds,
+            }),
           )
         },
         onError: () => {
+          releaseEmptyTrashLock()
           setAgentStatus('Could not empty Trash.')
         },
       },
@@ -7201,6 +7261,7 @@ export function XDriveWorkspace({
                     }
                     formatTrashedAt={relativeTime}
                     onRestoreDoc={(doc) => restoreDocumentFromTrash(doc.id)}
+                    restoreBlockedDocIds={pendingPermanentDeleteDocIds}
                     deleteForeverBlockedDocIds={lifecycleLockedDocIds}
                     emptyTrashBlocked={trashBinBusy}
                     onDeleteForeverDoc={(doc) => {

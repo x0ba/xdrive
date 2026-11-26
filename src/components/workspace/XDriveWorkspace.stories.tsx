@@ -3671,3 +3671,330 @@ export const ChatUndoWaitsDuringSaveAsTemplate: Story = {
     ).toHaveLength(1)
   },
 }
+
+const EMPTY_LOCK_DOC: MarbleDocumentFile = {
+  ...IDLE_TRASH_DOC,
+  id: 'doc-empty-lock',
+  slug: 'empty-lock',
+  fileName: 'empty-lock.mrbl',
+  title: 'Empty Lock',
+}
+
+let resolveEmptyLock: (() => void) | null = null
+let recordedEmptyLockPosts: RecordedMarblePost[] = []
+
+function EmptyTrashLockHarness(args: ComponentProps<typeof XDriveWorkspace>) {
+  const [ready, setReady] = useState(false)
+
+  useEffect(() => {
+    recordedEmptyLockPosts = []
+    const originalFetch = window.fetch.bind(window)
+    window.fetch = async (input, init) => {
+      const url =
+        typeof input === 'string'
+          ? input
+          : input instanceof Request
+            ? input.url
+            : String(input)
+      if (url.includes('/api/marble')) {
+        const method = (init?.method ?? 'GET').toUpperCase()
+        if (method === 'GET' && url.includes('action=workspace')) {
+          return new Response(
+            JSON.stringify({
+              ok: true,
+              folders: [],
+              docs: [EMPTY_LOCK_DOC],
+            }),
+            {
+              status: 200,
+              headers: { 'content-type': 'application/json' },
+            },
+          )
+        }
+        if (method === 'POST' && typeof init?.body === 'string') {
+          const payload = JSON.parse(init.body) as RecordedMarblePost
+          if (payload.action === 'diff' || payload.action === 'doctor') {
+            return new Response(JSON.stringify({ ok: false }), {
+              status: 404,
+              headers: { 'content-type': 'application/json' },
+            })
+          }
+          recordedEmptyLockPosts.push(payload)
+          if (payload.action === 'empty_trash') {
+            await new Promise<void>((resolve) => {
+              resolveEmptyLock = resolve
+            })
+            return new Response(
+              JSON.stringify({ ok: true, deletedCount: 0, deletedIds: [] }),
+              {
+                status: 200,
+                headers: { 'content-type': 'application/json' },
+              },
+            )
+          }
+          if (payload.action === 'restore') {
+            return new Response(
+              JSON.stringify({
+                ok: true,
+                slug: payload.slug,
+                restoredOnDisk: false,
+                folderPath: '',
+              }),
+              {
+                status: 200,
+                headers: { 'content-type': 'application/json' },
+              },
+            )
+          }
+          return new Response(JSON.stringify({ ok: true }), {
+            status: 200,
+            headers: { 'content-type': 'application/json' },
+          })
+        }
+      }
+      return originalFetch(input, init)
+    }
+    setReady(true)
+    return () => {
+      resolveEmptyLock?.()
+      resolveEmptyLock = null
+      window.fetch = originalFetch
+    }
+  }, [])
+
+  if (!ready) return null
+  return <XDriveWorkspace {...args} />
+}
+
+/**
+ * Verifies that Empty Trash locks Restore until the server replies, and that a restore which did not land on disk stays in Trash.
+ *
+ * @summary Empty Trash blocks Restore until the deletion finishes
+ */
+export const EmptyTrashBlocksRestoreUntilReply: Story = {
+  name: 'Drive · Empty Trash Blocks Restore Until Reply',
+  args: {
+    initialTheme: 'dark',
+    initialNav: 'trash',
+    initialActiveTabId: 'home',
+    initialDocs: [EMPTY_LOCK_DOC],
+    initialTrashedDocIds: ['doc-empty-lock'],
+    initialAiSidebarOpen: false,
+    syncWithServer: true,
+  },
+  render: (args) => <EmptyTrashLockHarness {...args} />,
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    await expect(await canvas.findByText('empty-lock.mrbl')).toBeVisible()
+    await userEvent.click(canvas.getByRole('button', { name: 'Empty trash' }))
+    const emptyDialog = await canvas.findByRole('dialog', {
+      name: 'Empty trash forever?',
+    })
+    await userEvent.click(
+      within(emptyDialog).getByRole('button', { name: 'Empty trash' }),
+    )
+    await waitFor(() =>
+      expect(
+        canvas.getByRole('button', { name: 'Restore Empty Lock' }),
+      ).toBeDisabled(),
+    )
+    expect(
+      recordedEmptyLockPosts.some((post) => post.action === 'restore'),
+    ).toBe(false)
+
+    const releaseEmpty = resolveEmptyLock
+    resolveEmptyLock = null
+    releaseEmpty?.()
+    await waitFor(() =>
+      expect(
+        canvas.getByRole('button', { name: 'Restore Empty Lock' }),
+      ).toBeEnabled(),
+    )
+    expect(canvas.getByText('empty-lock.mrbl')).toBeVisible()
+    await expect(
+      await canvas.findByText('Nothing in Trash was deleted.'),
+    ).toBeVisible()
+
+    await userEvent.click(
+      canvas.getByRole('button', { name: 'Restore Empty Lock' }),
+    )
+    await expect(
+      await canvas.findByText('Could not restore "Empty Lock".'),
+    ).toBeVisible()
+    expect(canvas.getByText('empty-lock.mrbl')).toBeVisible()
+    expect(canvas.queryByText(/Restored "Empty Lock"/)).toBeNull()
+  },
+}
+
+/**
+ * Verifies that Empty Trash removes the listed files immediately when the workspace is not syncing to the server.
+ *
+ * @summary Empty Trash removes local rows when sync is off
+ */
+export const EmptyTrashWithoutSyncRemovesRows: Story = {
+  name: 'Drive · Empty Trash Without Sync',
+  args: {
+    initialTheme: 'dark',
+    initialNav: 'trash',
+    initialActiveTabId: 'home',
+    initialDocs: [IDLE_TRASH_DOC],
+    initialTrashedDocIds: ['doc-idle-trash'],
+    initialAiSidebarOpen: false,
+    syncWithServer: false,
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    await expect(await canvas.findByText('idle-trash.mrbl')).toBeVisible()
+    await userEvent.click(canvas.getByRole('button', { name: 'Empty trash' }))
+    const emptyDialog = await canvas.findByRole('dialog', {
+      name: 'Empty trash forever?',
+    })
+    await userEvent.click(
+      within(emptyDialog).getByRole('button', { name: 'Empty trash' }),
+    )
+    await waitFor(() =>
+      expect(canvas.queryByText('idle-trash.mrbl')).toBeNull(),
+    )
+    await expect(await canvas.findByText('Trash is empty')).toBeVisible()
+  },
+}
+
+const TEMPLATE_ERROR_DISK_SOURCE = LIFECYCLE_GATE_SOURCE.replace(
+  'Gate Body',
+  'Disk Body',
+)
+const TEMPLATE_ERROR_LOCAL_SOURCE = LIFECYCLE_GATE_SOURCE.replace(
+  'Gate Body',
+  'Local Body',
+)
+
+const TEMPLATE_ERROR_DOC: MarbleDocumentFile = {
+  ...LIFECYCLE_GATE_DOC,
+  id: 'doc-template-error',
+  slug: 'template-error',
+  fileName: 'template-error.mrbl',
+  title: 'Template Error',
+  source: TEMPLATE_ERROR_LOCAL_SOURCE,
+}
+
+function TemplateSaveErrorHarness(
+  args: ComponentProps<typeof XDriveWorkspace>,
+) {
+  const [ready, setReady] = useState(false)
+
+  useEffect(() => {
+    let failed = false
+    const originalFetch = window.fetch.bind(window)
+    window.fetch = async (input, init) => {
+      const url =
+        typeof input === 'string'
+          ? input
+          : input instanceof Request
+            ? input.url
+            : String(input)
+      if (url.includes('/api/marble')) {
+        const method = (init?.method ?? 'GET').toUpperCase()
+        if (method === 'GET' && url.includes('action=workspace')) {
+          return new Response(
+            JSON.stringify({
+              ok: true,
+              folders: [],
+              docs: [
+                {
+                  ...TEMPLATE_ERROR_DOC,
+                  source: failed
+                    ? TEMPLATE_ERROR_DISK_SOURCE
+                    : TEMPLATE_ERROR_LOCAL_SOURCE,
+                  syncState: 'saved',
+                },
+              ],
+            }),
+            {
+              status: 200,
+              headers: { 'content-type': 'application/json' },
+            },
+          )
+        }
+        if (method === 'POST' && typeof init?.body === 'string') {
+          const payload = JSON.parse(init.body) as RecordedMarblePost
+          if (payload.action === 'diff' || payload.action === 'doctor') {
+            return new Response(JSON.stringify({ ok: false }), {
+              status: 404,
+              headers: { 'content-type': 'application/json' },
+            })
+          }
+          if (payload.action === 'save_as_template') {
+            failed = true
+            return new Response(
+              JSON.stringify({ ok: false, error: 'Template save failed' }),
+              {
+                status: 500,
+                headers: { 'content-type': 'application/json' },
+              },
+            )
+          }
+          return new Response(JSON.stringify({ ok: true }), {
+            status: 200,
+            headers: { 'content-type': 'application/json' },
+          })
+        }
+      }
+      return originalFetch(input, init)
+    }
+    setReady(true)
+    return () => {
+      window.fetch = originalFetch
+    }
+  }, [])
+
+  if (!ready) return null
+  return <XDriveWorkspace {...args} />
+}
+
+/**
+ * Verifies that a failed save-as-template clears Saving once the recovered disk source is back on screen.
+ *
+ * @summary Failed save-as-template settles against the recovered source
+ */
+export const TemplateSaveErrorSettlesRecoveredSource: Story = {
+  name: 'Drive · Failed Save As Template Settles Recovered Source',
+  args: {
+    initialTheme: 'dark',
+    initialNav: 'drive',
+    initialActiveTabId: 'doc-template-error',
+    initialOpenDocIds: ['doc-template-error'],
+    initialDocs: [TEMPLATE_ERROR_DOC],
+    initialMode: 'source',
+    initialAiSidebarOpen: false,
+    syncWithServer: true,
+  },
+  render: (args) => <TemplateSaveErrorHarness {...args} />,
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    const sourceTextarea = await canvas.findByLabelText<HTMLTextAreaElement>(
+      'Marble HTML5 source',
+    )
+    await waitFor(() => expect(sourceTextarea.value).toContain('Local Body'))
+
+    await userEvent.click(
+      canvas.getByRole('button', { name: 'Save as template' }),
+    )
+    const saveTplDialog = await canvas.findByRole('dialog', {
+      name: 'Save as template',
+    })
+    const tplNameInput = within(saveTplDialog).getByLabelText('Template name')
+    await userEvent.clear(tplNameInput)
+    await userEvent.type(tplNameInput, 'Failed Gate Template')
+    await userEvent.click(
+      within(saveTplDialog).getByRole('button', { name: 'Save template' }),
+    )
+
+    const recoveredTextarea = await canvas.findByLabelText<HTMLTextAreaElement>(
+      'Marble HTML5 source',
+    )
+    await waitFor(() => expect(recoveredTextarea.value).toContain('Disk Body'))
+    await waitFor(() => expect(canvas.getByTitle('Saved')).toBeVisible())
+    expect(canvas.queryByTitle('Saving')).toBeNull()
+    expect(recoveredTextarea.value).not.toContain('Local Body')
+  },
+}

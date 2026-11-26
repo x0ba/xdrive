@@ -708,6 +708,59 @@ export function confirmedEmptyTrashIds(
   return confirmed
 }
 
+function uniqueTrimmedIds(ids: readonly string[]): string[] {
+  const unique: string[] = []
+  const seen = new Set<string>()
+  for (const id of ids) {
+    const trimmed = id.trim()
+    if (!trimmed || seen.has(trimmed)) continue
+    seen.add(trimmed)
+    unique.push(trimmed)
+  }
+  return unique
+}
+
+/**
+ * Synced Empty Trash drops only ids the server listed in `deletedIds`.
+ * With sync off, the page is the store, so every requested id is removed.
+ */
+export function emptyTrashRowsToRemove(input: {
+  syncWithServer: boolean
+  requestedIds: readonly string[]
+  deletedIds?: readonly string[]
+}): string[] {
+  if (!input.syncWithServer) return uniqueTrimmedIds(input.requestedIds)
+  return confirmedEmptyTrashIds(input.requestedIds, input.deletedIds ?? [])
+}
+
+/** A restore reply is success only when the file was moved back onto disk. */
+export function restoreLandedOnDisk(reply: {
+  restoredOnDisk?: unknown
+}): boolean {
+  return reply.restoredOnDisk === true
+}
+
+/**
+ * After a failed save-as-template, compare the text on screen with the source
+ * the error reload recovered from disk. Mark saved only when they match and
+ * nothing else is still writing. Otherwise leave `saving` only while a write
+ * remains.
+ */
+export function templateSourceErrorSyncState(input: {
+  displayedSource: string | undefined
+  recoveredSource: string | undefined
+  writeStillPending: boolean
+}): 'saving' | 'saved' | 'retrying' {
+  if (input.writeStillPending) return 'saving'
+  if (
+    input.recoveredSource !== undefined &&
+    input.displayedSource === input.recoveredSource
+  ) {
+    return 'saved'
+  }
+  return 'retrying'
+}
+
 export function emptyTrashDocIds(input: {
   visibleDocIds: readonly string[]
   pending: DocLifecyclePendingSets

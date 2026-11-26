@@ -2137,6 +2137,7 @@ export interface DriveTrashListProps {
   formatTrashedAt?: (iso: string) => string
   onRestoreDoc?: (doc: MarbleDocumentFile) => void
   onDeleteForeverDoc?: (doc: MarbleDocumentFile) => void
+  restoreBlockedDocIds?: ReadonlySet<string>
   deleteForeverBlockedDocIds?: ReadonlySet<string>
   emptyTrashBlocked?: boolean
   onEmptyTrash?: () => void
@@ -2150,6 +2151,7 @@ export function DriveTrashList({
   formatTrashedAt,
   onRestoreDoc,
   onDeleteForeverDoc,
+  restoreBlockedDocIds,
   deleteForeverBlockedDocIds,
   emptyTrashBlocked = false,
   onEmptyTrash,
@@ -2254,8 +2256,10 @@ export function DriveTrashList({
 
                 const deleteForeverBlocked =
                   deleteForeverBlockedDocIds?.has(doc.id) ?? false
+                const restoreBlocked =
+                  restoreBlockedDocIds?.has(doc.id) ?? false
                 const menuItems: ActionMenuItem[] = [
-                  ...(onRestoreDoc
+                  ...(onRestoreDoc && !restoreBlocked
                     ? [
                         {
                           id: 'restore',
@@ -2346,8 +2350,14 @@ export function DriveTrashList({
                           <button
                             type="button"
                             onClick={() => onRestoreDoc(doc)}
+                            disabled={restoreBlocked}
                             aria-label={`Restore ${doc.title}`}
-                            className="inline-flex h-7 items-center gap-1 rounded border border-[var(--xd-border)] bg-[var(--xd-canvas)] px-2 text-[11.5px] font-medium text-[var(--xd-ink)] transition-colors hover:border-[var(--xd-border-strong)] hover:bg-[var(--xd-surface-hover)]"
+                            title={
+                              restoreBlocked
+                                ? 'Wait for delete to finish'
+                                : 'Restore'
+                            }
+                            className="inline-flex h-7 items-center gap-1 rounded border border-[var(--xd-border)] bg-[var(--xd-canvas)] px-2 text-[11.5px] font-medium text-[var(--xd-ink)] transition-colors hover:border-[var(--xd-border-strong)] hover:bg-[var(--xd-surface-hover)] disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:border-[var(--xd-border)] disabled:hover:bg-[var(--xd-canvas)]"
                           >
                             <RotateCcw className="h-3 w-3 text-[var(--xd-ink-secondary)]" />
                             <span>Restore</span>

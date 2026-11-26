@@ -18,6 +18,9 @@ import {
   chatEditUndoDecision,
   confirmedEmptyTrashIds,
   deriveDocIsTemplate,
+  emptyTrashRowsToRemove,
+  restoreLandedOnDisk,
+  templateSourceErrorSyncState,
   docEditDisposition,
   docLifecycleBlocksPermanentDelete,
   docLifecycleRefusalMessage,
@@ -866,5 +869,82 @@ describe('pending document lifecycle gate', () => {
       ),
     ).toEqual(['shown-b'])
     expect(confirmedEmptyTrashIds(['shown-a'], [])).toEqual([])
+  })
+
+  it('blocks restore while an empty-trash deletion is pending', () => {
+    const pending = { delete: new Set(['trashed-a', 'trashed-b']) }
+    expect(
+      docLifecycleRefusalMessage(
+        'trashed-a',
+        'restore',
+        'restoring this file',
+        pending,
+      ),
+    ).toBe('Wait for delete to finish before restoring this file.')
+    expect(
+      docLifecycleRefusalMessage(
+        'trashed-other',
+        'restore',
+        'restoring this file',
+        pending,
+      ),
+    ).toBeNull()
+    expect(restoreLandedOnDisk({ restoredOnDisk: true })).toBe(true)
+    expect(restoreLandedOnDisk({ restoredOnDisk: false })).toBe(false)
+    expect(restoreLandedOnDisk({})).toBe(false)
+  })
+
+  it('removes every requested trash row when sync is off and only confirmed ids when sync is on', () => {
+    expect(
+      emptyTrashRowsToRemove({
+        syncWithServer: false,
+        requestedIds: ['shown-a', ' shown-b ', 'shown-a', ''],
+        deletedIds: [],
+      }),
+    ).toEqual(['shown-a', 'shown-b'])
+    expect(
+      emptyTrashRowsToRemove({
+        syncWithServer: true,
+        requestedIds: ['shown-a', 'shown-b'],
+        deletedIds: ['shown-b'],
+      }),
+    ).toEqual(['shown-b'])
+    expect(
+      emptyTrashRowsToRemove({
+        syncWithServer: true,
+        requestedIds: ['shown-a'],
+      }),
+    ).toEqual([])
+  })
+
+  it('settles a failed save-as-template against the recovered server source', () => {
+    expect(
+      templateSourceErrorSyncState({
+        displayedSource: 'disk body',
+        recoveredSource: 'disk body',
+        writeStillPending: false,
+      }),
+    ).toBe('saved')
+    expect(
+      templateSourceErrorSyncState({
+        displayedSource: 'unsaved body',
+        recoveredSource: 'disk body',
+        writeStillPending: false,
+      }),
+    ).toBe('retrying')
+    expect(
+      templateSourceErrorSyncState({
+        displayedSource: 'disk body',
+        recoveredSource: 'disk body',
+        writeStillPending: true,
+      }),
+    ).toBe('saving')
+    expect(
+      templateSourceErrorSyncState({
+        displayedSource: 'unsaved body',
+        recoveredSource: undefined,
+        writeStillPending: false,
+      }),
+    ).toBe('retrying')
   })
 })
