@@ -70,6 +70,85 @@ export function withWhiteboardSnapshot(
   return `${source}\n${script}\n`
 }
 
+const BLANK_DROPPED_RECORD_TYPES = new Set(['shape', 'binding', 'asset'])
+const PAGE_SCOPED_RECORD_TYPES = new Set(['camera', 'instance_page_state'])
+
+export interface WhiteboardStoreRecord {
+  id: string
+  typeName: string
+  currentPageId?: string
+}
+
+export interface WhiteboardEditorSnapshotLike {
+  document: {
+    store: Record<string, WhiteboardStoreRecord>
+  }
+  session?: {
+    currentPageId?: string
+    pageStates?: Array<{
+      pageId: string
+      selectedShapeIds?: readonly string[]
+      focusedGroupId?: string | null
+    }>
+  }
+}
+
+/**
+ * A blank file (`null`) must remove shapes on every page, not only the page
+ * that is open. Extra pages go away so the next save cannot write them back.
+ * The first page stays, empty.
+ */
+export function blankWhiteboardEditorSnapshot<
+  T extends WhiteboardEditorSnapshotLike,
+>(snapshot: T): T {
+  const records = Object.values(snapshot.document.store)
+  const keepPage = records.find((record) => record.typeName === 'page')
+  const store: Record<string, WhiteboardStoreRecord> = {}
+  for (const record of records) {
+    if (BLANK_DROPPED_RECORD_TYPES.has(record.typeName)) continue
+    if (record.typeName === 'page') {
+      if (keepPage && record.id === keepPage.id) store[record.id] = record
+      continue
+    }
+    if (PAGE_SCOPED_RECORD_TYPES.has(record.typeName)) {
+      if (keepPage && record.id.endsWith(keepPage.id)) {
+        store[record.id] = record
+      }
+      continue
+    }
+    if (record.typeName === 'instance' && keepPage) {
+      store[record.id] = { ...record, currentPageId: keepPage.id }
+      continue
+    }
+    store[record.id] = record
+  }
+
+  const session = snapshot.session
+    ? {
+        ...snapshot.session,
+        currentPageId: keepPage?.id ?? snapshot.session.currentPageId,
+        pageStates: keepPage
+          ? (snapshot.session.pageStates ?? [])
+              .filter((state) => state.pageId === keepPage.id)
+              .map((state) => ({
+                ...state,
+                selectedShapeIds: [],
+                focusedGroupId: null,
+              }))
+          : [],
+      }
+    : snapshot.session
+
+  return {
+    ...snapshot,
+    document: {
+      ...snapshot.document,
+      store,
+    },
+    session,
+  }
+}
+
 export type WhiteboardSnapshotSync = 'keep' | 'blank' | 'load'
 
 /**

@@ -3,6 +3,7 @@ import { Tldraw } from 'tldraw'
 import type { Editor, TLEditorSnapshot } from 'tldraw'
 import 'tldraw/tldraw.css'
 import {
+  blankWhiteboardEditorSnapshot,
   isWhiteboardEditorSnapshot,
   readWhiteboardSnapshot,
   whiteboardSnapshotSync,
@@ -59,13 +60,11 @@ export function WhiteboardCanvas({
   }
 
   function applySnapshot(editor: Editor, snapshot: unknown) {
-    if (!isWhiteboardEditorSnapshot(snapshot)) {
-      const ids = [...editor.getCurrentPageShapeIds()]
-      if (ids.length > 0) editor.deleteShapes(ids)
-      return
-    }
+    const next = isWhiteboardEditorSnapshot(snapshot)
+      ? (snapshot as TLEditorSnapshot)
+      : blankWhiteboardEditorSnapshot(editor.getSnapshot())
     editor.store.mergeRemoteChanges(() => {
-      editor.loadSnapshot(snapshot as TLEditorSnapshot)
+      editor.loadSnapshot(next)
     })
   }
 

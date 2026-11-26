@@ -4,6 +4,7 @@ import { updateMarbleSourceTitle } from './engine-client'
 import { inferCategory } from './drive-storage.server'
 import { PREDEFINED_MARBLE_TEMPLATES } from './templates'
 import {
+  blankWhiteboardEditorSnapshot,
   categoryForAiWhiteboard,
   isWhiteboardEditorSnapshot,
   isWhiteboardMarbleSource,
@@ -57,6 +58,72 @@ describe('whiteboard document bytes', () => {
     expect(readWhiteboardSnapshot(inserted)).toEqual(snapshot)
     expect(inserted).toContain('<p>Keep</p>')
     expect(inserted.endsWith('</body>')).toBe(true)
+  })
+
+  it('clears every page when a blank snapshot replaces a multi-page board', () => {
+    const cleared = blankWhiteboardEditorSnapshot({
+      document: {
+        store: {
+          'document:document': {
+            id: 'document:document',
+            typeName: 'document',
+          },
+          'page:one': { id: 'page:one', typeName: 'page', name: 'Page 1' },
+          'page:two': { id: 'page:two', typeName: 'page', name: 'Page 2' },
+          'shape:on-one': {
+            id: 'shape:on-one',
+            typeName: 'shape',
+            parentId: 'page:one',
+          },
+          'shape:on-two': {
+            id: 'shape:on-two',
+            typeName: 'shape',
+            parentId: 'page:two',
+          },
+          'binding:arrow': { id: 'binding:arrow', typeName: 'binding' },
+          'asset:image': { id: 'asset:image', typeName: 'asset' },
+          'camera:page:one': { id: 'camera:page:one', typeName: 'camera' },
+          'camera:page:two': { id: 'camera:page:two', typeName: 'camera' },
+          'instance_page_state:page:one': {
+            id: 'instance_page_state:page:one',
+            typeName: 'instance_page_state',
+          },
+          'instance_page_state:page:two': {
+            id: 'instance_page_state:page:two',
+            typeName: 'instance_page_state',
+          },
+          'instance:instance': {
+            id: 'instance:instance',
+            typeName: 'instance',
+            currentPageId: 'page:two',
+          },
+        },
+      },
+      session: {
+        currentPageId: 'page:two',
+        pageStates: [
+          { pageId: 'page:one', selectedShapeIds: ['shape:on-one'] },
+          { pageId: 'page:two', selectedShapeIds: ['shape:on-two'] },
+        ],
+      },
+    })
+
+    const records = Object.values(cleared.document.store)
+    const pages = records.filter((record) => record.typeName === 'page')
+    expect(pages.map((page) => page.id)).toEqual(['page:one'])
+    expect(records.some((record) => record.typeName === 'shape')).toBe(false)
+    expect(records.some((record) => record.typeName === 'binding')).toBe(false)
+    expect(records.some((record) => record.typeName === 'asset')).toBe(false)
+    expect(records.map((record) => record.id)).not.toContain('shape:on-two')
+    expect(records.map((record) => record.id)).not.toContain('page:two')
+    expect(records.map((record) => record.id)).not.toContain('camera:page:two')
+    expect(cleared.document.store['instance:instance'].currentPageId).toBe(
+      'page:one',
+    )
+    expect(cleared.session.currentPageId).toBe('page:one')
+    const pageStates = cleared.session.pageStates
+    expect(pageStates.map((state) => state.pageId)).toEqual(['page:one'])
+    expect(pageStates[0].selectedShapeIds).toEqual([])
   })
 
   it('treats a null file snapshot as a blank board', () => {
