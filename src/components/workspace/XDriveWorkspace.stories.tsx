@@ -7,7 +7,7 @@ import {
   PREDEFINED_MARBLE_TEMPLATES,
   TEMPLATES_FOLDER_NAME,
 } from '#/lib/marble'
-import type { MarbleDocumentFile } from '#/lib/types'
+import type { DriveFolder, MarbleDocumentFile } from '#/lib/types'
 import { XDriveWorkspace } from './XDriveWorkspace'
 
 /**
@@ -430,7 +430,7 @@ const RENAME_RACE_DOC: MarbleDocumentFile = {
   folderId: null,
   trashedAt: null,
   source:
-    '<!doctype html><html lang="en" data-marble="1"><head><meta charset="utf-8"><title>Rename Race Doc</title></head><body><main data-marble-id="root"><h1 data-marble-id="h1" data-marble-editable>Initial Body</h1></main></body></html>',
+    '<!doctype html><html lang="en" data-marble="1"><head><meta charset="utf-8"><title>Rename Race Doc</title></head><body><main><h1 data-marble-id="h1" data-marble-editable>Initial Body</h1></main></body></html>',
 }
 
 function RenameInFlightStoryHarness(
@@ -588,9 +588,10 @@ export const RenameDocumentPreservesInFlightEdits: Story = {
       initialSelectionEnd: bodyStart + 'Initial Body'.length,
     })
     await userEvent.click(canvas.getByRole('button', { name: 'Apply' }))
-    await waitFor(() =>
-      expect(sourceTextarea.value).toContain('Fresh Local Edit'),
-    )
+    await waitFor(() => {
+      expect(sourceTextarea.value).toContain('Fresh Local Edit')
+      expect(canvas.getByRole('button', { name: 'Apply' })).toBeDisabled()
+    })
 
     // Release the delayed rename_document response containing stale Initial Body.
     resolveInFlightRename?.()
@@ -604,6 +605,535 @@ export const RenameDocumentPreservesInFlightEdits: Story = {
     await waitFor(() => {
       expect(sourceTextarea.value).toContain('Fresh Local Edit')
       expect(sourceTextarea.value).not.toContain('Initial Body')
+    })
+  },
+}
+
+const TEMPLATE_RACE_SOURCE_DOC: MarbleDocumentFile = {
+  ...INITIAL_WORKSPACE_DOCS[2],
+  id: 'doc-template-race-src',
+  slug: 'source-bench-note',
+  fileName: 'source-bench-note.mrbl',
+  title: 'Source Bench Note',
+  category: 'document',
+  isTemplate: false,
+  isEvergreen: false,
+  starred: false,
+  pinned: false,
+  folder: 'My Drive',
+  folderId: null,
+  trashedAt: null,
+  source:
+    '<!doctype html><html lang="en" data-marble="1"><head><meta charset="utf-8"><title>Source Bench Note</title></head><body><main><h1 data-marble-id="h1" data-marble-editable>Initial Body</h1></main></body></html>',
+}
+
+interface RecordedMarblePost {
+  action?: string
+  slug?: string
+  folderPath?: string
+  oldPath?: string
+  newName?: string
+  meta?: { slug?: string }
+  [key: string]: unknown
+}
+
+let resolveInFlightSaveTemplateDedupe: (() => void) | null = null
+let recordedSaveDedupePosts: RecordedMarblePost[] = []
+
+function SaveAsTemplateDedupeStoryHarness(
+  args: ComponentProps<typeof XDriveWorkspace>,
+) {
+  const [ready, setReady] = useState(false)
+
+  useEffect(() => {
+    recordedSaveDedupePosts = []
+    const originalFetch = window.fetch.bind(window)
+    window.fetch = async (input, init) => {
+      const url =
+        typeof input === 'string'
+          ? input
+          : input instanceof Request
+            ? input.url
+            : String(input)
+      if (url.includes('/api/marble')) {
+        const method = (init?.method ?? 'GET').toUpperCase()
+        if (method === 'GET' && url.includes('action=workspace')) {
+          return new Response(
+            JSON.stringify({
+              ok: true,
+              folders: [],
+              docs: [TEMPLATE_RACE_SOURCE_DOC],
+            }),
+            {
+              status: 200,
+              headers: { 'content-type': 'application/json' },
+            },
+          )
+        }
+        if (method === 'POST' && typeof init?.body === 'string') {
+          const payload = JSON.parse(init.body) as RecordedMarblePost
+          if (payload.action === 'diff' || payload.action === 'doctor') {
+            return new Response(JSON.stringify({ ok: false }), {
+              status: 404,
+              headers: { 'content-type': 'application/json' },
+            })
+          }
+          recordedSaveDedupePosts.push(payload)
+          if (payload.action === 'save_as_template') {
+            await new Promise<void>((resolve) => {
+              resolveInFlightSaveTemplateDedupe = resolve
+            })
+            const now = '2026-11-25T23:52:00.000Z'
+            const folder: DriveFolder = {
+              id: 'folder-templates-srv',
+              name: TEMPLATES_FOLDER_NAME,
+              parentId: null,
+              color: 'accent',
+              isTemplatesFolder: true,
+              createdAt: now,
+              updatedAt: now,
+            }
+            const title =
+              typeof payload.title === 'string'
+                ? payload.title
+                : 'Bench Template'
+            const staleServerSource = TEMPLATE_RACE_SOURCE_DOC.source.replace(
+              '<title>Source Bench Note</title>',
+              `<title>${title}</title>`,
+            )
+            const dedupedDoc: MarbleDocumentFile = {
+              ...TEMPLATE_RACE_SOURCE_DOC,
+              id:
+                typeof payload.id === 'string' ? payload.id : 'tpl-deduped-id',
+              slug: 'bench-template-2',
+              fileName: 'bench-template-2.mrbl',
+              title,
+              description:
+                typeof payload.description === 'string'
+                  ? payload.description
+                  : '',
+              isTemplate: true,
+              folderId: folder.id,
+              folder: TEMPLATES_FOLDER_NAME,
+              source: staleServerSource,
+              version: 1,
+              syncState: 'saved',
+              createdAt: now,
+              updatedAt: now,
+            }
+            return new Response(
+              JSON.stringify({ ok: true, folder, doc: dedupedDoc }),
+              {
+                status: 200,
+                headers: { 'content-type': 'application/json' },
+              },
+            )
+          }
+          return new Response(JSON.stringify({ ok: true }), {
+            status: 200,
+            headers: { 'content-type': 'application/json' },
+          })
+        }
+      }
+      return originalFetch(input, init)
+    }
+    setReady(true)
+    return () => {
+      resolveInFlightSaveTemplateDedupe?.()
+      resolveInFlightSaveTemplateDedupe = null
+      window.fetch = originalFetch
+    }
+  }, [])
+
+  if (!ready) return null
+  return <XDriveWorkspace {...args} />
+}
+
+/**
+ * Verifies that server slug deduplication on save_as_template reconciles UI state and re-targets queued saves instead of overwriting the optimistic slug.
+ *
+ * @summary Reconcile deduped template slug and re-target in-flight saves
+ */
+export const SaveAsTemplateSlugDedupePreservesInFlightEdits: Story = {
+  name: 'Template · Slug Dedupe Reconciles In-Flight Edits',
+  args: {
+    initialTheme: 'dark',
+    initialNav: 'drive',
+    initialActiveTabId: 'home',
+    initialDocs: [TEMPLATE_RACE_SOURCE_DOC],
+    initialAiSidebarOpen: false,
+    syncWithServer: true,
+  },
+  render: (args) => <SaveAsTemplateDedupeStoryHarness {...args} />,
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    const docMenuBtn = await canvas.findByRole('button', {
+      name: 'Actions for Source Bench Note',
+    })
+    await userEvent.click(docMenuBtn)
+    const docMenu = await canvas.findByRole('menu', {
+      name: 'Actions for Source Bench Note',
+    })
+    await userEvent.click(
+      within(docMenu).getByRole('menuitem', { name: 'Save as template' }),
+    )
+
+    const saveTplDialog = await canvas.findByRole('dialog', {
+      name: 'Save as template',
+    })
+    const tplNameInput = within(saveTplDialog).getByLabelText('Template name')
+    await userEvent.clear(tplNameInput)
+    await userEvent.type(tplNameInput, 'Bench Template')
+    await userEvent.click(
+      within(saveTplDialog).getByRole('button', { name: 'Save template' }),
+    )
+
+    await waitFor(() =>
+      expect(resolveInFlightSaveTemplateDedupe).not.toBeNull(),
+    )
+
+    const sidebarNav = canvas.getByRole('navigation', {
+      name: 'Primary Workspace Navigation',
+    })
+    const templatesNavLink = within(sidebarNav)
+      .getAllByRole('link', { name: TEMPLATES_FOLDER_NAME })
+      .find((link) => link.getAttribute('href') === '/templates')
+    expect(templatesNavLink).toBeDefined()
+    await userEvent.click(templatesNavLink!)
+
+    const tplMenuBtn = await canvas.findByRole('button', {
+      name: 'Actions for Bench Template',
+    })
+    await userEvent.click(tplMenuBtn)
+    const tplMenu = await canvas.findByRole('menu', {
+      name: 'Actions for Bench Template',
+    })
+    await userEvent.click(
+      within(tplMenu).getByRole('menuitem', { name: 'Edit template' }),
+    )
+
+    await userEvent.click(await canvas.findByTitle('Source (4)'))
+    const sourceTextarea = await canvas.findByLabelText<HTMLTextAreaElement>(
+      'Marble HTML5 source',
+    )
+    await waitFor(() => expect(sourceTextarea.value).toContain('Initial Body'))
+
+    const bodyStart = sourceTextarea.value.indexOf('Initial Body')
+    expect(bodyStart).toBeGreaterThan(-1)
+    sourceTextarea.focus()
+    await userEvent.type(sourceTextarea, 'Edited Before Reply', {
+      initialSelectionStart: bodyStart,
+      initialSelectionEnd: bodyStart + 'Initial Body'.length,
+    })
+    await userEvent.click(canvas.getByRole('button', { name: 'Apply' }))
+    await waitFor(() => {
+      expect(sourceTextarea.value).toContain('Edited Before Reply')
+      expect(canvas.getByRole('button', { name: 'Apply' })).toBeDisabled()
+    })
+
+    resolveInFlightSaveTemplateDedupe?.()
+    resolveInFlightSaveTemplateDedupe = null
+
+    await waitFor(() =>
+      expect(
+        canvas.getAllByText('bench-template-2.mrbl').length,
+      ).toBeGreaterThanOrEqual(1),
+    )
+    await waitFor(() => {
+      const savePosts = recordedSaveDedupePosts.filter(
+        (post) => post.action === 'save' || post.action === 'apply_ops',
+      )
+      expect(savePosts.length).toBeGreaterThanOrEqual(1)
+      expect(savePosts.some((post) => post.slug === 'bench-template-2')).toBe(
+        true,
+      )
+      expect(savePosts.some((post) => post.slug === 'bench-template')).toBe(
+        false,
+      )
+      expect(
+        savePosts.every((post) => post.meta?.slug === 'bench-template-2'),
+      ).toBe(true)
+    })
+    expect(sourceTextarea.value).toContain('Edited Before Reply')
+    expect(sourceTextarea.value).not.toContain('Initial Body')
+  },
+}
+
+let resolveInFlightSaveFolderRace: (() => void) | null = null
+let recordedFolderRacePosts: RecordedMarblePost[] = []
+
+function SaveAsTemplateFolderRenameHarness(
+  args: ComponentProps<typeof XDriveWorkspace>,
+) {
+  const [ready, setReady] = useState(false)
+
+  useEffect(() => {
+    recordedFolderRacePosts = []
+    const originalFetch = window.fetch.bind(window)
+    const initialTemplatesFolder: DriveFolder = {
+      id: 'folder-templates',
+      name: TEMPLATES_FOLDER_NAME,
+      parentId: null,
+      color: 'accent',
+      isTemplatesFolder: true,
+      createdAt: '2026-11-25T23:00:00.000Z',
+      updatedAt: '2026-11-25T23:00:00.000Z',
+    }
+    window.fetch = async (input, init) => {
+      const url =
+        typeof input === 'string'
+          ? input
+          : input instanceof Request
+            ? input.url
+            : String(input)
+      if (url.includes('/api/marble')) {
+        const method = (init?.method ?? 'GET').toUpperCase()
+        if (method === 'GET' && url.includes('action=workspace')) {
+          return new Response(
+            JSON.stringify({
+              ok: true,
+              folders: [initialTemplatesFolder],
+              docs: [TEMPLATE_RACE_SOURCE_DOC],
+            }),
+            {
+              status: 200,
+              headers: { 'content-type': 'application/json' },
+            },
+          )
+        }
+        if (method === 'POST' && typeof init?.body === 'string') {
+          const payload = JSON.parse(init.body) as RecordedMarblePost
+          if (payload.action === 'diff' || payload.action === 'doctor') {
+            return new Response(JSON.stringify({ ok: false }), {
+              status: 404,
+              headers: { 'content-type': 'application/json' },
+            })
+          }
+          recordedFolderRacePosts.push(payload)
+          if (payload.action === 'save_as_template') {
+            await new Promise<void>((resolve) => {
+              resolveInFlightSaveFolderRace = resolve
+            })
+            const now = '2026-11-25T23:53:00.000Z'
+            const title =
+              typeof payload.title === 'string'
+                ? payload.title
+                : 'Race Template'
+            const serverDoc: MarbleDocumentFile = {
+              ...TEMPLATE_RACE_SOURCE_DOC,
+              id:
+                typeof payload.id === 'string' ? payload.id : 'tpl-folder-race',
+              slug: 'race-template',
+              fileName: 'race-template.mrbl',
+              title,
+              isTemplate: true,
+              folderId: initialTemplatesFolder.id,
+              folder: TEMPLATES_FOLDER_NAME,
+              source: TEMPLATE_RACE_SOURCE_DOC.source.replace(
+                '<title>Source Bench Note</title>',
+                `<title>${title}</title>`,
+              ),
+              version: 1,
+              syncState: 'saved',
+              createdAt: now,
+              updatedAt: now,
+            }
+            return new Response(
+              JSON.stringify({
+                ok: true,
+                folder: initialTemplatesFolder,
+                doc: serverDoc,
+              }),
+              {
+                status: 200,
+                headers: { 'content-type': 'application/json' },
+              },
+            )
+          }
+          if (payload.action === 'rename_folder') {
+            return new Response(
+              JSON.stringify({
+                ok: true,
+                oldPath: payload.oldPath,
+                newPath: payload.newName,
+                folder: {
+                  ...initialTemplatesFolder,
+                  name:
+                    typeof payload.newName === 'string'
+                      ? payload.newName
+                      : 'Archived Templates',
+                  isTemplatesFolder: false,
+                  updatedAt: '2026-11-25T23:54:00.000Z',
+                },
+              }),
+              {
+                status: 200,
+                headers: { 'content-type': 'application/json' },
+              },
+            )
+          }
+          return new Response(JSON.stringify({ ok: true }), {
+            status: 200,
+            headers: { 'content-type': 'application/json' },
+          })
+        }
+      }
+      return originalFetch(input, init)
+    }
+    setReady(true)
+    return () => {
+      resolveInFlightSaveFolderRace?.()
+      resolveInFlightSaveFolderRace = null
+      window.fetch = originalFetch
+    }
+  }, [])
+
+  if (!ready) return null
+  return <XDriveWorkspace {...args} />
+}
+
+/**
+ * Verifies that renaming the Templates folder while save_as_template is in flight preserves the renamed folder and routes later edits into it.
+ *
+ * @summary Preserve folder rename when in-flight save_as_template replies
+ */
+export const SaveAsTemplateReplyPreservesFolderRename: Story = {
+  name: 'Template · Preserve Folder Rename During In-Flight Save',
+  args: {
+    initialTheme: 'dark',
+    initialNav: 'drive',
+    initialActiveTabId: 'home',
+    initialDocs: [TEMPLATE_RACE_SOURCE_DOC],
+    initialAiSidebarOpen: false,
+    syncWithServer: true,
+  },
+  render: (args) => <SaveAsTemplateFolderRenameHarness {...args} />,
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    await expect(
+      await canvas.findByRole('button', { name: 'Actions for Templates' }),
+    ).toBeInTheDocument()
+
+    const docMenuBtn = await canvas.findByRole('button', {
+      name: 'Actions for Source Bench Note',
+    })
+    await userEvent.click(docMenuBtn)
+    const docMenu = await canvas.findByRole('menu', {
+      name: 'Actions for Source Bench Note',
+    })
+    await userEvent.click(
+      within(docMenu).getByRole('menuitem', { name: 'Save as template' }),
+    )
+
+    const saveTplDialog = await canvas.findByRole('dialog', {
+      name: 'Save as template',
+    })
+    const tplNameInput = within(saveTplDialog).getByLabelText('Template name')
+    await userEvent.clear(tplNameInput)
+    await userEvent.type(tplNameInput, 'Race Template')
+    await userEvent.click(
+      within(saveTplDialog).getByRole('button', { name: 'Save template' }),
+    )
+
+    await waitFor(() => expect(resolveInFlightSaveFolderRace).not.toBeNull())
+
+    // Rename Templates -> Archived Templates while save_as_template is still pending
+    await userEvent.click(
+      canvas.getByRole('button', { name: 'Actions for Templates' }),
+    )
+    const folderMenu = await canvas.findByRole('menu', {
+      name: 'Actions for Templates',
+    })
+    await userEvent.click(
+      within(folderMenu).getByRole('menuitem', { name: 'Rename' }),
+    )
+
+    const renameDialog = await canvas.findByRole('dialog', {
+      name: 'Rename folder',
+    })
+    const folderInput = within(renameDialog).getByLabelText('Folder name')
+    await userEvent.clear(folderInput)
+    await userEvent.type(folderInput, 'Archived Templates')
+    await userEvent.click(
+      within(renameDialog).getByRole('button', { name: 'Save name' }),
+    )
+
+    // Resolve the earlier save_as_template reply; renamed folder and non-template state must survive
+    resolveInFlightSaveFolderRace?.()
+    resolveInFlightSaveFolderRace = null
+
+    await waitFor(() =>
+      expect(
+        recordedFolderRacePosts.some((post) => post.action === 'rename_folder'),
+      ).toBe(true),
+    )
+
+    await expect(
+      await canvas.findByRole('button', {
+        name: 'Actions for Archived Templates',
+      }),
+    ).toBeInTheDocument()
+    expect(
+      canvas.queryByRole('button', { name: 'Actions for Templates' }),
+    ).toBeNull()
+
+    const sidebarNav = canvas.getByRole('navigation', {
+      name: 'Primary Workspace Navigation',
+    })
+    const templatesNavLink = within(sidebarNav)
+      .getAllByRole('link', { name: TEMPLATES_FOLDER_NAME })
+      .find((link) => link.getAttribute('href') === '/templates')
+    expect(templatesNavLink).toBeDefined()
+    await userEvent.click(templatesNavLink!)
+    await expect(await canvas.findByText('No templates yet')).toBeVisible()
+
+    // Open Archived Templates -> open Race Template -> edit -> ensure save goes to Archived Templates
+    await userEvent.click(
+      within(sidebarNav).getByRole('link', { name: 'Archived Templates' }),
+    )
+    const raceTplMenuBtn = await canvas.findByRole('button', {
+      name: 'Actions for Race Template',
+    })
+    await userEvent.click(raceTplMenuBtn)
+    const raceTplMenu = await canvas.findByRole('menu', {
+      name: 'Actions for Race Template',
+    })
+    await userEvent.click(
+      within(raceTplMenu).getByRole('menuitem', { name: 'Open' }),
+    )
+
+    await userEvent.click(await canvas.findByTitle('Source (4)'))
+    const sourceTextarea = await canvas.findByLabelText<HTMLTextAreaElement>(
+      'Marble HTML5 source',
+    )
+    await waitFor(() => expect(sourceTextarea.value).toContain('Initial Body'))
+    const bodyStart = sourceTextarea.value.indexOf('Initial Body')
+    expect(bodyStart).toBeGreaterThan(-1)
+    sourceTextarea.focus()
+    await userEvent.type(sourceTextarea, 'Saved In Renamed Folder', {
+      initialSelectionStart: bodyStart,
+      initialSelectionEnd: bodyStart + 'Initial Body'.length,
+    })
+    await userEvent.click(canvas.getByRole('button', { name: 'Apply' }))
+    await waitFor(() =>
+      expect(canvas.getByRole('button', { name: 'Apply' })).toBeDisabled(),
+    )
+
+    await waitFor(() => {
+      const savePosts = recordedFolderRacePosts.filter(
+        (post) => post.action === 'save' || post.action === 'apply_ops',
+      )
+      expect(savePosts.length).toBeGreaterThanOrEqual(1)
+      expect(
+        savePosts.some(
+          (post) =>
+            post.slug === 'race-template' &&
+            post.folderPath === 'Archived Templates',
+        ),
+      ).toBe(true)
+      expect(
+        savePosts.some((post) => post.folderPath === TEMPLATES_FOLDER_NAME),
+      ).toBe(false)
     })
   },
 }
