@@ -30,6 +30,16 @@ import type {
   SharePermissionLevel,
   SketchAnnotation,
 } from '../types'
+import { updateMarbleSourceTitle } from './engine-client'
+import {
+  DOCUMENT_DESIGN_SYSTEM_SLUG,
+  DOCUMENT_DONTS_SYSTEM_SLUG,
+  PREDEFINED_MARBLE_TEMPLATES,
+  TEMPLATES_FOLDER_ID,
+  TEMPLATES_FOLDER_NAME,
+} from './templates'
+
+export { TEMPLATES_FOLDER_ID, TEMPLATES_FOLDER_NAME }
 
 export const DEFAULT_TRASH_RETENTION_DAYS = 30
 const DAY_MS = 24 * 60 * 60 * 1000
@@ -140,11 +150,17 @@ export interface StoredDocumentMeta {
   share?: ShareConfig
 }
 
+export interface DriveTemplatesSeedState {
+  seededIds: string[]
+  seededAt: string | null
+}
+
 interface DriveMetadataFile {
   version: 2
   folders: Partial<Record<string, StoredFolderMeta>>
   documents: Partial<Record<string, StoredDocumentMeta>>
   trash: DriveTrashState
+  templates: DriveTemplatesSeedState
 }
 
 interface StoredDocumentHistoryFile {
@@ -178,6 +194,42 @@ export interface DriveDocumentLocation {
 export function getDriveDir(): string {
   const configured = process.env.XDRIVE_DRIVE_DIR?.trim()
   return path.resolve(configured || path.resolve(process.cwd(), 'marble-drive'))
+}
+
+export function getTemplatesDir(): string {
+  return path.resolve(getDriveDir(), TEMPLATES_FOLDER_NAME)
+}
+
+export function isTemplatesFolderPath(
+  folderPath: string | null | undefined,
+): boolean {
+  const normalized = normalizeFolderPath(folderPath)
+  return (
+    normalized === TEMPLATES_FOLDER_NAME ||
+    normalized.startsWith(`${TEMPLATES_FOLDER_NAME}/`)
+  )
+}
+
+export function isTemplateRelPath(relPath: string): boolean {
+  return relPath.startsWith(`${TEMPLATES_FOLDER_NAME}/`)
+}
+
+export function isTemplatesRootPath(
+  folderPath: string | null | undefined,
+): boolean {
+  return normalizeFolderPath(folderPath) === TEMPLATES_FOLDER_NAME
+}
+
+export function slugifyTitle(title: string, fallback = 'untitled'): string {
+  const slug = title
+    .normalize('NFKD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/\.mrbl$/i, '')
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 64)
+  return slug || fallback
 }
 
 export function getTrashDir(): string {
@@ -358,6 +410,14 @@ export function trashMetaFilePath(slug: string): string {
 function deterministicId(prefix: string, key: string): string {
   const digest = createHash('sha256').update(key).digest('hex').slice(0, 12)
   return `${prefix}-${digest}`
+}
+
+function trashDocumentId(slug: string, meta: TrashMetaRecord | null): string {
+  const storedId = meta?.meta?.id?.trim()
+  if (storedId) return storedId
+  const recordedId = meta?.docId?.trim()
+  if (recordedId) return recordedId
+  return deterministicId('doc', `trash/${slug}`)
 }
 
 function sanitizeColor(value: unknown): DriveFolderColor {
@@ -733,6 +793,35 @@ function defaultTrashState(
   }
 }
 
+function defaultTemplatesSeedState(): DriveTemplatesSeedState {
+  return {
+    seededIds: [],
+    seededAt: null,
+  }
+}
+
+function sanitizeTemplatesSeedState(raw: unknown): DriveTemplatesSeedState {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+    return defaultTemplatesSeedState()
+  }
+  const rec = raw as Record<string, unknown>
+  const seededIds = Array.isArray(rec.seededIds)
+    ? Array.from(
+        new Set(
+          rec.seededIds
+            .filter((item): item is string => typeof item === 'string')
+            .map((item) => item.trim())
+            .filter(Boolean),
+        ),
+      )
+    : []
+  const seededAt =
+    typeof rec.seededAt === 'string' && !Number.isNaN(Date.parse(rec.seededAt))
+      ? rec.seededAt
+      : null
+  return { seededIds, seededAt }
+}
+
 function emptyMetadata(
   retentionDays = DEFAULT_TRASH_RETENTION_DAYS,
 ): DriveMetadataFile {
@@ -741,6 +830,7 @@ function emptyMetadata(
     folders: {},
     documents: {},
     trash: defaultTrashState(retentionDays),
+    templates: defaultTemplatesSeedState(),
   }
 }
 
@@ -833,6 +923,7 @@ async function readMetadataWithMigration(): Promise<{
         folders,
         documents,
         trash: sanitizeTrashState(parsed.trash),
+        templates: sanitizeTemplatesSeedState(parsed.templates),
       },
       migrated: wasOldVersion,
     }
@@ -921,6 +1012,17 @@ async function deleteDocumentHistory(docId: string | undefined): Promise<void> {
         // Ignore missing doc-chat files during cleanup.
       }
     }
+  }
+}
+
+async function slugIsInTrash(slug: string): Promise<boolean> {
+  if (await readTrashMeta(slug)) return true
+  return pathExists(trashFilePath(slug))
+}
+
+async function failIfSlugInTrash(slug: string, verb: string): Promise<void> {
+  if (await slugIsInTrash(slug)) {
+    fail(409, `Cannot ${verb} "${slug}" while it is in Trash`)
   }
 }
 
@@ -1154,6 +1256,7 @@ export async function saveDocumentToDisk(input: {
 }): Promise<DriveDocumentLocation> {
   return await withDriveLock(async () => {
     const validSlug = assertSlug(input.slug)
+    await failIfSlugInTrash(validSlug, 'save')
     let target: DriveDocumentLocation
     if (input.folderPath !== undefined) {
       target = resolveDocumentLocation(validSlug, input.folderPath)
@@ -1212,9 +1315,10 @@ export async function updateDocumentMetaOnDisk(input: {
     if (!patch && checkpoints === undefined && intentHistory === undefined) {
       fail(400, 'meta, checkpoints, or intentHistory is required')
     }
+    const found = await findDocumentBySlug(validSlug, input.folderPath)
+    if (!found) await failIfSlugInTrash(validSlug, 'update')
     const located =
-      (await findDocumentBySlug(validSlug, input.folderPath)) ??
-      resolveDocumentLocation(validSlug, input.folderPath ?? '')
+      found ?? resolveDocumentLocation(validSlug, input.folderPath ?? '')
     const metadata = await readMetadata()
     const previous = metadata.documents[located.relPath] ?? {}
     const docId =
@@ -1255,6 +1359,7 @@ export async function moveDocumentOnDisk(input: {
   fromPath: string
   toPath: string
   folderPath: string
+  isTemplate: boolean
 }> {
   return await withDriveLock(async () => {
     const validSlug = assertSlug(input.slug)
@@ -1264,8 +1369,10 @@ export async function moveDocumentOnDisk(input: {
     const toLoc = resolveDocumentLocation(validSlug, input.toFolderPath ?? '')
 
     await mkdir(path.dirname(toLoc.fullPath), { recursive: true })
+    const fromExists = await pathExists(fromLoc.fullPath)
+    if (!fromExists) await failIfSlugInTrash(validSlug, 'move')
     if (fromLoc.fullPath !== toLoc.fullPath) {
-      if (await pathExists(fromLoc.fullPath)) {
+      if (fromExists) {
         if (await pathExists(toLoc.fullPath)) {
           fail(
             409,
@@ -1299,6 +1406,7 @@ export async function moveDocumentOnDisk(input: {
       fromPath: fromLoc.relPath,
       toPath: toLoc.relPath,
       folderPath: toLoc.folderPath,
+      isTemplate: isTemplatesFolderPath(toLoc.folderPath),
     }
   })
 }
@@ -1333,7 +1441,10 @@ export async function createFolderOnDisk(input: {
     const createdAt = input.createdAt ?? now
     const updatedAt = input.updatedAt ?? now
     const color = sanitizeColor(input.color)
-    const id = input.id?.trim() || deterministicId('folder', relPath)
+    const id = mintUnusedFolderId(
+      metadata,
+      input.id?.trim() || deterministicId('folder', relPath),
+    )
 
     const parentMeta = parent.folderPath
       ? metadata.folders[parent.folderPath]
@@ -1358,6 +1469,7 @@ export async function createFolderOnDisk(input: {
         name: cleanName,
         parentId,
         color,
+        isTemplatesFolder: isTemplatesRootPath(relPath),
         createdAt,
         updatedAt,
       },
@@ -1472,7 +1584,9 @@ export async function renameFolderOnDisk(input: {
 
     const existingMeta = metadata.folders[normalizedNew]
     const updatedMeta: StoredFolderMeta = {
-      id: existingMeta?.id ?? deterministicId('folder', normalizedNew),
+      id:
+        existingMeta?.id ??
+        mintUnusedFolderId(metadata, deterministicId('folder', normalizedNew)),
       color:
         input.color !== undefined
           ? sanitizeColor(input.color)
@@ -1503,6 +1617,7 @@ export async function renameFolderOnDisk(input: {
         name: cleanNewName,
         parentId,
         color: updatedMeta.color,
+        isTemplatesFolder: isTemplatesRootPath(normalizedNew),
         createdAt: updatedMeta.createdAt,
         updatedAt: updatedMeta.updatedAt,
       },
@@ -1950,17 +2065,26 @@ export async function deleteDocumentPermanentlyOnDisk(input: {
   })
 }
 
-export async function emptyTrashOnDisk(): Promise<{
+export async function emptyTrashOnDisk(ids: readonly string[]): Promise<{
   ok: true
   deletedCount: number
+  deletedIds: string[]
 }> {
+  const wanted = new Set(
+    ids.map((id) => id.trim()).filter((id) => id.length > 0),
+  )
   return await withDriveLock(async () => {
+    if (wanted.size === 0) {
+      return { ok: true, deletedCount: 0, deletedIds: [] }
+    }
     const trashDir = getTrashDir()
     let names: string[]
     try {
       names = await readdir(trashDir)
     } catch (error) {
-      if (isEnoent(error)) return { ok: true, deletedCount: 0 }
+      if (isEnoent(error)) {
+        return { ok: true, deletedCount: 0, deletedIds: [] }
+      }
       throw error
     }
 
@@ -1971,23 +2095,19 @@ export async function emptyTrashOnDisk(): Promise<{
       const slug = name.slice(0, -'.mrbl'.length)
       if (!SLUG_PATTERN.test(slug) || slug.includes('..')) continue
       const meta = await readTrashMeta(slug)
-      const docId = meta?.docId ?? meta?.meta?.id
-      if (docId) docIdsToDelete.add(docId)
+      const docId = trashDocumentId(slug, meta)
+      if (!wanted.has(docId)) continue
+      docIdsToDelete.add(docId)
       purgedSlugs.push(slug)
-    }
-
-    let deletedCount = 0
-    for (const name of names) {
-      if (!name.endsWith('.mrbl') && !name.endsWith('.meta.json')) continue
       await rm(path.resolve(trashDir, name), { force: true })
-      if (name.endsWith('.mrbl')) deletedCount += 1
+      await rm(trashMetaFilePath(slug), { force: true })
     }
 
     for (const docId of docIdsToDelete) {
       await deleteDocumentHistory(docId)
     }
 
-    if (deletedCount > 0) {
+    if (purgedSlugs.length > 0) {
       const metadata = await readMetadata()
       metadata.trash = {
         ...metadata.trash,
@@ -1997,7 +2117,464 @@ export async function emptyTrashOnDisk(): Promise<{
       await writeMetadata(metadata)
     }
 
-    return { ok: true, deletedCount }
+    return {
+      ok: true,
+      deletedCount: purgedSlugs.length,
+      deletedIds: [...docIdsToDelete],
+    }
+  })
+}
+
+function countNodesFallback(source: string): number {
+  const re = /data-marble-id\s*=\s*(?:"[^"]*"|'[^']*')/g
+  let count = 0
+  while (re.exec(source)) count += 1
+  return count
+}
+
+async function collectUsedSlugs(
+  excludeFullPath?: string,
+): Promise<Set<string>> {
+  const used = new Set<string>()
+  const { files } = await scanDriveTree()
+  for (const file of files) {
+    if (excludeFullPath && file.fullPath === excludeFullPath) continue
+    used.add(file.slug)
+  }
+  try {
+    const trashNames = await readdir(getTrashDir())
+    for (const fileName of trashNames) {
+      if (!fileName.endsWith('.mrbl')) continue
+      const slug = fileName.slice(0, -'.mrbl'.length)
+      if (SLUG_PATTERN.test(slug) && !slug.includes('..')) {
+        used.add(slug)
+      }
+    }
+  } catch (error) {
+    if (!isEnoent(error)) throw error
+  }
+  return used
+}
+
+function dedupeValidSlug(validSlug: string, used: Set<string>): string {
+  if (!used.has(validSlug)) return validSlug
+  let candidate = validSlug
+  let suffix = 2
+  while (used.has(candidate)) {
+    const suffixStr = `-${suffix}`
+    const trimmedBase = validSlug.slice(0, Math.max(1, 128 - suffixStr.length))
+    candidate = `${trimmedBase}${suffixStr}`
+    suffix += 1
+  }
+  return candidate
+}
+
+function dedupeSlug(base: string, used: Set<string>): string {
+  return dedupeValidSlug(slugifyTitle(base), used)
+}
+
+function collectUsedFolderIds(
+  metadata: DriveMetadataFile,
+  extraIds?: Iterable<string>,
+): Set<string> {
+  const used = new Set<string>()
+  for (const entry of Object.values(metadata.folders)) {
+    if (entry?.id) used.add(entry.id)
+  }
+  if (extraIds) {
+    for (const id of extraIds) {
+      if (id) used.add(id)
+    }
+  }
+  return used
+}
+
+function mintUnusedFolderId(
+  metadata: DriveMetadataFile,
+  preferredId?: string,
+  extraIds?: Iterable<string>,
+): string {
+  const used = collectUsedFolderIds(metadata, extraIds)
+  const candidate = preferredId?.trim()
+  if (candidate && !used.has(candidate)) {
+    return candidate
+  }
+  let minted = `folder-${randomBytes(6).toString('hex')}`
+  while (used.has(minted)) {
+    minted = `folder-${randomBytes(6).toString('hex')}`
+  }
+  return minted
+}
+
+function ensureTemplatesFolderMeta(
+  metadata: DriveMetadataFile,
+  now: string,
+  preferredId?: string,
+): StoredFolderMeta {
+  const existing = metadata.folders[TEMPLATES_FOLDER_NAME]
+  if (existing) return existing
+  const created: StoredFolderMeta = {
+    id: mintUnusedFolderId(metadata, preferredId ?? TEMPLATES_FOLDER_ID),
+    color: 'accent',
+    createdAt: now,
+    updatedAt: now,
+  }
+  metadata.folders[TEMPLATES_FOLDER_NAME] = created
+  return created
+}
+
+async function collectExistingDocIds(
+  metadata: DriveMetadataFile,
+): Promise<Set<string>> {
+  const ids = new Set<string>()
+  for (const entry of Object.values(metadata.documents)) {
+    if (entry?.id) ids.add(entry.id)
+  }
+  try {
+    const trashNames = await readdir(getTrashDir())
+    for (const fileName of trashNames) {
+      if (!fileName.endsWith('.mrbl')) continue
+      const slug = fileName.slice(0, -'.mrbl'.length)
+      if (!SLUG_PATTERN.test(slug) || slug.includes('..')) continue
+      const trashMeta = await readTrashMeta(slug)
+      if (trashMeta?.docId) ids.add(trashMeta.docId)
+      if (trashMeta?.meta?.id) ids.add(trashMeta.meta.id)
+    }
+  } catch (error) {
+    if (!isEnoent(error)) throw error
+  }
+  return ids
+}
+
+export async function seedPremadeTemplatesOnDisk(
+  premadeTemplates: readonly MarbleDocumentFile[] = PREDEFINED_MARBLE_TEMPLATES,
+): Promise<{ seededSlugs: string[]; skippedIds: string[] }> {
+  return await withDriveLock(async () => {
+    const metadata = await readMetadata()
+    const seededSet = new Set(metadata.templates.seededIds)
+    const unseeded = premadeTemplates.filter((tpl) => !seededSet.has(tpl.id))
+
+    if (unseeded.length === 0) {
+      return {
+        seededSlugs: [],
+        skippedIds: premadeTemplates.map((tpl) => tpl.id),
+      }
+    }
+
+    const templatesDir = resolveDriveDirPath(TEMPLATES_FOLDER_NAME)
+    await mkdir(templatesDir.fullPath, { recursive: true })
+    const now = new Date().toISOString()
+    ensureTemplatesFolderMeta(metadata, now)
+
+    const [existingDocIds, usedSlugs] = await Promise.all([
+      collectExistingDocIds(metadata),
+      collectUsedSlugs(),
+    ])
+    const seededSlugs: string[] = []
+    const skippedIds: string[] = premadeTemplates
+      .filter((tpl) => seededSet.has(tpl.id))
+      .map((tpl) => tpl.id)
+
+    for (const tpl of unseeded) {
+      const desiredSlug = assertSlug(tpl.slug)
+      const defaultTarget = resolveDocumentLocation(
+        desiredSlug,
+        TEMPLATES_FOLDER_NAME,
+      )
+      const [existsInTemplates, knownById] = await Promise.all([
+        pathExists(defaultTarget.fullPath),
+        Promise.resolve(existingDocIds.has(tpl.id)),
+      ])
+
+      if (!existsInTemplates && !knownById) {
+        const chosenSlug = dedupeValidSlug(desiredSlug, usedSlugs)
+        const target = resolveDocumentLocation(
+          chosenSlug,
+          TEMPLATES_FOLDER_NAME,
+        )
+        await writeAtomicText(target.fullPath, tpl.source)
+        const baseShare =
+          sanitizeShareConfig(tpl.share, chosenSlug) ??
+          defaultShareConfig(chosenSlug)
+        metadata.documents[target.relPath] = {
+          id: tpl.id,
+          slug: chosenSlug,
+          title: tpl.title,
+          description: tpl.description,
+          category: tpl.category,
+          isEvergreen: false,
+          version: 1,
+          createdAt: tpl.createdAt || now,
+          updatedAt: tpl.updatedAt || now,
+          createdBy: tpl.createdBy,
+          lastEditedBy: tpl.lastEditedBy,
+          starred: false,
+          pinned: false,
+          tags: [...tpl.tags],
+          share:
+            chosenSlug !== desiredSlug
+              ? {
+                  ...baseShare,
+                  publicLinkUrl: `https://xdrive.app/d/${chosenSlug}`,
+                }
+              : baseShare,
+        }
+        usedSlugs.add(chosenSlug)
+        existingDocIds.add(tpl.id)
+        seededSlugs.push(chosenSlug)
+      } else {
+        skippedIds.push(tpl.id)
+      }
+      seededSet.add(tpl.id)
+    }
+
+    metadata.templates = {
+      seededIds: Array.from(seededSet),
+      seededAt: now,
+    }
+    await writeMetadata(metadata)
+
+    return { seededSlugs, skippedIds }
+  })
+}
+
+export async function listTemplatesOnDisk(
+  nodeCountOf: (source: string) => number,
+): Promise<MarbleDocumentFile[]> {
+  const workspace = await loadDriveWorkspace(nodeCountOf)
+  return workspace.docs.filter((doc) => !doc.trashedAt && doc.isTemplate)
+}
+
+export async function saveAsTemplateOnDisk(input: {
+  sourceSlug?: string
+  sourceFolderPath?: string | null
+  source?: string
+  title: string
+  description?: string
+  category?: MarbleAppCategory
+  tags?: string[]
+  id?: string
+  folderId?: string
+  slug?: string
+  createdBy?: MarbleDocumentFile['createdBy']
+  nodeCountOf?: (source: string) => number
+}): Promise<{ ok: true; folder: DriveFolder; doc: MarbleDocumentFile }> {
+  return await withDriveLock(async () => {
+    const cleanTitle = input.title.trim()
+    if (!cleanTitle) {
+      fail(400, 'title is required')
+    }
+
+    const metadata = await readMetadata()
+    let sourceMeta: StoredDocumentMeta | undefined
+    let rawSource = typeof input.source === 'string' ? input.source : ''
+
+    if (input.sourceSlug) {
+      const validSourceSlug = assertSlug(input.sourceSlug)
+      const located = await findDocumentBySlug(
+        validSourceSlug,
+        input.sourceFolderPath,
+      )
+      if (located) {
+        sourceMeta = metadata.documents[located.relPath]
+        if (!rawSource) {
+          rawSource = await readFile(located.fullPath, 'utf8')
+        }
+      } else if (!rawSource) {
+        fail(404, `No marble document for slug "${validSourceSlug}"`)
+      }
+    }
+
+    if (!rawSource.trim()) {
+      fail(400, 'source or sourceSlug is required')
+    }
+
+    const templatesDir = resolveDriveDirPath(TEMPLATES_FOLDER_NAME)
+    await mkdir(templatesDir.fullPath, { recursive: true })
+    const now = new Date().toISOString()
+    const folderMeta = ensureTemplatesFolderMeta(metadata, now, input.folderId)
+
+    const usedSlugs = await collectUsedSlugs()
+    const desiredSlug = input.slug?.trim()
+      ? slugifyTitle(input.slug.trim(), 'template')
+      : slugifyTitle(cleanTitle, 'template')
+    const uniqueSlug = dedupeSlug(desiredSlug, usedSlugs)
+    const target = resolveDocumentLocation(uniqueSlug, TEMPLATES_FOLDER_NAME)
+    const nextSource = updateMarbleSourceTitle(rawSource, cleanTitle)
+
+    await writeAtomicText(target.fullPath, nextSource)
+
+    const tplId = input.id?.trim() || `tpl-${randomBytes(6).toString('hex')}`
+    const category =
+      sanitizeCategory(input.category) ??
+      sourceMeta?.category ??
+      inferCategory(nextSource, uniqueSlug)
+    const description =
+      typeof input.description === 'string'
+        ? input.description.trim()
+        : (sourceMeta?.description ?? '')
+    const tags = Array.isArray(input.tags)
+      ? input.tags.filter((item): item is string => typeof item === 'string')
+      : sourceMeta?.tags
+        ? [...sourceMeta.tags]
+        : [category]
+    const author = sanitizeAuthor(input.createdBy) ?? {
+      name: 'You',
+      initials: 'YO',
+    }
+    const share = defaultShareConfig(uniqueSlug)
+
+    metadata.documents[target.relPath] = {
+      id: tplId,
+      slug: uniqueSlug,
+      title: cleanTitle,
+      description,
+      category,
+      isEvergreen: false,
+      version: 1,
+      createdAt: now,
+      updatedAt: now,
+      createdBy: author,
+      lastEditedBy: author,
+      starred: false,
+      pinned: false,
+      tags,
+      share,
+    }
+    await writeMetadata(metadata)
+
+    const folder: DriveFolder = {
+      id: folderMeta.id,
+      name: TEMPLATES_FOLDER_NAME,
+      parentId: null,
+      color: sanitizeColor(folderMeta.color),
+      isTemplatesFolder: true,
+      createdAt: folderMeta.createdAt,
+      updatedAt: folderMeta.updatedAt,
+    }
+
+    const doc: MarbleDocumentFile = {
+      id: tplId,
+      slug: uniqueSlug,
+      fileName: target.fileName,
+      title: cleanTitle,
+      description,
+      category,
+      isTemplate: true,
+      isEvergreen: false,
+      source: nextSource,
+      nodeCount: (input.nodeCountOf ?? countNodesFallback)(nextSource),
+      byteSize: byteSizeOf(nextSource),
+      version: 1,
+      syncState: 'saved',
+      createdAt: now,
+      updatedAt: now,
+      createdBy: author,
+      lastEditedBy: author,
+      starred: false,
+      pinned: false,
+      tags,
+      folder: TEMPLATES_FOLDER_NAME,
+      folderId: folder.id,
+      trashedAt: null,
+      share,
+      checkpoints: [],
+      intentHistory: [],
+    }
+
+    return { ok: true, folder, doc }
+  })
+}
+
+export async function renameDocumentOnDisk(input: {
+  slug: string
+  folderPath?: string | null
+  title: string
+  description?: string
+  nextSlug?: string
+}): Promise<{
+  ok: true
+  id: string
+  oldSlug: string
+  slug: string
+  fileName: string
+  folderPath: string
+  relPath: string
+  isTemplate: boolean
+  title: string
+  description: string
+  source: string
+  updatedAt: string
+}> {
+  return await withDriveLock(async () => {
+    const validSlug = assertSlug(input.slug)
+    const cleanTitle = input.title.trim()
+    if (!cleanTitle) {
+      fail(400, 'title is required')
+    }
+
+    const located = await findDocumentBySlug(validSlug, input.folderPath)
+    if (!located) {
+      fail(404, `No marble document for slug "${validSlug}"`)
+    }
+
+    const rawSource = await readFile(located.fullPath, 'utf8')
+    const nextSource = updateMarbleSourceTitle(rawSource, cleanTitle)
+    const metadata = await readMetadata()
+    const prevMeta = metadata.documents[located.relPath] ?? {}
+    const docId = prevMeta.id ?? deterministicId('doc', located.relPath)
+
+    const isEvergreen =
+      Boolean(prevMeta.isEvergreen) ||
+      located.slug === DOCUMENT_DESIGN_SYSTEM_SLUG ||
+      located.slug === DOCUMENT_DONTS_SYSTEM_SLUG
+
+    let targetSlug = located.slug
+    if (!isEvergreen) {
+      const usedSlugs = await collectUsedSlugs(located.fullPath)
+      const desired = input.nextSlug?.trim()
+        ? slugifyTitle(input.nextSlug.trim(), located.slug)
+        : slugifyTitle(cleanTitle, located.slug)
+      targetSlug = dedupeSlug(desired, usedSlugs)
+    }
+
+    const targetLoc = resolveDocumentLocation(targetSlug, located.folderPath)
+    await writeAtomicText(targetLoc.fullPath, nextSource)
+    if (targetLoc.fullPath !== located.fullPath) {
+      await rm(located.fullPath, { force: true })
+      delete metadata.documents[located.relPath]
+    }
+
+    const now = new Date().toISOString()
+    const nextDescription =
+      typeof input.description === 'string'
+        ? input.description.trim()
+        : (prevMeta.description ?? '')
+
+    metadata.documents[targetLoc.relPath] = {
+      ...prevMeta,
+      id: docId,
+      slug: targetSlug,
+      title: cleanTitle,
+      description: nextDescription,
+      updatedAt: now,
+    }
+    await writeMetadata(metadata)
+
+    return {
+      ok: true,
+      id: docId,
+      oldSlug: located.slug,
+      slug: targetSlug,
+      fileName: targetLoc.fileName,
+      folderPath: targetLoc.folderPath,
+      relPath: targetLoc.relPath,
+      isTemplate: isTemplatesFolderPath(targetLoc.folderPath),
+      title: cleanTitle,
+      description: nextDescription,
+      source: nextSource,
+      updatedAt: now,
+    }
   })
 }
 
@@ -2020,11 +2597,13 @@ export async function loadDriveWorkspace(
       : settings.trashRetentionDays
 
   const purged = await purgeExpiredTrashOnDisk(effectiveRetention)
+  await seedPremadeTemplatesOnDisk()
   const { meta: metadata, migrated } = await readMetadataWithMigration()
   const { directories, files } = await scanDriveTree()
 
   const folderByPath = new Map<string, DriveFolder>()
   const folders: DriveFolder[] = []
+  const usedFolderIds = collectUsedFolderIds(metadata)
   let metaDirty = migrated
 
   for (const dir of directories) {
@@ -2036,7 +2615,14 @@ export async function loadDriveWorkspace(
     const name = path.posix.basename(dir.relPath)
     const createdAt = stored?.createdAt ?? info.birthtime.toISOString()
     const updatedAt = stored?.updatedAt ?? info.mtime.toISOString()
-    const id = stored?.id ?? deterministicId('folder', dir.relPath)
+    const id = stored?.id
+      ? stored.id
+      : mintUnusedFolderId(
+          metadata,
+          deterministicId('folder', dir.relPath),
+          usedFolderIds,
+        )
+    usedFolderIds.add(id)
     const color = sanitizeColor(stored?.color)
     if (!stored) {
       metadata.folders[dir.relPath] = { id, color, createdAt, updatedAt }
@@ -2047,6 +2633,7 @@ export async function loadDriveWorkspace(
       name,
       parentId: parent ? parent.id : null,
       color,
+      isTemplatesFolder: isTemplatesRootPath(dir.relPath),
       createdAt,
       updatedAt,
     }
@@ -2101,7 +2688,7 @@ export async function loadDriveWorkspace(
         title,
         description: stored?.description ?? '',
         category,
-        isTemplate: false,
+        isTemplate: isTemplatesFolderPath(file.folderPath),
         isEvergreen: stored?.isEvergreen,
         templateId: stored?.templateId,
         source,
@@ -2144,10 +2731,7 @@ export async function loadDriveWorkspace(
         ? folderByPath.get(normalizeFolderPath(trashMeta.originalFolderPath))
         : undefined
       const trashedAt = trashMeta?.trashedAt ?? info.mtime.toISOString()
-      const id =
-        stored?.id ??
-        trashMeta?.docId ??
-        deterministicId('doc', `trash/${slug}`)
+      const id = trashDocumentId(slug, trashMeta)
       const history = await readDocumentHistory(id)
       trashedDocs.push({
         id,
@@ -2156,7 +2740,7 @@ export async function loadDriveWorkspace(
         title: stored?.title ?? titleOf(source, slug),
         description: stored?.description ?? '',
         category: stored?.category ?? inferCategory(source, slug),
-        isTemplate: false,
+        isTemplate: isTemplatesFolderPath(trashMeta?.originalFolderPath),
         isEvergreen: stored?.isEvergreen,
         templateId: stored?.templateId,
         source,
@@ -2191,6 +2775,16 @@ export async function loadDriveWorkspace(
       }
       for (const [key, value] of Object.entries(metadata.documents)) {
         if (!latest.documents[key]) latest.documents[key] = value
+      }
+      const mergedSeededIds = Array.from(
+        new Set([
+          ...metadata.templates.seededIds,
+          ...latest.templates.seededIds,
+        ]),
+      )
+      latest.templates = {
+        seededIds: mergedSeededIds,
+        seededAt: latest.templates.seededAt ?? metadata.templates.seededAt,
       }
       latest.trash = {
         ...metadata.trash,

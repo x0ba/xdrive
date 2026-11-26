@@ -1,16 +1,21 @@
-import React, { useState } from 'react'
+import React, { useEffect, useRef, useState } from 'react'
 import {
   Search,
   LayoutGrid,
   LayoutPanelTop,
   List,
   ChevronDown,
+  MoreVertical,
+  Pencil,
   Star,
   Copy,
   Share2,
   ArrowUp,
   Pin,
+  Trash2,
 } from 'lucide-react'
+import { AppContextMenu } from '#/components/apps/shared'
+import type { ContextMenuItem } from '#/components/apps/shared'
 import type { ReasoningEffort } from '#/lib/ai/drive-chat-types'
 import { reasoningEffortForModel } from '#/lib/ai/drive-chat-client'
 import type {
@@ -344,67 +349,237 @@ export interface TemplateGalleryCardProps {
   template: MarbleTemplateBlueprint
   onDuplicateTemplate?: (template: MarbleTemplateBlueprint) => void
   onPreviewTemplate?: (template: MarbleTemplateBlueprint) => void
+  onEditTemplate?: (template: MarbleTemplateBlueprint) => void
+  onRenameTemplate?: (template: MarbleTemplateBlueprint) => void
+  onDuplicateAsTemplate?: (template: MarbleTemplateBlueprint) => void
+  onDeleteTemplate?: (template: MarbleTemplateBlueprint) => void
 }
 
 export function TemplateGalleryCard({
   template,
   onDuplicateTemplate,
   onPreviewTemplate,
+  onEditTemplate,
+  onRenameTemplate,
+  onDuplicateAsTemplate,
+  onDeleteTemplate,
 }: TemplateGalleryCardProps) {
   const isEditorial =
     template.category === 'latex' || template.category === 'document'
+  const [menuOpen, setMenuOpen] = useState(false)
+  const [contextMenu, setContextMenu] = useState({ open: false, x: 0, y: 0 })
+  const menuContainerRef = useRef<HTMLDivElement | null>(null)
+
+  useEffect(() => {
+    if (!menuOpen) return
+    function onPointerDown(event: MouseEvent) {
+      if (
+        menuContainerRef.current &&
+        !menuContainerRef.current.contains(event.target as Node)
+      ) {
+        setMenuOpen(false)
+      }
+    }
+    function onKeyDown(event: KeyboardEvent) {
+      if (event.key === 'Escape') setMenuOpen(false)
+    }
+    window.addEventListener('mousedown', onPointerDown)
+    window.addEventListener('keydown', onKeyDown)
+    return () => {
+      window.removeEventListener('mousedown', onPointerDown)
+      window.removeEventListener('keydown', onKeyDown)
+    }
+  }, [menuOpen])
+
+  const editHandler = onEditTemplate ?? onPreviewTemplate
+  const editLabel = onEditTemplate ? 'Edit' : 'Preview'
+  const hasManagementActions = Boolean(
+    onRenameTemplate || onDuplicateAsTemplate || onDeleteTemplate,
+  )
+
+  const menuItems: ContextMenuItem[] = [
+    ...(onDuplicateTemplate
+      ? [
+          {
+            id: 'use-template',
+            label: 'Use template',
+            icon: <Copy className="h-3.5 w-3.5" />,
+            onSelect: () => onDuplicateTemplate(template),
+          },
+        ]
+      : []),
+    ...(editHandler
+      ? [
+          {
+            id: 'edit-template',
+            label: onEditTemplate ? 'Edit template' : 'Preview template',
+            icon: <Pencil className="h-3.5 w-3.5" />,
+            onSelect: () => editHandler(template),
+          },
+        ]
+      : []),
+    ...(onRenameTemplate
+      ? [
+          {
+            id: 'rename-template',
+            label: 'Rename',
+            icon: <Pencil className="h-3.5 w-3.5" />,
+            onSelect: () => onRenameTemplate(template),
+          },
+        ]
+      : []),
+    ...(onDuplicateAsTemplate
+      ? [
+          {
+            id: 'duplicate-template',
+            label: 'Duplicate template',
+            icon: <Copy className="h-3.5 w-3.5" />,
+            onSelect: () => onDuplicateAsTemplate(template),
+          },
+        ]
+      : []),
+    ...(onDeleteTemplate
+      ? [
+          { id: 'sep-delete-template', label: '', divider: true },
+          {
+            id: 'delete-template',
+            label: 'Move to trash',
+            icon: <Trash2 className="h-3.5 w-3.5" />,
+            danger: true,
+            onSelect: () => onDeleteTemplate(template),
+          },
+        ]
+      : []),
+  ]
 
   return (
-    <article className="flex flex-col justify-between rounded-md border border-[var(--xd-border)] bg-[var(--xd-canvas)] p-4 transition-colors hover:border-[var(--xd-border-strong)]">
-      <div>
-        <div className="flex items-center justify-between gap-2 text-[11.5px] text-[var(--xd-ink-muted)]">
-          <span className="inline-flex items-center gap-1.5">
-            <span className="text-[var(--xd-accent)]">
-              {getCategoryIcon(template.category, 'h-3.5 w-3.5')}
+    <>
+      <article
+        onContextMenu={(event) => {
+          if (!hasManagementActions) return
+          event.preventDefault()
+          event.stopPropagation()
+          setContextMenu({ open: true, x: event.clientX, y: event.clientY })
+        }}
+        className="flex flex-col justify-between rounded-md border border-[var(--xd-border)] bg-[var(--xd-canvas)] p-4 transition-colors hover:border-[var(--xd-border-strong)]"
+      >
+        <div>
+          <div className="flex items-center justify-between gap-2 text-[11.5px] text-[var(--xd-ink-muted)]">
+            <span className="inline-flex items-center gap-1.5">
+              <span className="text-[var(--xd-accent)]">
+                {getCategoryIcon(template.category, 'h-3.5 w-3.5')}
+              </span>
+              <span>{getCategoryLabel(template.category)}</span>
             </span>
-            <span>{getCategoryLabel(template.category)}</span>
-          </span>
-          <span className="xd-mono">{template.fileName}</span>
+
+            <div className="flex min-w-0 items-center gap-1">
+              <span className="xd-mono truncate">{template.fileName}</span>
+              {hasManagementActions && (
+                <div ref={menuContainerRef} className="relative">
+                  <button
+                    type="button"
+                    aria-label={`Actions for ${template.title}`}
+                    aria-haspopup="menu"
+                    aria-expanded={menuOpen}
+                    onClick={() => setMenuOpen((prev) => !prev)}
+                    className="inline-flex h-6 w-6 items-center justify-center rounded text-[var(--xd-ink-muted)] transition-colors hover:bg-[var(--xd-surface-hover)] hover:text-[var(--xd-ink)]"
+                  >
+                    <MoreVertical className="h-3.5 w-3.5" />
+                  </button>
+
+                  {menuOpen && (
+                    <div
+                      role="menu"
+                      aria-label={`Actions for ${template.title}`}
+                      className="absolute right-0 top-7 z-30 min-w-[172px] overflow-hidden rounded-md border border-[var(--xd-border-strong)] bg-[var(--xd-canvas)] py-1 shadow-lg"
+                    >
+                      {menuItems.map((item) =>
+                        item.divider ? (
+                          <div
+                            key={item.id}
+                            role="separator"
+                            className="my-1 h-px bg-[var(--xd-border)]"
+                          />
+                        ) : (
+                          <button
+                            key={item.id}
+                            type="button"
+                            role="menuitem"
+                            onClick={() => {
+                              setMenuOpen(false)
+                              item.onSelect?.()
+                            }}
+                            className={`flex w-full items-center gap-2 px-2.5 py-1.5 text-left text-[12px] transition-colors ${
+                              item.danger
+                                ? 'text-[var(--xd-danger)] hover:bg-[var(--xd-danger-soft)]'
+                                : 'text-[var(--xd-ink-secondary)] hover:bg-[var(--xd-surface-hover)] hover:text-[var(--xd-ink)]'
+                            }`}
+                          >
+                            <span className="shrink-0 opacity-80">
+                              {item.icon}
+                            </span>
+                            <span className="truncate">{item.label}</span>
+                          </button>
+                        ),
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          </div>
+
+          <h3
+            className={`mt-2 font-medium text-[var(--xd-ink)] ${
+              isEditorial
+                ? 'xd-serif text-[17px] leading-snug'
+                : 'text-[14.5px] leading-snug tracking-tight'
+            }`}
+          >
+            {template.title}
+          </h3>
+          <p className="mt-1 line-clamp-2 text-[12.5px] leading-relaxed text-[var(--xd-ink-secondary)]">
+            {template.description ||
+              `${getCategoryLabel(template.category)} template`}
+          </p>
         </div>
 
-        <h3
-          className={`mt-2 font-medium text-[var(--xd-ink)] ${
-            isEditorial
-              ? 'xd-serif text-[17px] leading-snug'
-              : 'text-[14.5px] leading-snug tracking-tight'
-          }`}
-        >
-          {template.title}
-        </h3>
-        <p className="mt-1 line-clamp-2 text-[12.5px] leading-relaxed text-[var(--xd-ink-secondary)]">
-          {template.description}
-        </p>
-      </div>
-
-      <div className="mt-4 flex items-center justify-end gap-1.5 pt-2">
-        {onPreviewTemplate && (
-          <WorkspaceLink
-            href={docHref({
-              id: template.id,
-              slug: template.fileName,
-              title: template.title,
-            })}
-            onNavigate={() => onPreviewTemplate(template)}
-            className="inline-flex h-7 items-center rounded border border-[var(--xd-border)] px-2.5 text-[11.5px] font-medium text-[var(--xd-ink-secondary)] transition-colors hover:bg-[var(--xd-surface-hover)] hover:text-[var(--xd-ink)]"
+        <div className="mt-4 flex items-center justify-end gap-1.5 pt-2">
+          {editHandler && (
+            <WorkspaceLink
+              href={docHref({
+                id: template.id,
+                slug: template.fileName,
+                title: template.title,
+              })}
+              onNavigate={() => editHandler(template)}
+              className="inline-flex h-7 items-center rounded border border-[var(--xd-border)] px-2.5 text-[11.5px] font-medium text-[var(--xd-ink-secondary)] transition-colors hover:bg-[var(--xd-surface-hover)] hover:text-[var(--xd-ink)]"
+            >
+              {editLabel}
+            </WorkspaceLink>
+          )}
+          <button
+            type="button"
+            onClick={() => onDuplicateTemplate?.(template)}
+            className="inline-flex h-7 items-center gap-1 rounded bg-[var(--xd-ink)] px-2.5 text-[11.5px] font-medium text-[var(--xd-canvas)] transition-opacity hover:opacity-90"
           >
-            Preview
-          </WorkspaceLink>
-        )}
-        <button
-          type="button"
-          onClick={() => onDuplicateTemplate?.(template)}
-          className="inline-flex h-7 items-center gap-1 rounded bg-[var(--xd-ink)] px-2.5 text-[11.5px] font-medium text-[var(--xd-canvas)] transition-opacity hover:opacity-90"
-        >
-          <Copy className="h-3 w-3" />
-          <span>Use template</span>
-        </button>
-      </div>
-    </article>
+            <Copy className="h-3 w-3" />
+            <span>Use template</span>
+          </button>
+        </div>
+      </article>
+
+      {hasManagementActions && (
+        <AppContextMenu
+          open={contextMenu.open}
+          x={contextMenu.x}
+          y={contextMenu.y}
+          items={menuItems}
+          onClose={() => setContextMenu((prev) => ({ ...prev, open: false }))}
+          ariaLabel={`Actions for ${template.title}`}
+        />
+      )}
+    </>
   )
 }
 

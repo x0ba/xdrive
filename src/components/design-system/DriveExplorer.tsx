@@ -10,6 +10,7 @@ import {
   FolderOpen,
   FolderPlus,
   HardDrive,
+  LayoutTemplate,
   MoreVertical,
   Pencil,
   Pin,
@@ -19,6 +20,7 @@ import {
   Trash2,
   X,
 } from 'lucide-react'
+import { TEMPLATES_FOLDER_NAME, isTemplatesRootFolder } from '#/lib/marble'
 import type {
   DriveFolder,
   DriveFolderColor,
@@ -100,7 +102,12 @@ export function seedDriveFolders(docs: MarbleDocumentFile[]): {
 
   const colorFor = (name: string): DriveFolderColor => {
     const lower = name.toLowerCase()
-    if (lower === 'evergreen') return 'accent'
+    if (
+      lower === 'evergreen' ||
+      lower === TEMPLATES_FOLDER_NAME.toLowerCase()
+    ) {
+      return 'accent'
+    }
     if (lower === 'papers' || lower === 'specs') return 'default'
     if (lower === 'lab') return 'commit'
     if (lower === 'talks') return 'sketch'
@@ -119,6 +126,7 @@ export function seedDriveFolders(docs: MarbleDocumentFile[]): {
         name: folderName,
         parentId: null,
         color: colorFor(folderName),
+        isTemplatesFolder: folderName === TEMPLATES_FOLDER_NAME,
         createdAt: doc.createdAt || now,
         updatedAt: doc.updatedAt || now,
       }
@@ -375,6 +383,7 @@ function CompactActionMenu({
       {open && (
         <div
           role="menu"
+          aria-label={label}
           className="absolute right-0 top-7 z-30 min-w-[168px] overflow-hidden rounded-md border border-[var(--xd-border-strong)] bg-[var(--xd-canvas)] py-1 shadow-lg"
         >
           {items.map((item) => (
@@ -537,6 +546,10 @@ export interface DriveFolderCardProps {
   onDropDoc?: (docId: string, folderId: string) => void
 }
 
+export function isTopLevelTemplatesFolder(folder: DriveFolder): boolean {
+  return isTemplatesRootFolder(folder)
+}
+
 export function DriveFolderCard({
   folder,
   itemCount = 0,
@@ -624,9 +637,15 @@ export function DriveFolderCard({
           onNavigate={onOpen ? () => onOpen(folder) : undefined}
           className="flex min-w-0 flex-1 items-center gap-2.5 after:absolute after:inset-0"
         >
-          <Folder
-            className={`h-4 w-4 shrink-0 fill-current/15 ${getFolderIconClass(folder.color)}`}
-          />
+          {isTopLevelTemplatesFolder(folder) ? (
+            <LayoutTemplate
+              className={`h-4 w-4 shrink-0 ${getFolderIconClass(folder.color)}`}
+            />
+          ) : (
+            <Folder
+              className={`h-4 w-4 shrink-0 fill-current/15 ${getFolderIconClass(folder.color)}`}
+            />
+          )}
           <span className="truncate text-[13px] font-medium text-[var(--xd-ink)]">
             {folder.name}
           </span>
@@ -912,6 +931,8 @@ export interface DriveFileCardProps {
   doc: MarbleDocumentFile
   folderLabel?: string
   onOpen?: (doc: MarbleDocumentFile) => void
+  onRename?: (doc: MarbleDocumentFile) => void
+  onSaveAsTemplate?: (doc: MarbleDocumentFile) => void
   onMove?: (doc: MarbleDocumentFile) => void
   onDuplicate?: (doc: MarbleDocumentFile) => void
   onShare?: (doc: MarbleDocumentFile) => void
@@ -924,6 +945,8 @@ function buildFileMenuItems(props: DriveFileCardProps): ActionMenuItem[] {
   const {
     doc,
     onOpen,
+    onRename,
+    onSaveAsTemplate,
     onMove,
     onDuplicate,
     onShare,
@@ -938,6 +961,26 @@ function buildFileMenuItems(props: DriveFileCardProps): ActionMenuItem[] {
       icon: <ExternalLink className="h-3.5 w-3.5" />,
       onSelect: () => onOpen?.(doc),
     },
+    ...(onRename
+      ? [
+          {
+            id: 'rename',
+            label: 'Rename',
+            icon: <Pencil className="h-3.5 w-3.5" />,
+            onSelect: () => onRename(doc),
+          },
+        ]
+      : []),
+    ...(onSaveAsTemplate && !doc.isTemplate
+      ? [
+          {
+            id: 'save-as-template',
+            label: 'Save as template',
+            icon: <LayoutTemplate className="h-3.5 w-3.5" />,
+            onSelect: () => onSaveAsTemplate(doc),
+          },
+        ]
+      : []),
     ...(onMove
       ? [
           {
@@ -1196,6 +1239,8 @@ export interface DriveFileListTableProps {
   onDeleteFolder?: (folder: DriveFolder) => void
   onDropDocOnFolder?: (docId: string, folderId: string) => void
   onOpenDoc?: (doc: MarbleDocumentFile) => void
+  onRenameDoc?: (doc: MarbleDocumentFile) => void
+  onSaveAsTemplateDoc?: (doc: MarbleDocumentFile) => void
   onMoveDoc?: (doc: MarbleDocumentFile) => void
   onDuplicateDoc?: (doc: MarbleDocumentFile) => void
   onShareDoc?: (doc: MarbleDocumentFile) => void
@@ -1215,6 +1260,8 @@ export function DriveFileListTable({
   onDeleteFolder,
   onDropDocOnFolder,
   onOpenDoc,
+  onRenameDoc,
+  onSaveAsTemplateDoc,
   onMoveDoc,
   onDuplicateDoc,
   onShareDoc,
@@ -1346,9 +1393,15 @@ export function DriveFileListTable({
                     }
                     className="flex items-center gap-2.5"
                   >
-                    <Folder
-                      className={`h-4 w-4 shrink-0 fill-current/15 ${getFolderIconClass(folder.color)}`}
-                    />
+                    {isTopLevelTemplatesFolder(folder) ? (
+                      <LayoutTemplate
+                        className={`h-4 w-4 shrink-0 ${getFolderIconClass(folder.color)}`}
+                      />
+                    ) : (
+                      <Folder
+                        className={`h-4 w-4 shrink-0 fill-current/15 ${getFolderIconClass(folder.color)}`}
+                      />
+                    )}
                     <span className="font-medium text-[var(--xd-ink)]">
                       {folder.name}
                     </span>
@@ -1388,6 +1441,8 @@ export function DriveFileListTable({
             const menuItems = buildFileMenuItems({
               doc,
               onOpen: onOpenDoc,
+              onRename: onRenameDoc,
+              onSaveAsTemplate: onSaveAsTemplateDoc,
               onMove: onMoveDoc,
               onDuplicate: onDuplicateDoc,
               onShare: onShareDoc,
@@ -1437,6 +1492,11 @@ export function DriveFileListTable({
                         <span className="truncate font-medium text-[var(--xd-ink)]">
                           {doc.title}
                         </span>
+                        {doc.isTemplate && (
+                          <span className="xd-mono shrink-0 rounded border border-[var(--xd-accent-border)] bg-[var(--xd-accent-soft)] px-1 py-0.5 text-[9.5px] leading-none text-[var(--xd-accent)]">
+                            Template
+                          </span>
+                        )}
                         {doc.isEvergreen && (
                           <span className="xd-mono shrink-0 rounded border border-[var(--xd-accent-border)] bg-[var(--xd-accent-soft)] px-1 py-0.5 text-[9.5px] leading-none text-[var(--xd-accent)]">
                             Ref
@@ -1659,6 +1719,285 @@ export function DriveFolderDialog({
 }
 
 /* ============================================================================
+   7b. SaveAsTemplateDialog — Save an Existing App/File as a Reusable Template
+   ============================================================================ */
+
+export interface SaveAsTemplateDialogProps {
+  open: boolean
+  sourceTitle: string
+  initialTitle?: string
+  initialDescription?: string
+  onClose: () => void
+  onSubmit: (input: { title: string; description: string }) => void
+}
+
+export function SaveAsTemplateDialog({
+  open,
+  sourceTitle,
+  initialTitle = '',
+  initialDescription = '',
+  onClose,
+  onSubmit,
+}: SaveAsTemplateDialogProps) {
+  const [title, setTitle] = useState(initialTitle || `${sourceTitle} template`)
+  const [description, setDescription] = useState(initialDescription)
+
+  useEffect(() => {
+    if (open) {
+      setTitle(initialTitle || `${sourceTitle} template`)
+      setDescription(initialDescription)
+    }
+  }, [open, sourceTitle, initialTitle, initialDescription])
+
+  useEffect(() => {
+    if (!open) return
+    function onKeyDown(event: KeyboardEvent) {
+      if (event.key === 'Escape') onClose()
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [open, onClose])
+
+  if (!open) return null
+
+  const trimmedTitle = title.trim()
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-start justify-center bg-black/45 px-4 pt-[16vh]"
+      onMouseDown={onClose}
+    >
+      <form
+        role="dialog"
+        aria-modal="true"
+        aria-label="Save as template"
+        className="w-full max-w-sm rounded-lg border border-[var(--xd-border-strong)] bg-[var(--xd-canvas)] p-4 shadow-xl"
+        onMouseDown={(e) => e.stopPropagation()}
+        onSubmit={(event) => {
+          event.preventDefault()
+          if (!trimmedTitle) return
+          onSubmit({ title: trimmedTitle, description: description.trim() })
+        }}
+      >
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <span className="inline-flex h-6 w-6 items-center justify-center rounded border border-[var(--xd-accent-border)] bg-[var(--xd-accent-soft)] text-[var(--xd-accent)]">
+              <LayoutTemplate className="h-3.5 w-3.5" />
+            </span>
+            <h2 className="text-[14px] font-semibold text-[var(--xd-ink)]">
+              Save as template
+            </h2>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="Close dialog"
+            className="inline-flex h-6 w-6 items-center justify-center rounded text-[var(--xd-ink-muted)] hover:bg-[var(--xd-surface-hover)] hover:text-[var(--xd-ink)]"
+          >
+            <X className="h-3.5 w-3.5" />
+          </button>
+        </div>
+
+        <p className="mt-1.5 text-[11.5px] text-[var(--xd-ink-muted)]">
+          Location: My Drive / {TEMPLATES_FOLDER_NAME}
+        </p>
+
+        <div className="mt-3 space-y-2.5">
+          <div>
+            <label
+              htmlFor="xdrive-save-template-title"
+              className="mb-1 block text-[11.5px] font-medium text-[var(--xd-ink-secondary)]"
+            >
+              Template name
+            </label>
+            <input
+              id="xdrive-save-template-title"
+              autoFocus
+              type="text"
+              value={title}
+              onChange={(e) => setTitle(e.target.value)}
+              placeholder="Template name"
+              aria-label="Template name"
+              className="h-8 w-full rounded border border-[var(--xd-border)] bg-[var(--xd-rail)] px-2.5 text-[12.5px] text-[var(--xd-ink)] placeholder:text-[var(--xd-ink-muted)] focus:border-[var(--xd-accent)] focus:outline-none"
+            />
+          </div>
+
+          <div>
+            <label
+              htmlFor="xdrive-save-template-desc"
+              className="mb-1 block text-[11.5px] font-medium text-[var(--xd-ink-secondary)]"
+            >
+              Description (optional)
+            </label>
+            <textarea
+              id="xdrive-save-template-desc"
+              rows={2}
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+              placeholder="Describe what this template includes..."
+              aria-label="Template description"
+              className="w-full resize-none rounded border border-[var(--xd-border)] bg-[var(--xd-rail)] px-2.5 py-1.5 text-[12px] text-[var(--xd-ink)] placeholder:text-[var(--xd-ink-muted)] focus:border-[var(--xd-accent)] focus:outline-none"
+            />
+          </div>
+        </div>
+
+        <div className="mt-4 flex justify-end gap-1.5">
+          <button
+            type="button"
+            onClick={onClose}
+            className="h-7 rounded border border-[var(--xd-border)] px-3 text-[12px] text-[var(--xd-ink-secondary)] transition-colors hover:bg-[var(--xd-surface-hover)] hover:text-[var(--xd-ink)]"
+          >
+            Cancel
+          </button>
+          <button
+            type="submit"
+            disabled={!trimmedTitle}
+            className="h-7 rounded bg-[var(--xd-accent)] px-3 text-[12px] font-medium text-white transition-colors hover:bg-[var(--xd-accent-hover)] disabled:opacity-40"
+          >
+            Save template
+          </button>
+        </div>
+      </form>
+    </div>
+  )
+}
+
+/* ============================================================================
+   7c. DriveRenameDocDialog — Rename a File or Template
+   ============================================================================ */
+
+export interface DriveRenameDocDialogProps {
+  open: boolean
+  isTemplate?: boolean
+  initialTitle: string
+  initialDescription?: string
+  onClose: () => void
+  onSubmit: (input: { title: string; description: string }) => void
+}
+
+export function DriveRenameDocDialog({
+  open,
+  isTemplate = false,
+  initialTitle,
+  initialDescription = '',
+  onClose,
+  onSubmit,
+}: DriveRenameDocDialogProps) {
+  const [title, setTitle] = useState(initialTitle)
+  const [description, setDescription] = useState(initialDescription)
+
+  useEffect(() => {
+    if (open) {
+      setTitle(initialTitle)
+      setDescription(initialDescription)
+    }
+  }, [open, initialTitle, initialDescription])
+
+  useEffect(() => {
+    if (!open) return
+    function onKeyDown(event: KeyboardEvent) {
+      if (event.key === 'Escape') onClose()
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [open, onClose])
+
+  if (!open) return null
+
+  const trimmedTitle = title.trim()
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-start justify-center bg-black/45 px-4 pt-[16vh]"
+      onMouseDown={onClose}
+    >
+      <form
+        role="dialog"
+        aria-modal="true"
+        aria-label={isTemplate ? 'Rename template' : 'Rename file'}
+        className="w-full max-w-sm rounded-lg border border-[var(--xd-border-strong)] bg-[var(--xd-canvas)] p-4 shadow-xl"
+        onMouseDown={(e) => e.stopPropagation()}
+        onSubmit={(event) => {
+          event.preventDefault()
+          if (!trimmedTitle) return
+          onSubmit({ title: trimmedTitle, description: description.trim() })
+        }}
+      >
+        <div className="flex items-center justify-between">
+          <h2 className="text-[14px] font-semibold text-[var(--xd-ink)]">
+            {isTemplate ? 'Rename template' : 'Rename file'}
+          </h2>
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="Close dialog"
+            className="inline-flex h-6 w-6 items-center justify-center rounded text-[var(--xd-ink-muted)] hover:bg-[var(--xd-surface-hover)] hover:text-[var(--xd-ink)]"
+          >
+            <X className="h-3.5 w-3.5" />
+          </button>
+        </div>
+
+        <div className="mt-3 space-y-2.5">
+          <div>
+            <label
+              htmlFor="xdrive-rename-doc-title"
+              className="mb-1 block text-[11.5px] font-medium text-[var(--xd-ink-secondary)]"
+            >
+              Name
+            </label>
+            <input
+              id="xdrive-rename-doc-title"
+              autoFocus
+              type="text"
+              value={title}
+              onChange={(e) => setTitle(e.target.value)}
+              placeholder="Document name"
+              aria-label="Document name"
+              className="h-8 w-full rounded border border-[var(--xd-border)] bg-[var(--xd-rail)] px-2.5 text-[12.5px] text-[var(--xd-ink)] placeholder:text-[var(--xd-ink-muted)] focus:border-[var(--xd-accent)] focus:outline-none"
+            />
+          </div>
+
+          <div>
+            <label
+              htmlFor="xdrive-rename-doc-desc"
+              className="mb-1 block text-[11.5px] font-medium text-[var(--xd-ink-secondary)]"
+            >
+              Description (optional)
+            </label>
+            <textarea
+              id="xdrive-rename-doc-desc"
+              rows={2}
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+              placeholder="Brief summary..."
+              aria-label="Document description"
+              className="w-full resize-none rounded border border-[var(--xd-border)] bg-[var(--xd-rail)] px-2.5 py-1.5 text-[12px] text-[var(--xd-ink)] placeholder:text-[var(--xd-ink-muted)] focus:border-[var(--xd-accent)] focus:outline-none"
+            />
+          </div>
+        </div>
+
+        <div className="mt-4 flex justify-end gap-1.5">
+          <button
+            type="button"
+            onClick={onClose}
+            className="h-7 rounded border border-[var(--xd-border)] px-3 text-[12px] text-[var(--xd-ink-secondary)] transition-colors hover:bg-[var(--xd-surface-hover)] hover:text-[var(--xd-ink)]"
+          >
+            Cancel
+          </button>
+          <button
+            type="submit"
+            disabled={!trimmedTitle}
+            className="h-7 rounded bg-[var(--xd-accent)] px-3 text-[12px] font-medium text-white transition-colors hover:bg-[var(--xd-accent-hover)] disabled:opacity-40"
+          >
+            Save
+          </button>
+        </div>
+      </form>
+    </div>
+  )
+}
+
+/* ============================================================================
    8. DriveMoveDialog — Move a File into Any Folder
    ============================================================================ */
 
@@ -1798,6 +2137,9 @@ export interface DriveTrashListProps {
   formatTrashedAt?: (iso: string) => string
   onRestoreDoc?: (doc: MarbleDocumentFile) => void
   onDeleteForeverDoc?: (doc: MarbleDocumentFile) => void
+  restoreBlockedDocIds?: ReadonlySet<string>
+  deleteForeverBlockedDocIds?: ReadonlySet<string>
+  emptyTrashBlocked?: boolean
   onEmptyTrash?: () => void
 }
 
@@ -1809,6 +2151,9 @@ export function DriveTrashList({
   formatTrashedAt,
   onRestoreDoc,
   onDeleteForeverDoc,
+  restoreBlockedDocIds,
+  deleteForeverBlockedDocIds,
+  emptyTrashBlocked = false,
   onEmptyTrash,
 }: DriveTrashListProps) {
   const effectiveTotal = totalCount ?? docs.length
@@ -1840,7 +2185,13 @@ export function DriveTrashList({
           <button
             type="button"
             onClick={onEmptyTrash}
-            className="inline-flex h-7 items-center gap-1.5 rounded border border-[var(--xd-danger)]/35 bg-[var(--xd-danger-soft)] px-2.5 text-[11.5px] font-medium text-[var(--xd-danger)] transition-colors hover:border-[var(--xd-danger)]/60 hover:bg-[var(--xd-danger)] hover:text-white"
+            disabled={emptyTrashBlocked}
+            title={
+              emptyTrashBlocked
+                ? 'Wait for Trash changes to finish'
+                : 'Empty trash'
+            }
+            className="inline-flex h-7 items-center gap-1.5 rounded border border-[var(--xd-danger)]/35 bg-[var(--xd-danger-soft)] px-2.5 text-[11.5px] font-medium text-[var(--xd-danger)] transition-colors hover:border-[var(--xd-danger)]/60 hover:bg-[var(--xd-danger)] hover:text-white disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:border-[var(--xd-danger)]/35 disabled:hover:bg-[var(--xd-danger-soft)] disabled:hover:text-[var(--xd-danger)]"
           >
             <Trash2 className="h-3 w-3" />
             <span>Empty trash</span>
@@ -1903,8 +2254,12 @@ export function DriveTrashList({
                       : `${daysLeft} days left`
                 const urgent = daysLeft <= 5
 
+                const deleteForeverBlocked =
+                  deleteForeverBlockedDocIds?.has(doc.id) ?? false
+                const restoreBlocked =
+                  restoreBlockedDocIds?.has(doc.id) ?? false
                 const menuItems: ActionMenuItem[] = [
-                  ...(onRestoreDoc
+                  ...(onRestoreDoc && !restoreBlocked
                     ? [
                         {
                           id: 'restore',
@@ -1914,7 +2269,7 @@ export function DriveTrashList({
                         },
                       ]
                     : []),
-                  ...(onDeleteForeverDoc
+                  ...(onDeleteForeverDoc && !deleteForeverBlocked
                     ? [
                         {
                           id: 'delete-forever',
@@ -1995,8 +2350,14 @@ export function DriveTrashList({
                           <button
                             type="button"
                             onClick={() => onRestoreDoc(doc)}
+                            disabled={restoreBlocked}
                             aria-label={`Restore ${doc.title}`}
-                            className="inline-flex h-7 items-center gap-1 rounded border border-[var(--xd-border)] bg-[var(--xd-canvas)] px-2 text-[11.5px] font-medium text-[var(--xd-ink)] transition-colors hover:border-[var(--xd-border-strong)] hover:bg-[var(--xd-surface-hover)]"
+                            title={
+                              restoreBlocked
+                                ? 'Wait for delete to finish'
+                                : 'Restore'
+                            }
+                            className="inline-flex h-7 items-center gap-1 rounded border border-[var(--xd-border)] bg-[var(--xd-canvas)] px-2 text-[11.5px] font-medium text-[var(--xd-ink)] transition-colors hover:border-[var(--xd-border-strong)] hover:bg-[var(--xd-surface-hover)] disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:border-[var(--xd-border)] disabled:hover:bg-[var(--xd-canvas)]"
                           >
                             <RotateCcw className="h-3 w-3 text-[var(--xd-ink-secondary)]" />
                             <span>Restore</span>
@@ -2006,9 +2367,14 @@ export function DriveTrashList({
                           <button
                             type="button"
                             onClick={() => onDeleteForeverDoc(doc)}
+                            disabled={deleteForeverBlocked}
                             aria-label={`Delete ${doc.title} forever`}
-                            title="Delete forever"
-                            className="inline-flex h-7 w-7 items-center justify-center rounded border border-[var(--xd-border)] text-[var(--xd-ink-muted)] transition-colors hover:border-[var(--xd-danger)]/45 hover:bg-[var(--xd-danger-soft)] hover:text-[var(--xd-danger)]"
+                            title={
+                              deleteForeverBlocked
+                                ? 'Wait for the current change to finish'
+                                : 'Delete forever'
+                            }
+                            className="inline-flex h-7 w-7 items-center justify-center rounded border border-[var(--xd-border)] text-[var(--xd-ink-muted)] transition-colors hover:border-[var(--xd-danger)]/45 hover:bg-[var(--xd-danger-soft)] hover:text-[var(--xd-danger)] disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:border-[var(--xd-border)] disabled:hover:bg-transparent disabled:hover:text-[var(--xd-ink-muted)]"
                           >
                             <Trash2 className="h-3.5 w-3.5" />
                           </button>

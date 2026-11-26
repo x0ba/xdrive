@@ -43,6 +43,7 @@ import {
 import { AppContextMenu } from '#/components/apps/shared'
 import type { ContextMenuItem } from '#/components/apps/shared'
 import { WorkspaceLink } from '#/components/routing/WorkspaceLink'
+import { isTemplatesRootFolder } from '#/lib/marble'
 import { docHref, folderHref, navHref } from '#/lib/routing'
 import type {
   DriveFolder,
@@ -463,6 +464,7 @@ export interface SidebarRailProps {
     category: MarbleAppCategory
     nodeCount: number
     starred?: boolean
+    isTemplate?: boolean
   }>
   chatHref?: string
   recentApps?: Array<{
@@ -474,6 +476,8 @@ export interface SidebarRailProps {
   }>
   activeAppId?: string
   onSelectApp?: (appId: string) => void
+  onRenameApp?: (appId: string) => void
+  onSaveAsTemplateApp?: (appId: string) => void
   onMoveApp?: (appId: string) => void
   onDuplicateApp?: (appId: string) => void
   onShareApp?: (appId: string) => void
@@ -505,6 +509,8 @@ export function SidebarRail({
   chatHref = '/chat',
   activeAppId,
   onSelectApp,
+  onRenameApp,
+  onSaveAsTemplateApp,
   onMoveApp,
   onDuplicateApp,
   onShareApp,
@@ -597,6 +603,26 @@ export function SidebarRail({
       icon: <ExternalLink className="h-3.5 w-3.5" />,
       onSelect: () => onSelectApp?.(app.id),
     },
+    ...(onRenameApp
+      ? [
+          {
+            id: 'rename-app',
+            label: 'Rename',
+            icon: <Pencil className="h-3.5 w-3.5" />,
+            onSelect: () => onRenameApp(app.id),
+          },
+        ]
+      : []),
+    ...(onSaveAsTemplateApp && !app.isTemplate
+      ? [
+          {
+            id: 'save-as-template-app',
+            label: 'Save as template',
+            icon: <LayoutTemplate className="h-3.5 w-3.5" />,
+            onSelect: () => onSaveAsTemplateApp(app.id),
+          },
+        ]
+      : []),
     ...(onMoveApp
       ? [
           {
@@ -781,9 +807,15 @@ export function SidebarRail({
               aria-current={isSelected ? 'page' : undefined}
               className="flex min-w-0 flex-1 items-center gap-1.5 text-left"
             >
-              <Folder
-                className={`h-3.5 w-3.5 shrink-0 ${sidebarFolderColorClass(folder.color)}`}
-              />
+              {isTemplatesRootFolder(folder) ? (
+                <LayoutTemplate
+                  className={`h-3.5 w-3.5 shrink-0 ${sidebarFolderColorClass(folder.color)}`}
+                />
+              ) : (
+                <Folder
+                  className={`h-3.5 w-3.5 shrink-0 ${sidebarFolderColorClass(folder.color)}`}
+                />
+              )}
               <span className="truncate">{folder.name}</span>
             </WorkspaceLink>
           </div>
@@ -1102,12 +1134,15 @@ export interface DocumentBreadcrumbHeaderProps {
   onClickFolder?: () => void
   category: MarbleAppCategory
   fileName: string
+  isTemplate?: boolean
   nodeCount?: number
   byteSize?: number
   syncState: MarbleDocumentFile['syncState']
   interactionMode: CanvasInteractionMode
   modeHrefs?: Partial<Record<CanvasInteractionMode, string>>
   onChangeInteractionMode?: (mode: CanvasInteractionMode) => void
+  onSaveAsTemplate?: () => void
+  onUseTemplate?: () => void
   onDuplicate?: () => void
   shareHref?: string
   onOpenShare?: () => void
@@ -1121,10 +1156,13 @@ export function DocumentBreadcrumbHeader({
   folderHref: folderHrefProp,
   onClickFolder,
   fileName,
+  isTemplate = false,
   syncState,
   interactionMode,
   modeHrefs,
   onChangeInteractionMode,
+  onSaveAsTemplate,
+  onUseTemplate,
   onDuplicate,
   shareHref,
   onOpenShare,
@@ -1188,6 +1226,11 @@ export function DocumentBreadcrumbHeader({
             {fileName}
           </span>
         </nav>
+        {isTemplate && (
+          <span className="xd-mono shrink-0 rounded border border-[var(--xd-accent-border)] bg-[var(--xd-accent-soft)] px-1.5 py-0.5 text-[10px] leading-none text-[var(--xd-accent)]">
+            Template
+          </span>
+        )}
         <MarbleSyncBadge state={syncState} showLabel={false} />
       </div>
 
@@ -1238,6 +1281,31 @@ export function DocumentBreadcrumbHeader({
             )
           })}
         </div>
+
+        {isTemplate && onUseTemplate ? (
+          <button
+            type="button"
+            onClick={onUseTemplate}
+            title="Create new app from this template"
+            className="inline-flex h-7 items-center gap-1 rounded bg-[var(--xd-accent)] px-2 text-[11.5px] font-medium text-white transition-colors hover:bg-[var(--xd-accent-hover)]"
+          >
+            <LayoutTemplate className="h-3 w-3" />
+            <span>Use template</span>
+          </button>
+        ) : (
+          !isTemplate &&
+          onSaveAsTemplate && (
+            <button
+              type="button"
+              onClick={onSaveAsTemplate}
+              title="Save a copy to Templates"
+              className="inline-flex h-7 items-center gap-1 rounded border border-[var(--xd-border)] px-2 text-[11.5px] font-medium text-[var(--xd-ink-secondary)] transition-colors hover:bg-[var(--xd-surface-hover)] hover:text-[var(--xd-ink)]"
+            >
+              <LayoutTemplate className="h-3 w-3" />
+              <span>Save as template</span>
+            </button>
+          )
+        )}
 
         <button
           type="button"

@@ -52,6 +52,7 @@ const TEMPLATE_CATEGORIES: Array<{
   { value: 'slides', label: 'Slides' },
   { value: 'matrix', label: 'Matrices' },
   { value: 'sandbox', label: 'Sandbox' },
+  { value: 'custom', label: 'Apps' },
 ]
 
 /* ============================================================================
@@ -151,7 +152,7 @@ export function NewAppButton({
     }
   }, [open])
 
-  const quickTemplates = templates.slice(0, 6)
+  const quickTemplates = templates
   const portalTarget =
     typeof document !== 'undefined'
       ? (rootRef.current?.closest('[data-component="xdrive-workspace"]') ??
@@ -369,17 +370,35 @@ export function NewAppModal({
     templates.at(0)?.id ?? '',
   )
   const [customTitle, setCustomTitle] = useState('')
+  const wasOpenRef = useRef(false)
 
   useEffect(() => {
+    if (open) setMode(initialMode)
+  }, [open, initialMode])
+
+  useEffect(() => {
+    const justOpened = open && !wasOpenRef.current
+    wasOpenRef.current = open
     if (!open) return
-    setMode(initialMode)
-    setFolderId(initialFolderId)
-    if (templates.length > 0) {
+    if (justOpened) {
+      setFolderId(initialFolderId)
+      const first = templates.at(0)
+      setSelectedTemplateId(first?.id ?? '')
+      setCustomTitle(first ? `${first.title} copy` : '')
+      return
+    }
+    if (
+      templates.length > 0 &&
+      !templates.some((tpl) => tpl.id === selectedTemplateId)
+    ) {
       const first = templates[0]
       setSelectedTemplateId(first.id)
       setCustomTitle(`${first.title} copy`)
+    } else if (templates.length === 0 && selectedTemplateId !== '') {
+      setSelectedTemplateId('')
+      setCustomTitle('')
     }
-  }, [open, initialMode, initialFolderId, templates])
+  }, [open, initialFolderId, templates, selectedTemplateId])
 
   useEffect(() => {
     if (!open || !selectedModelId) return
@@ -688,7 +707,12 @@ export function NewAppModal({
 
             {/* Template Grid */}
             <div className="min-h-0 flex-1 overflow-y-auto p-4">
-              {filteredTemplates.length === 0 ? (
+              {templates.length === 0 ? (
+                <p className="py-10 text-center text-[12.5px] text-[var(--xd-ink-muted)]">
+                  No templates in your Templates folder yet. Save any file as a
+                  template from My Drive to start from it here.
+                </p>
+              ) : filteredTemplates.length === 0 ? (
                 <p className="py-10 text-center text-[12.5px] text-[var(--xd-ink-muted)]">
                   No templates match this filter.
                 </p>
@@ -744,7 +768,8 @@ export function NewAppModal({
                         </div>
 
                         <p className="line-clamp-2 px-3 py-2 text-[11.5px] leading-snug text-[var(--xd-ink-secondary)]">
-                          {tpl.description}
+                          {tpl.description ||
+                            `${getCategoryLabel(tpl.category)} template`}
                         </p>
                       </div>
                     )

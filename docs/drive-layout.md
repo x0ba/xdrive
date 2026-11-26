@@ -8,16 +8,18 @@ Copying or moving that folder moves the entire Drive—folder hierarchy, `.mrbl`
 
 ```text
 <XDRIVE_DRIVE_DIR>/                 # Default: ./marble-drive/
+├── Templates/                      # Editable premade & user-created templates (.mrbl)
+│   └── <slug>.mrbl
 ├── <Folder>/                       # Real user folders (arbitrary nesting)
 │   ├── <Subfolder>/
 │   │   └── <slug>.mrbl             # Marble HTML5 document source
 │   └── <slug>.mrbl
 ├── <slug>.mrbl                     # Root-level ("My Drive") documents
-├── .trash/                         # Soft-deleted documents awaiting auto-purge
+├── .trash/                         # Soft-deleted documents & templates awaiting auto-purge
 │   ├── <slug>.mrbl                 # Trashed document source
 │   └── <slug>.meta.json            # Trash timestamp, purge timestamp, original folder & meta
 └── .xdrive/                        # Internal Drive metadata, settings, history & chats
-    ├── metadata.json               # Folder metadata, document metadata, and trash purge state
+    ├── metadata.json               # Folder metadata, document metadata, trash purge state & template seed state
     ├── settings.json               # Per-drive settings (retention, model defaults/favorites, view)
     ├── history/
     │   └── <docId>.json            # Per-document checkpoints (max 40) & AI intent history (max 20)
@@ -36,9 +38,15 @@ Copying or moving that folder moves the entire Drive—folder hierarchy, `.mrbl`
 - Dropping a raw `.mrbl` file or creating a folder directly on disk is supported: the next workspace load discovers it automatically, derives its title and category from the HTML5 source, and records a deterministic ID in `.xdrive/metadata.json`.
 - Moving a `.mrbl` file between folders manually on disk is also recovered on load by matching its slug, and its checkpoint/intent/chat histories follow automatically because they are keyed by `docId`.
 
+### Templates (`Templates/<slug>.mrbl`)
+
+- Starter templates (`PREDEFINED_MARBLE_TEMPLATES`) are seeded idempotently into `<XDRIVE_DRIVE_DIR>/Templates/` on initial workspace load, and their IDs are recorded in `.xdrive/metadata.json` (`templates.seededIds`).
+- Once seeded, templates are ordinary editable `.mrbl` files on disk: user edits are never overwritten on restart, and renamed, moved, or deleted premade templates are not re-seeded.
+- Users can save any existing `.mrbl` document/app as a template via **Save as template** (copying it into `Templates/`), drop raw `.mrbl` files into `Templates/` on disk, or move files into/out of `Templates/`.
+
 ### `.xdrive/metadata.json` (Schema v2)
 
-Stores structured metadata for folders, active documents, and trash purge tracking:
+Stores structured metadata for folders, active documents, trash purge tracking, and template seeding state:
 
 ```json
 {
@@ -81,6 +89,10 @@ Stores structured metadata for folders, active documents, and trash purge tracki
     "retentionDays": 30,
     "lastPurgedAt": "2026-11-25T04:00:00.000Z",
     "lastPurgedSlugs": []
+  },
+  "templates": {
+    "seededIds": ["tpl-latex-studio"],
+    "seededAt": "2026-11-25T04:00:00.000Z"
   }
 }
 ```
@@ -197,7 +209,6 @@ Soft-deleted documents live in `.trash/` until restored, manually deleted, or au
 
 ## What Does _Not_ Live in the Drive Folder
 
-- **Built-in templates** (`PREDEFINED_MARBLE_TEMPLATES`): read-only starter blueprints bundled with the app. Documents created from them are saved into `<XDRIVE_DRIVE_DIR>`.
 - **Machine-local runtime caches & ephemeral temp dirs**: downloaded platform-specific ACP binaries (`~/.xdrive/acp/antigravity-acp`) and temporary LaTeX / ACP scratch workspaces (`xdrive-antigravity-acp-workspace`, `xdrive-opencode-acp-workspace`) in `os.tmpdir()`.
 - **Secrets & credentials**: OpenCode credentials stay in OpenCode CLI's own auth store (`opencode auth login`), and optional fallback/server env vars (`OPENCODE_API_KEY`, `CLERK_SECRET_KEY`, etc.) remain in `.env.local` / environment variables and are never written into the Drive folder.
 

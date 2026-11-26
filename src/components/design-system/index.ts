@@ -64,16 +64,20 @@ export {
   DriveFileListTable,
   DriveFolderDialog,
   DriveMoveDialog,
+  DriveRenameDocDialog,
   DriveTrashList,
   DrivePermanentDeleteDialog,
+  SaveAsTemplateDialog,
   type DriveBreadcrumbBarProps,
   type DriveFolderCardProps,
   type DriveFileCardProps,
   type DriveFileListTableProps,
   type DriveFolderDialogProps,
   type DriveMoveDialogProps,
+  type DriveRenameDocDialogProps,
   type DriveTrashListProps,
   type DrivePermanentDeleteDialogProps,
+  type SaveAsTemplateDialogProps,
 } from './DriveExplorer'
 
 export {

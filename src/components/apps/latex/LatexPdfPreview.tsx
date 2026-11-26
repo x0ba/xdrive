@@ -319,17 +319,20 @@ export const LatexPdfPreview = forwardRef<
                           {
                             id: 'pdflatex',
                             label: 'Native pdfLaTeX (Host)',
-                            available: availableNativeEngines.includes('pdflatex'),
+                            available:
+                              availableNativeEngines.includes('pdflatex'),
                           },
                           {
                             id: 'xelatex',
                             label: 'Native XeLaTeX (Host)',
-                            available: availableNativeEngines.includes('xelatex'),
+                            available:
+                              availableNativeEngines.includes('xelatex'),
                           },
                           {
                             id: 'lualatex',
                             label: 'Native LuaLaTeX (Host)',
-                            available: availableNativeEngines.includes('lualatex'),
+                            available:
+                              availableNativeEngines.includes('lualatex'),
                           },
                         ] as const
                       ).map((eng) => (
