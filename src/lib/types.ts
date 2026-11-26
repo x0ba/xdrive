@@ -41,7 +41,14 @@ export interface MarbleOpProposal {
 }
 
 export type MarbleAppCategory =
-  'latex' | 'notebook' | 'document' | 'slides' | 'matrix' | 'sandbox' | 'custom'
+  | 'latex'
+  | 'notebook'
+  | 'document'
+  | 'slides'
+  | 'matrix'
+  | 'sandbox'
+  | 'whiteboard'
+  | 'custom'
 
 export type SharePermissionLevel =
   | 'view_only' // Look & read only: data-marble-look allowed in visitor tab, no persistent edits, no AI

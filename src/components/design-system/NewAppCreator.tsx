@@ -52,6 +52,7 @@ const TEMPLATE_CATEGORIES: Array<{
   { value: 'slides', label: 'Slides' },
   { value: 'matrix', label: 'Matrices' },
   { value: 'sandbox', label: 'Sandbox' },
+  { value: 'whiteboard', label: 'Whiteboards' },
   { value: 'custom', label: 'Apps' },
 ]
 

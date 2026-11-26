@@ -29,6 +29,7 @@ import {
   Presentation,
   Table2,
   Cpu,
+  PenLine,
   Blocks,
   MousePointerClick,
   BoxSelect,
@@ -88,9 +89,14 @@ export function getCategoryIcon(
       return <Table2 className={className} />
     case 'sandbox':
       return <Cpu className={className} />
+    case 'whiteboard':
+      return <PenLine className={className} />
     case 'custom':
-    default:
       return <Blocks className={className} />
+    default: {
+      const exhaustive: never = category
+      return exhaustive
+    }
   }
 }
 
@@ -108,9 +114,14 @@ export function getCategoryLabel(category: MarbleAppCategory): string {
       return 'Matrix'
     case 'sandbox':
       return 'Sandbox'
+    case 'whiteboard':
+      return 'Whiteboard'
     case 'custom':
-    default:
       return 'App'
+    default: {
+      const exhaustive: never = category
+      return exhaustive
+    }
   }
 }
 
