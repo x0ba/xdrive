@@ -63,6 +63,7 @@ const VALID_CATEGORIES = new Set<MarbleAppCategory>([
   'slides',
   'matrix',
   'sandbox',
+  'whiteboard',
   'custom',
 ])
 
@@ -1065,6 +1066,7 @@ export function byteSizeOf(source: string): number {
 }
 
 export function inferCategory(source: string, slug: string): MarbleAppCategory {
+  if (/data-marble-whiteboard-state\s*=/.test(source)) return 'whiteboard'
   if (
     /data-marble-notes-state\s*=/.test(source) ||
     /id=["']notebook-shell["']/.test(source)
@@ -1095,6 +1097,7 @@ export function inferCategory(source: string, slug: string): MarbleAppCategory {
   if (slug.includes('slide') || slug.includes('deck')) return 'slides'
   if (slug.includes('notebook') || slug.includes('note')) return 'notebook'
   if (slug.includes('latex') || slug.includes('paper')) return 'latex'
+  if (slug.includes('whiteboard')) return 'whiteboard'
   return 'document'
 }
 

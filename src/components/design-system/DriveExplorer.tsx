@@ -740,6 +740,24 @@ export function DriveDocumentThumbnail({ doc }: { doc: MarbleDocumentFile }) {
     )
   }
 
+  if (doc.category === 'whiteboard') {
+    return (
+      <div className="flex h-full w-full flex-col bg-[var(--xd-canvas)] p-3">
+        <div className="flex items-center justify-between gap-2 text-[9px] text-[var(--xd-ink-muted)]">
+          <span className="truncate font-medium text-[var(--xd-ink)]">
+            {snippet.heading}
+          </span>
+          <span className="xd-mono shrink-0">tldraw</span>
+        </div>
+        <div className="relative mt-2 min-h-16 flex-1 overflow-hidden rounded-sm border border-dashed border-[var(--xd-border-strong)] bg-[var(--xd-rail)]">
+          <span className="absolute left-3 top-4 h-px w-10 -rotate-6 bg-[var(--xd-accent)]" />
+          <span className="absolute left-8 top-6 h-6 w-8 rounded-sm border border-[var(--xd-sketch)]" />
+          <span className="absolute right-3 bottom-3 h-2 w-2 rounded-full bg-[var(--xd-commit)]" />
+        </div>
+      </div>
+    )
+  }
+
   if (doc.category === 'sandbox') {
     return (
       <div className="flex h-full w-full flex-col justify-between bg-[var(--xd-canvas)] p-3">

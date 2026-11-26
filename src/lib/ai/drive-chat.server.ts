@@ -12,11 +12,7 @@ import {
   sanitizeHtmlWithEvergreenRules,
   sanitizeTextWithDonts,
 } from '#/lib/marble/ai-collaborator'
-import type {
-  DriveFolderColor,
-  MarbleAppCategory,
-  MarbleOp,
-} from '#/lib/types'
+import type { DriveFolderColor, MarbleAppCategory, MarbleOp } from '#/lib/types'
 import type {
   DriveChatAction,
   DriveChatApiRequest,
@@ -52,6 +48,7 @@ const VALID_CATEGORIES = new Set<MarbleAppCategory>([
   'slides',
   'matrix',
   'sandbox',
+  'whiteboard',
   'custom',
 ])
 
@@ -128,7 +125,9 @@ export function buildDriveChatSystemPrompt(input: DriveChatApiRequest): string {
         )
       : ['- (Trash is empty)']
 
-  const fullSourceDocs = drive.docs.filter((doc) => Boolean(doc.source)).slice(0, 4)
+  const fullSourceDocs = drive.docs
+    .filter((doc) => Boolean(doc.source))
+    .slice(0, 4)
 
   const focusLines =
     drive.focusedRefs.length > 0
@@ -256,7 +255,8 @@ function coerceMarbleOp(raw: unknown): MarbleOp | null {
   }
   const op: MarbleOp = { type: type as MarbleOp['type'] }
   if (typeof record.id === 'string') op.id = record.id
-  if (typeof record.text === 'string') op.text = sanitizeTextWithDonts(record.text)
+  if (typeof record.text === 'string')
+    op.text = sanitizeTextWithDonts(record.text)
   if (typeof record.html === 'string') {
     op.html = sanitizeHtmlWithEvergreenRules(record.html)
   }
@@ -401,7 +401,11 @@ export function parseDriveChatResponse(
     let parsed: Record<string, unknown>
     try {
       const candidate: unknown = JSON.parse(jsonChunk)
-      if (!candidate || typeof candidate !== 'object' || Array.isArray(candidate)) {
+      if (
+        !candidate ||
+        typeof candidate !== 'object' ||
+        Array.isArray(candidate)
+      ) {
         continue
       }
       parsed = candidate as Record<string, unknown>
@@ -511,7 +515,9 @@ export function parseDriveChatResponse(
         )
         const tags = Array.isArray(item.tags)
           ? item.tags
-              .filter((t): t is string => typeof t === 'string' && Boolean(t.trim()))
+              .filter(
+                (t): t is string => typeof t === 'string' && Boolean(t.trim()),
+              )
               .slice(0, 6)
           : [category]
         actions.push({
@@ -606,7 +612,8 @@ export function parseDriveChatResponse(
         referencedSet.add(doc.id)
         const starred =
           typeof item.starred === 'boolean' ? item.starred : undefined
-        const pinned = typeof item.pinned === 'boolean' ? item.pinned : undefined
+        const pinned =
+          typeof item.pinned === 'boolean' ? item.pinned : undefined
         const tags = Array.isArray(item.tags)
           ? item.tags.filter((t): t is string => typeof t === 'string')
           : undefined
@@ -732,7 +739,9 @@ export function parseDriveChatResponse(
           folderName: folder.name,
           nextName,
           nextColor:
-            rawColor && VALID_FOLDER_COLORS.has(rawColor) ? rawColor : undefined,
+            rawColor && VALID_FOLDER_COLORS.has(rawColor)
+              ? rawColor
+              : undefined,
           label: `Rename folder ${folder.name}`,
           summary:
             typeof item.summary === 'string' && item.summary.trim()

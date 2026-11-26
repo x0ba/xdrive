@@ -11,6 +11,7 @@ import {
   duplicateMarbleTemplate,
   escapeText,
 } from './engine-client'
+import { whiteboardStateScript } from './whiteboard-document'
 
 export const TEMPLATES_FOLDER_NAME = 'Templates'
 export const TEMPLATES_FOLDER_ID = 'folder-templates'
@@ -1185,6 +1186,21 @@ function matrixSource(): string {
   return page('Literature Review & Synthesis Matrix', css, body, script)
 }
 
+function whiteboardSource(): string {
+  const css = `
+  .board { max-width: 42rem; padding: 2.5rem 2rem 4rem; }
+  .board h1 { font-family: var(--serif); font-size: 2.1rem; font-weight: 450; letter-spacing: -0.02em; margin: .2rem 0 .75rem; }
+  .board p { max-width: 36rem; color: var(--muted); }
+  `
+  const body = `<main data-marble-id="whiteboard" class="board">
+  <p data-marble-id="whiteboard-kicker" class="kicker">Whiteboard</p>
+  <h1 data-marble-id="whiteboard-title" data-marble-editable>Whiteboard</h1>
+  <p data-marble-id="whiteboard-lede" data-marble-editable>An infinite canvas. Draw on it in xDrive and this file keeps the tldraw snapshot.</p>
+</main>
+${whiteboardStateScript(null)}`
+  return page('Whiteboard', css, body, '')
+}
+
 function sandboxSource(): string {
   const css = `
   main { max-width: 68rem; margin: 0 auto; padding: 2rem 1.4rem 4rem; display: grid; grid-template-columns: 1.2fr .8fr; gap: 1rem; }
@@ -1533,6 +1549,20 @@ export const PREDEFINED_MARBLE_TEMPLATES: MarbleDocumentFile[] = [
     starred: true,
     pinned: false,
     tags: ['chart', 'benchmark', 'sandbox'],
+    folder: 'Templates',
+  }),
+  template({
+    id: 'tpl-whiteboard',
+    slug: 'whiteboard',
+    fileName: 'whiteboard.mrbl',
+    title: 'Whiteboard',
+    description:
+      'An infinite tldraw canvas. Drawings are stored in this file and can be renamed, moved, and saved as a template.',
+    category: 'whiteboard',
+    source: whiteboardSource(),
+    starred: false,
+    pinned: false,
+    tags: ['whiteboard', 'tldraw', 'sketch'],
     folder: 'Templates',
   }),
 ]

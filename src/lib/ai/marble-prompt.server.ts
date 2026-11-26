@@ -54,6 +54,7 @@ const VALID_CATEGORIES = new Set<MarbleAppCategory>([
   'slides',
   'matrix',
   'sandbox',
+  'whiteboard',
   'custom',
 ])
 
@@ -202,7 +203,7 @@ export function buildMarbleAcpPrompt(input: ServerCollaborateInput): string {
       '  "newDocument": {',
       '    "title": "Human-readable title",',
       '    "slug": "url-safe-slug",',
-      '    "category": "latex" | "notebook" | "document" | "slides" | "matrix" | "sandbox" | "custom",',
+      '    "category": "latex" | "notebook" | "document" | "slides" | "matrix" | "sandbox" | "whiteboard" | "custom",',
       '    "description": "1-sentence description",',
       '    "tags": ["tag1", "tag2"],',
       '    "source": "<!DOCTYPE html>\\n<html lang=\\"en\\">...complete interactive .mrbl HTML5 document with data-marble-id on key elements, data-marble-editable on editable prose, and clean <style> using xDrive tokens...</html>"',

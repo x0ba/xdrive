@@ -83,7 +83,15 @@ import {
   nodeToElement,
   MarbleSourceInspector,
 } from '#/components/workspace/MarbleSourceInspector'
-import { DocsApp, LatexApp, NotesApp, SlidesApp } from '#/components/apps'
+import {
+  DocsApp,
+  LatexApp,
+  NotesApp,
+  SlidesApp,
+  WhiteboardApp,
+} from '#/components/apps'
+import { canMarkPersistedSourceSaved } from '#/components/apps/whiteboard/save-gate'
+import { isWhiteboardMarbleSource } from '#/lib/marble/whiteboard-document'
 import { DriveChatView } from '#/components/chat'
 import {
   buildDriveChatModels,
@@ -340,7 +348,33 @@ const MODEL_FOR: Record<MarbleAppCategory, string> = {
   slides: 'Grok 4.7',
   matrix: 'DeepSeek Flash',
   sandbox: 'Grok 4.7 Build Fast',
+  whiteboard: 'Grok 4.7',
   custom: 'Grok 4.7',
+}
+
+type RichEditorKind = 'notes' | 'docs' | 'slides' | 'latex' | 'whiteboard'
+
+function richEditorKind(doc: MarbleDocumentFile): RichEditorKind | null {
+  switch (doc.category) {
+    case 'notebook':
+      return 'notes'
+    case 'slides':
+      return 'slides'
+    case 'latex':
+      return 'latex'
+    case 'document':
+      return doc.isEvergreen ? null : 'docs'
+    case 'whiteboard':
+      return 'whiteboard'
+    case 'matrix':
+    case 'sandbox':
+    case 'custom':
+      return null
+    default: {
+      const exhaustive: never = doc.category
+      return exhaustive
+    }
+  }
 }
 
 const LIGHT_VARS: CSSProperties = {
@@ -1088,6 +1122,7 @@ export function XDriveWorkspace({
   const shownSigRef = useRef('')
   const saveTokens = useRef(new Map<string, number>())
   const pendingSaveCountsRef = useRef(new Map<string, number>())
+  const whiteboardUncommittedRef = useRef(new Set<string>())
   const suppressedLocalDocIdsRef = useRef(new Set<string>())
   const pendingRenameDocIdsRef = useRef(new Set<string>())
   const [pendingRenameDocIds, setPendingRenameDocIds] = useState<Set<string>>(
@@ -1486,6 +1521,9 @@ export function XDriveWorkspace({
       const pendingSaveDocIds = new Set<string>()
       for (const [docId, count] of pendingSaveCountsRef.current) {
         if (count > 0) pendingSaveDocIds.add(docId)
+      }
+      for (const docId of whiteboardUncommittedRef.current) {
+        pendingSaveDocIds.add(docId)
       }
       const mergedDocs = mergeReloadedWorkspaceDocs({
         reloadedDocs: data.docs,
@@ -2619,7 +2657,8 @@ export function XDriveWorkspace({
       !pendingPermanentDeleteDocIdsRef.current.has(id) &&
       !pendingSaveAsTemplateDocIdsRef.current.has(id) &&
       (pendingSaveCountsRef.current.get(id) ?? 0) === 0 &&
-      (heldDocEditsRef.current.get(id)?.length ?? 0) === 0
+      (heldDocEditsRef.current.get(id)?.length ?? 0) === 0 &&
+      !whiteboardUncommittedRef.current.has(id)
     )
   }
 
@@ -2735,6 +2774,16 @@ export function XDriveWorkspace({
       .then(() => {
         if (saveTokens.current.get(id) !== token) return
         const settled = docWriteSettled(id)
+        const displayed = sourceRef.current.get(id)
+        const sourcesMatch =
+          !isWhiteboardMarbleSource(nextSource) ||
+          canMarkPersistedSourceSaved({
+            writtenSource: nextSource,
+            displayedSource: displayed,
+            saveOrLifecyclePending: !settled,
+            editorAheadOfDisplayedSource:
+              whiteboardUncommittedRef.current.has(id),
+          })
         const live = allDocsRef.current.find((item) => item.id === id)
         if (!live) {
           if (!docOverride) return
@@ -2743,11 +2792,11 @@ export function XDriveWorkspace({
             source: nextSource,
             nodeCount: countMarbleNodes(nextSource),
             byteSize: byteSizeOf(nextSource),
-            syncState: settled ? 'saved' : 'saving',
+            syncState: settled && sourcesMatch ? 'saved' : 'saving',
           })
           return
         }
-        if (settled) markDocSavedIfSettled(id)
+        if (settled && sourcesMatch) markDocSavedIfSettled(id)
       })
       .catch(() => {
         if (saveTokens.current.get(id) !== token) return
@@ -4408,7 +4457,10 @@ export function XDriveWorkspace({
     for (const id of removedIds) {
       queueDocChatDelete(id)
     }
-    for (const id of removedIds) sourceRef.current.delete(id)
+    for (const id of removedIds) {
+      sourceRef.current.delete(id)
+      whiteboardUncommittedRef.current.delete(id)
+    }
     setLivePreview((prev) => (prev && removedIds.has(prev.docId) ? null : prev))
     setShareId((prev) => (prev && removedIds.has(prev) ? null : prev))
     setMoveDocId((prev) => (prev && removedIds.has(prev) ? null : prev))
@@ -6128,21 +6180,13 @@ export function XDriveWorkspace({
 
   const shareDoc = findDoc(shareId)
   const frameTitle = activeDoc ? `${activeDoc.title} .mrbl app` : 'Marble app'
-  const richAppKind = activeDoc
-    ? activeDoc.category === 'notebook'
-      ? 'notes'
-      : activeDoc.category === 'slides'
-        ? 'slides'
-        : activeDoc.category === 'latex'
-          ? 'latex'
-          : activeDoc.category === 'document' && !activeDoc.isEvergreen
-            ? 'docs'
-            : null
-    : null
+  const richAppKind = activeDoc ? richEditorKind(activeDoc) : null
 
   const appDisplaySource = activeDoc ? (previewSource ?? activeDoc.source) : ''
   const appReadOnly =
     permission === 'view_only' || permission === 'comment_annotate'
+  const whiteboardReadOnly =
+    appReadOnly || (activeDoc ? lifecycleLockedDocIds.has(activeDoc.id) : false)
 
   function handleRichAppSourceChange(nextSource: string, label: string) {
     if (!activeDoc) return
@@ -6175,6 +6219,96 @@ export function XDriveWorkspace({
     }
     patchFile(id, () => updatedDoc)
     persist(id, activeDoc.slug, prior, [], nextSource, updatedDoc)
+  }
+
+  function noteWhiteboardDraft(docId: string) {
+    if (docEditDisposition(docId, currentLifecyclePending()) === 'block') return
+    whiteboardUncommittedRef.current.add(docId)
+    const doc = allDocsRef.current.find((item) => item.id === docId)
+    if (!doc || doc.syncState !== 'saved') return
+    patchFile(docId, (item) => ({ ...item, syncState: 'saving' }))
+  }
+
+  function clearWhiteboardDraft(docId: string) {
+    whiteboardUncommittedRef.current.delete(docId)
+    if (!docWriteSettled(docId)) return
+    const displayed = sourceRef.current.get(docId)
+    const doc = allDocsRef.current.find((item) => item.id === docId)
+    if (!doc) return
+    if (
+      !canMarkPersistedSourceSaved({
+        writtenSource: doc.source,
+        displayedSource: displayed,
+        saveOrLifecyclePending: false,
+        editorAheadOfDisplayedSource: false,
+      })
+    ) {
+      return
+    }
+    markDocSavedIfSettled(docId)
+  }
+
+  function commitWhiteboardSource(
+    docId: string,
+    nextSource: string,
+    label: string,
+  ): boolean {
+    const meta = allDocsRef.current.find((doc) => doc.id === docId)
+    if (!meta) {
+      whiteboardUncommittedRef.current.delete(docId)
+      return false
+    }
+    if (refuseDocLifecycle(docId, 'edit', 'editing this file')) {
+      whiteboardUncommittedRef.current.delete(docId)
+      return false
+    }
+    whiteboardUncommittedRef.current.delete(docId)
+    const prior = sourceRef.current.get(docId) ?? meta.source
+    if (prior === nextSource) {
+      if (!syncWithServer && docWriteSettled(docId))
+        markDocSavedIfSettled(docId)
+      return true
+    }
+    sourceRef.current.set(docId, nextSource)
+    if (activeTabRef.current === docId) shownSourceRef.current = nextSource
+    const checkpoint: MarbleCheckpoint = {
+      sha: shortSha(),
+      label,
+      timestamp: Date.now(),
+      author: YOU.name,
+      opsCount: 1,
+      source: nextSource,
+    }
+    const updatedDoc: MarbleDocumentFile = {
+      ...meta,
+      source: nextSource,
+      nodeCount: countMarbleNodes(nextSource),
+      byteSize: byteSizeOf(nextSource),
+      version: meta.version + 1,
+      updatedAt: new Date().toISOString(),
+      syncState: 'saving',
+      lastEditedBy: YOU,
+      checkpoints: coalesceCheckpoint(meta.checkpoints, checkpoint, {
+        type: 'setText',
+      }),
+    }
+    patchFile(docId, () => updatedDoc)
+    if (!syncWithServer) {
+      if (
+        canMarkPersistedSourceSaved({
+          writtenSource: nextSource,
+          displayedSource: sourceRef.current.get(docId),
+          saveOrLifecyclePending: !docWriteSettled(docId),
+          editorAheadOfDisplayedSource:
+            whiteboardUncommittedRef.current.has(docId),
+        })
+      ) {
+        markDocSavedIfSettled(docId)
+      }
+      return true
+    }
+    persist(docId, meta.slug, prior, [], nextSource, updatedDoc)
+    return true
   }
 
   useEffect(() => {
@@ -6244,6 +6378,19 @@ export function XDriveWorkspace({
           marbleSource={appDisplaySource}
           onMarbleSourceChange={handleRichAppSourceChange}
           readOnly={appReadOnly}
+        />
+      </div>
+    ) : richAppKind === 'whiteboard' && activeDoc ? (
+      <div ref={richStageRef} className="h-full w-full min-h-0">
+        <WhiteboardApp
+          key={activeDoc.id}
+          marbleSource={appDisplaySource}
+          onDraft={() => noteWhiteboardDraft(activeDoc.id)}
+          onDraftClear={() => clearWhiteboardDraft(activeDoc.id)}
+          onMarbleSourceChange={(nextSource, label) =>
+            commitWhiteboardSource(activeDoc.id, nextSource, label)
+          }
+          readOnly={whiteboardReadOnly}
         />
       </div>
     ) : (
