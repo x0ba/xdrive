@@ -378,3 +378,46 @@ export function replayHeldDocEdits(
 
   return { source: current, ops }
 }
+
+/**
+ * Merges freshly loaded server documents with in-flight client rename/move
+ * mutations so unrelated workspace reloads never erase held edits or clear
+ * saving indicators for queued mutations.
+ */
+export function mergeReloadedWorkspaceDocs(input: {
+  reloadedDocs: readonly MarbleDocumentFile[]
+  currentDocs: readonly MarbleDocumentFile[]
+  pendingRenameDocIds: ReadonlySet<string>
+  heldDocEdits: ReadonlyMap<string, readonly HeldDocEdit[]>
+  pendingMoveDocIds?: ReadonlySet<string>
+}): MarbleDocumentFile[] {
+  return input.reloadedDocs.map((serverDoc) => {
+    const isRenamePending = input.pendingRenameDocIds.has(serverDoc.id)
+    const isMovePending = input.pendingMoveDocIds?.has(serverDoc.id) ?? false
+    if (!isRenamePending && !isMovePending) {
+      return serverDoc
+    }
+    if (!isRenamePending) {
+      return { ...serverDoc, syncState: 'saving' }
+    }
+    const held = input.heldDocEdits.get(serverDoc.id)
+    const currentDoc = input.currentDocs.find(
+      (item) => item.id === serverDoc.id,
+    )
+    if (held && held.length > 0 && currentDoc) {
+      return {
+        ...serverDoc,
+        source: currentDoc.source,
+        nodeCount: currentDoc.nodeCount,
+        byteSize: currentDoc.byteSize,
+        version: currentDoc.version,
+        checkpoints: currentDoc.checkpoints,
+        intentHistory: currentDoc.intentHistory,
+        updatedAt: currentDoc.updatedAt,
+        lastEditedBy: currentDoc.lastEditedBy,
+        syncState: 'saving',
+      }
+    }
+    return { ...serverDoc, syncState: 'saving' }
+  })
+}

@@ -7,6 +7,7 @@ import {
   PREDEFINED_MARBLE_TEMPLATES,
   TEMPLATES_FOLDER_NAME,
 } from '#/lib/marble'
+import type { DriveChatThread } from '#/lib/ai/drive-chat-types'
 import type { DriveFolder, MarbleDocumentFile } from '#/lib/types'
 import { XDriveWorkspace } from './XDriveWorkspace'
 
@@ -1318,5 +1319,757 @@ export const SaveAsTemplateReplyPreservesFolderRename: Story = {
       expect(savePosts[0]?.slug).toBe('race-template')
       expect(savePosts[0]?.folderPath).toBe('Archived Templates')
     })
+  },
+}
+
+const MOVE_RACE_DOC: MarbleDocumentFile = {
+  ...INITIAL_WORKSPACE_DOCS[2],
+  id: 'doc-move-race',
+  slug: 'move-race-doc',
+  fileName: 'move-race-doc.mrbl',
+  title: 'Move Race Doc',
+  category: 'document',
+  isTemplate: false,
+  isEvergreen: false,
+  starred: false,
+  pinned: true,
+  folder: 'My Drive',
+  folderId: null,
+  trashedAt: null,
+  source:
+    '<!doctype html><html lang="en" data-marble="1"><head><meta charset="utf-8"><title>Move Race Doc</title></head><body><main><h1 data-marble-id="h1" data-marble-editable>Initial Body</h1></main></body></html>',
+}
+
+const MOVE_RACE_ARCHIVE_FOLDER: DriveFolder = {
+  id: 'folder-archive',
+  name: 'Archive',
+  parentId: null,
+  color: 'default',
+  createdAt: '2026-11-26T00:00:00.000Z',
+  updatedAt: '2026-11-26T00:00:00.000Z',
+}
+
+const MOVE_RACE_BLOCKED_FOLDER: DriveFolder = {
+  id: 'folder-blocked',
+  name: 'Blocked',
+  parentId: null,
+  color: 'sketch',
+  createdAt: '2026-11-26T00:00:00.000Z',
+  updatedAt: '2026-11-26T00:00:00.000Z',
+}
+
+let resolveFirstMoveRaceSave: (() => void) | null = null
+let recordedMoveRacePosts: RecordedMarblePost[] = []
+
+function QueuedEditBeforeMoveHarness(
+  args: ComponentProps<typeof XDriveWorkspace>,
+) {
+  const [ready, setReady] = useState(false)
+
+  useEffect(() => {
+    recordedMoveRacePosts = []
+    let saveAttempt = 0
+    const originalFetch = window.fetch.bind(window)
+    window.fetch = async (input, init) => {
+      const url =
+        typeof input === 'string'
+          ? input
+          : input instanceof Request
+            ? input.url
+            : String(input)
+      if (url.includes('/api/marble')) {
+        const method = (init?.method ?? 'GET').toUpperCase()
+        if (method === 'GET' && url.includes('action=workspace')) {
+          return new Response(
+            JSON.stringify({
+              ok: true,
+              folders: [MOVE_RACE_ARCHIVE_FOLDER, MOVE_RACE_BLOCKED_FOLDER],
+              docs: [MOVE_RACE_DOC],
+            }),
+            {
+              status: 200,
+              headers: { 'content-type': 'application/json' },
+            },
+          )
+        }
+        if (method === 'POST' && typeof init?.body === 'string') {
+          const payload = JSON.parse(init.body) as RecordedMarblePost
+          if (payload.action === 'diff' || payload.action === 'doctor') {
+            return new Response(JSON.stringify({ ok: false }), {
+              status: 404,
+              headers: { 'content-type': 'application/json' },
+            })
+          }
+          recordedMoveRacePosts.push(payload)
+          if (payload.action === 'save' || payload.action === 'apply_ops') {
+            saveAttempt += 1
+            if (saveAttempt === 1) {
+              await new Promise<void>((resolve) => {
+                resolveFirstMoveRaceSave = resolve
+              })
+            }
+            return new Response(
+              JSON.stringify({
+                ok: true,
+                slug: payload.slug,
+                folderPath: payload.folderPath ?? '',
+                source: payload.source,
+              }),
+              {
+                status: 200,
+                headers: { 'content-type': 'application/json' },
+              },
+            )
+          }
+          if (payload.action === 'move_document') {
+            if (payload.toFolderPath === 'Blocked') {
+              return new Response(
+                JSON.stringify({
+                  ok: false,
+                  error: 'Blocked folder conflict',
+                }),
+                {
+                  status: 409,
+                  headers: { 'content-type': 'application/json' },
+                },
+              )
+            }
+            return new Response(
+              JSON.stringify({
+                ok: true,
+                slug: payload.slug,
+                fromPath: `${payload.slug}.mrbl`,
+                toPath: `${String(payload.toFolderPath ?? '')}/${payload.slug}.mrbl`,
+                folderPath: payload.toFolderPath ?? '',
+                isTemplate: false,
+              }),
+              {
+                status: 200,
+                headers: { 'content-type': 'application/json' },
+              },
+            )
+          }
+          return new Response(JSON.stringify({ ok: true }), {
+            status: 200,
+            headers: { 'content-type': 'application/json' },
+          })
+        }
+      }
+      return originalFetch(input, init)
+    }
+    setReady(true)
+    return () => {
+      resolveFirstMoveRaceSave?.()
+      resolveFirstMoveRaceSave = null
+      window.fetch = originalFetch
+    }
+  }, [])
+
+  if (!ready) return null
+  return <XDriveWorkspace {...args} />
+}
+
+/**
+ * Verifies that edits queued before a move target the pre-move confirmed folder, while edits after a confirmed move target the destination and failed moves preserve the confirmed folder.
+ *
+ * @summary Server-confirmed move keeps queued writes bound to confirmed folders
+ */
+export const QueuedEditBeforeMoveUsesConfirmedFolder: Story = {
+  name: 'Document · Queued Edit Targets Confirmed Folder Before Move',
+  args: {
+    initialTheme: 'dark',
+    initialActiveTabId: 'doc-move-race',
+    initialDocs: [MOVE_RACE_DOC],
+    initialOpenDocIds: ['doc-move-race'],
+    initialMode: 'source',
+    initialAiSidebarOpen: false,
+    syncWithServer: true,
+  },
+  render: (args) => <QueuedEditBeforeMoveHarness {...args} />,
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    const sourceTextarea = await canvas.findByLabelText<HTMLTextAreaElement>(
+      'Marble HTML5 source',
+    )
+    await waitFor(() => expect(sourceTextarea.value).toContain('Initial Body'))
+
+    const sidebarNav = canvas.getByRole('navigation', {
+      name: 'Primary Workspace Navigation',
+    })
+    const sidebarContainer = sidebarNav.parentElement
+    expect(sidebarContainer).not.toBeNull()
+    await expect(
+      await within(sidebarContainer!).findByRole('link', { name: 'Archive' }),
+    ).toBeVisible()
+
+    const replaceBodyText = async (currentText: string, nextText: string) => {
+      const start = sourceTextarea.value.indexOf(currentText)
+      expect(start).toBeGreaterThan(-1)
+      sourceTextarea.focus()
+      await userEvent.type(sourceTextarea, nextText, {
+        initialSelectionStart: start,
+        initialSelectionEnd: start + currentText.length,
+      })
+      await userEvent.click(canvas.getByRole('button', { name: 'Apply' }))
+      await waitFor(() =>
+        expect(canvas.getByRole('button', { name: 'Apply' })).toBeDisabled(),
+      )
+    }
+
+    const triggerMoveTo = async (folderName: string) => {
+      const pinnedLink = await within(sidebarContainer!).findByRole('link', {
+        name: 'Move Race Doc',
+      })
+      await userEvent.pointer({ keys: '[MouseRight]', target: pinnedLink })
+      const menu = await canvas.findByRole('menu', {
+        name: 'Actions for Move Race Doc',
+      })
+      await userEvent.click(
+        within(menu).getByRole('menuitem', { name: 'Move to folder…' }),
+      )
+      const dialog = await canvas.findByRole('dialog', {
+        name: 'Move file to folder',
+      })
+      await userEvent.click(
+        within(dialog).getByRole('button', { name: folderName }),
+      )
+      await userEvent.click(
+        within(dialog).getByRole('button', { name: 'Move here' }),
+      )
+    }
+
+    // Edit 1 holds the queue; Edit 2 and Move -> Archive queue behind it.
+    await replaceBodyText('Initial Body', 'First Edit Body')
+    await waitFor(() => expect(resolveFirstMoveRaceSave).not.toBeNull())
+
+    await replaceBodyText('First Edit Body', 'Second Edit Body')
+    await triggerMoveTo('Archive')
+    expect(
+      await canvas.findByText('Moving "Move Race Doc" to Archive…'),
+    ).toBeVisible()
+
+    resolveFirstMoveRaceSave?.()
+    resolveFirstMoveRaceSave = null
+
+    await expect(
+      await canvas.findByText('Moved "Move Race Doc" to Archive'),
+    ).toBeVisible()
+
+    await waitFor(() => expect(recordedMoveRacePosts).toHaveLength(3))
+    expect(['save', 'apply_ops']).toContain(recordedMoveRacePosts[0]?.action)
+    expect(recordedMoveRacePosts[0]?.folderPath).toBe('')
+    expect(['save', 'apply_ops']).toContain(recordedMoveRacePosts[1]?.action)
+    expect(recordedMoveRacePosts[1]?.folderPath).toBe('')
+    expect(recordedMoveRacePosts[2]?.action).toBe('move_document')
+    expect(recordedMoveRacePosts[2]?.fromFolderPath).toBe('')
+    expect(recordedMoveRacePosts[2]?.toFolderPath).toBe('Archive')
+
+    // Edit 3 after confirmed move targets Archive.
+    await replaceBodyText('Second Edit Body', 'Third Edit Body')
+    await waitFor(() => expect(recordedMoveRacePosts).toHaveLength(4))
+    expect(['save', 'apply_ops']).toContain(recordedMoveRacePosts[3]?.action)
+    expect(recordedMoveRacePosts[3]?.folderPath).toBe('Archive')
+
+    // Failed move to Blocked keeps confirmed Archive location for Edit 4.
+    await triggerMoveTo('Blocked')
+    expect(await canvas.findByText('Blocked folder conflict')).toBeVisible()
+
+    await replaceBodyText('Third Edit Body', 'Fourth Edit Body')
+    await waitFor(() => expect(recordedMoveRacePosts).toHaveLength(6))
+    expect(recordedMoveRacePosts[4]?.action).toBe('move_document')
+    expect(recordedMoveRacePosts[4]?.toFolderPath).toBe('Blocked')
+    expect(['save', 'apply_ops']).toContain(recordedMoveRacePosts[5]?.action)
+    expect(recordedMoveRacePosts[5]?.folderPath).toBe('Archive')
+  },
+}
+
+const TEMP_RELOAD_FOLDER: DriveFolder = {
+  id: 'folder-temp',
+  name: 'Temp Folder',
+  parentId: null,
+  color: 'default',
+  createdAt: '2026-11-26T00:00:00.000Z',
+  updatedAt: '2026-11-26T00:00:00.000Z',
+}
+
+let resolveInFlightDeleteFolder: (() => void) | null = null
+let recordedReloadRenamePosts: RecordedMarblePost[] = []
+let reloadWorkspaceGetCount = 0
+
+function ReloadDuringQueuedRenameHarness(
+  args: ComponentProps<typeof XDriveWorkspace>,
+) {
+  const [ready, setReady] = useState(false)
+
+  useEffect(() => {
+    recordedReloadRenamePosts = []
+    reloadWorkspaceGetCount = 0
+    let folderDeleted = false
+    const originalFetch = window.fetch.bind(window)
+    window.fetch = async (input, init) => {
+      const url =
+        typeof input === 'string'
+          ? input
+          : input instanceof Request
+            ? input.url
+            : String(input)
+      if (url.includes('/api/marble')) {
+        const method = (init?.method ?? 'GET').toUpperCase()
+        if (method === 'GET' && url.includes('action=workspace')) {
+          reloadWorkspaceGetCount += 1
+          return new Response(
+            JSON.stringify({
+              ok: true,
+              folders: folderDeleted ? [] : [TEMP_RELOAD_FOLDER],
+              docs: [RENAME_RACE_DOC],
+            }),
+            {
+              status: 200,
+              headers: { 'content-type': 'application/json' },
+            },
+          )
+        }
+        if (method === 'POST' && typeof init?.body === 'string') {
+          const payload = JSON.parse(init.body) as RecordedMarblePost
+          if (payload.action === 'diff' || payload.action === 'doctor') {
+            return new Response(JSON.stringify({ ok: false }), {
+              status: 404,
+              headers: { 'content-type': 'application/json' },
+            })
+          }
+          recordedReloadRenamePosts.push(payload)
+          if (payload.action === 'delete_folder') {
+            await new Promise<void>((resolve) => {
+              resolveInFlightDeleteFolder = resolve
+            })
+            folderDeleted = true
+            return new Response(
+              JSON.stringify({
+                ok: true,
+                movedFiles: [
+                  { from: 'Temp Folder/dup.mrbl', to: 'dup-2.mrbl' },
+                ],
+              }),
+              {
+                status: 200,
+                headers: { 'content-type': 'application/json' },
+              },
+            )
+          }
+          if (payload.action === 'rename_document') {
+            const nextTitle =
+              typeof payload.title === 'string'
+                ? payload.title
+                : 'Renamed After Reload'
+            const serverSource = RENAME_RACE_DOC.source.replace(
+              '<title>Rename Race Doc</title>',
+              `<title>${nextTitle}</title>`,
+            )
+            return new Response(
+              JSON.stringify({
+                ok: true,
+                id: RENAME_RACE_DOC.id,
+                oldSlug: payload.slug,
+                slug: 'renamed-after-reload',
+                fileName: 'renamed-after-reload.mrbl',
+                folderPath: '',
+                relPath: 'renamed-after-reload.mrbl',
+                isTemplate: false,
+                title: nextTitle,
+                description:
+                  typeof payload.description === 'string'
+                    ? payload.description
+                    : '',
+                source: serverSource,
+                updatedAt: '2026-11-26T00:08:00.000Z',
+              }),
+              {
+                status: 200,
+                headers: { 'content-type': 'application/json' },
+              },
+            )
+          }
+          return new Response(
+            JSON.stringify({
+              ok: true,
+              slug: payload.slug,
+              source: payload.source,
+            }),
+            {
+              status: 200,
+              headers: { 'content-type': 'application/json' },
+            },
+          )
+        }
+      }
+      return originalFetch(input, init)
+    }
+    setReady(true)
+    return () => {
+      resolveInFlightDeleteFolder?.()
+      resolveInFlightDeleteFolder = null
+      window.fetch = originalFetch
+    }
+  }, [])
+
+  if (!ready) return null
+  return <XDriveWorkspace {...args} />
+}
+
+/**
+ * Verifies that an unrelated reloadWorkspaceFromServer running ahead of a queued rename preserves held edits so they replay against the confirmed slug.
+ *
+ * @summary Unrelated workspace reload preserves held edits for queued rename
+ */
+export const ReloadDuringQueuedRenamePreservesHeldEdits: Story = {
+  name: 'Document · Reload During Queued Rename Preserves Held Edits',
+  args: {
+    initialTheme: 'dark',
+    initialActiveTabId: 'doc-rename-race',
+    initialDocs: [RENAME_RACE_DOC],
+    initialOpenDocIds: ['doc-rename-race'],
+    initialMode: 'source',
+    initialAiSidebarOpen: false,
+    syncWithServer: true,
+  },
+  render: (args) => <ReloadDuringQueuedRenameHarness {...args} />,
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    const sourceTextarea = await canvas.findByLabelText<HTMLTextAreaElement>(
+      'Marble HTML5 source',
+    )
+    await waitFor(() => expect(sourceTextarea.value).toContain('Initial Body'))
+
+    const sidebarNav = canvas.getByRole('navigation', {
+      name: 'Primary Workspace Navigation',
+    })
+    const sidebarContainer = sidebarNav.parentElement
+    expect(sidebarContainer).not.toBeNull()
+
+    // Start delete_folder on Temp Folder to hold the queue and trigger a reload on completion.
+    const tempFolderLink = await within(sidebarContainer!).findByRole('link', {
+      name: 'Temp Folder',
+    })
+    await userEvent.pointer({ keys: '[MouseRight]', target: tempFolderLink })
+    const folderMenu = await canvas.findByRole('menu', {
+      name: 'Actions for Temp Folder',
+    })
+    await userEvent.click(
+      within(folderMenu).getByRole('menuitem', { name: 'Delete folder' }),
+    )
+    await waitFor(() => expect(resolveInFlightDeleteFolder).not.toBeNull())
+
+    // Queue rename_document behind delete_folder and edit while waiting.
+    const pinnedLink = await within(sidebarContainer!).findByRole('link', {
+      name: 'Rename Race Doc',
+    })
+    await userEvent.pointer({ keys: '[MouseRight]', target: pinnedLink })
+    const pinnedMenu = await canvas.findByRole('menu', {
+      name: 'Actions for Rename Race Doc',
+    })
+    await userEvent.click(
+      within(pinnedMenu).getByRole('menuitem', { name: 'Rename' }),
+    )
+    const renameDialog = await canvas.findByRole('dialog', {
+      name: 'Rename file',
+    })
+    const nameInput = within(renameDialog).getByLabelText('Document name')
+    await userEvent.clear(nameInput)
+    await userEvent.type(nameInput, 'Renamed After Reload')
+    await userEvent.click(
+      within(renameDialog).getByRole('button', { name: 'Save' }),
+    )
+    expect(await canvas.findByText('Renaming "Rename Race Doc"…')).toBeVisible()
+
+    const bodyStart = sourceTextarea.value.indexOf('Initial Body')
+    expect(bodyStart).toBeGreaterThan(-1)
+    sourceTextarea.focus()
+    await userEvent.type(sourceTextarea, 'Survived Reload Edit', {
+      initialSelectionStart: bodyStart,
+      initialSelectionEnd: bodyStart + 'Initial Body'.length,
+    })
+    await userEvent.click(canvas.getByRole('button', { name: 'Apply' }))
+    await waitFor(() =>
+      expect(canvas.getByRole('button', { name: 'Apply' })).toBeDisabled(),
+    )
+    expect(
+      recordedReloadRenamePosts.filter(
+        (post) => post.action === 'save' || post.action === 'apply_ops',
+      ),
+    ).toHaveLength(0)
+
+    // Complete delete_folder -> reloadWorkspaceFromServer runs -> rename_document confirms -> held edit replays.
+    resolveInFlightDeleteFolder?.()
+    resolveInFlightDeleteFolder = null
+
+    await expect(
+      await within(sidebarContainer!).findByRole('link', {
+        name: 'Renamed After Reload',
+      }),
+    ).toBeVisible()
+    await waitFor(() =>
+      expect(reloadWorkspaceGetCount).toBeGreaterThanOrEqual(2),
+    )
+
+    await waitFor(() => {
+      const savePosts = recordedReloadRenamePosts.filter(
+        (post) => post.action === 'save' || post.action === 'apply_ops',
+      )
+      expect(savePosts).toHaveLength(1)
+      expect(savePosts[0]?.slug).toBe('renamed-after-reload')
+      expect(savePosts[0]?.meta?.slug).toBe('renamed-after-reload')
+      const serialized = JSON.stringify(savePosts[0])
+      expect(serialized).toContain('Survived Reload Edit')
+    })
+    expect(sourceTextarea.value).toContain(
+      '<title>Renamed After Reload</title>',
+    )
+    expect(sourceTextarea.value).toContain('Survived Reload Edit')
+  },
+}
+
+const CHAT_RENAME_FOLDER: DriveFolder = {
+  id: 'folder-notes',
+  name: 'Research Notes',
+  parentId: null,
+  color: 'accent',
+  createdAt: '2026-11-26T00:00:00.000Z',
+  updatedAt: '2026-11-26T00:00:00.000Z',
+}
+
+const CHAT_RENAME_THREAD: DriveChatThread = {
+  id: 'chat-thread-rename',
+  title: 'Rename folder thread',
+  createdAt: '2026-11-26T00:00:00.000Z',
+  updatedAt: '2026-11-26T00:05:00.000Z',
+  modelId: 'claude-sonnet-4-6',
+  reasoningEffort: 'medium',
+  mode: 'review',
+  messages: [
+    {
+      id: 'msg-user-1',
+      role: 'user',
+      content: 'Rename Research Notes to Archived Notes',
+      createdAt: '2026-11-26T00:04:00.000Z',
+    },
+    {
+      id: 'msg-assistant-1',
+      role: 'assistant',
+      content: 'Proposed renaming the folder.',
+      createdAt: '2026-11-26T00:05:00.000Z',
+      actions: [
+        {
+          id: 'act-rename-folder-1',
+          kind: 'rename_folder',
+          label: 'Rename folder',
+          summary: 'Rename Research Notes to Archived Notes',
+          status: 'proposed',
+          folderId: 'folder-notes',
+          folderName: 'Research Notes',
+          nextName: 'Archived Notes',
+        },
+      ],
+    },
+  ],
+}
+
+let resolveChatForwardRename: (() => void) | null = null
+let resolveChatUndoRename: (() => void) | null = null
+let recordedChatFolderPosts: RecordedMarblePost[] = []
+
+function DriveChatFolderRenameHarness(
+  args: ComponentProps<typeof XDriveWorkspace>,
+) {
+  const [ready, setReady] = useState(false)
+
+  useEffect(() => {
+    recordedChatFolderPosts = []
+    try {
+      window.localStorage.removeItem('xdrive-drive-chat-threads')
+    } catch {
+      // ignore storage errors
+    }
+    const originalFetch = window.fetch.bind(window)
+    window.fetch = async (input, init) => {
+      const url =
+        typeof input === 'string'
+          ? input
+          : input instanceof Request
+            ? input.url
+            : String(input)
+      const method = (init?.method ?? 'GET').toUpperCase()
+      if (url.includes('/api/drive-chat/threads')) {
+        if (method === 'GET') {
+          return new Response(
+            JSON.stringify({ ok: true, threads: [CHAT_RENAME_THREAD] }),
+            {
+              status: 200,
+              headers: { 'content-type': 'application/json' },
+            },
+          )
+        }
+        return new Response(JSON.stringify({ ok: true }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        })
+      }
+      if (url.includes('/api/marble')) {
+        if (method === 'GET' && url.includes('action=workspace')) {
+          return new Response(
+            JSON.stringify({
+              ok: true,
+              folders: [CHAT_RENAME_FOLDER],
+              docs: [RENAME_RACE_DOC],
+            }),
+            {
+              status: 200,
+              headers: { 'content-type': 'application/json' },
+            },
+          )
+        }
+        if (method === 'POST' && typeof init?.body === 'string') {
+          const payload = JSON.parse(init.body) as RecordedMarblePost
+          if (payload.action === 'diff' || payload.action === 'doctor') {
+            return new Response(JSON.stringify({ ok: false }), {
+              status: 404,
+              headers: { 'content-type': 'application/json' },
+            })
+          }
+          recordedChatFolderPosts.push(payload)
+          if (payload.action === 'rename_folder') {
+            if (payload.newName === 'Archived Notes') {
+              await new Promise<void>((resolve) => {
+                resolveChatForwardRename = resolve
+              })
+              return new Response(
+                JSON.stringify({
+                  ok: true,
+                  oldPath: payload.oldPath,
+                  newPath: 'Archived Notes',
+                  folder: {
+                    ...CHAT_RENAME_FOLDER,
+                    id: 'folder-notes-srv',
+                    name: 'Archived Notes',
+                    updatedAt: '2026-11-26T00:06:00.000Z',
+                  },
+                }),
+                {
+                  status: 200,
+                  headers: { 'content-type': 'application/json' },
+                },
+              )
+            }
+            await new Promise<void>((resolve) => {
+              resolveChatUndoRename = resolve
+            })
+            return new Response(
+              JSON.stringify({
+                ok: true,
+                oldPath: payload.oldPath,
+                newPath: 'Research Notes',
+                folder: {
+                  ...CHAT_RENAME_FOLDER,
+                  id: 'folder-notes-srv',
+                  name: 'Research Notes',
+                  updatedAt: '2026-11-26T00:07:00.000Z',
+                },
+              }),
+              {
+                status: 200,
+                headers: { 'content-type': 'application/json' },
+              },
+            )
+          }
+          return new Response(JSON.stringify({ ok: true }), {
+            status: 200,
+            headers: { 'content-type': 'application/json' },
+          })
+        }
+      }
+      return originalFetch(input, init)
+    }
+    setReady(true)
+    return () => {
+      resolveChatForwardRename?.()
+      resolveChatForwardRename = null
+      resolveChatUndoRename?.()
+      resolveChatUndoRename = null
+      window.fetch = originalFetch
+    }
+  }, [])
+
+  if (!ready) return null
+  return <XDriveWorkspace {...args} />
+}
+
+/**
+ * Verifies that Drive Chat folder rename waits for server confirmation before marking Applied and exposing Undo, and Undo waits for confirmation before marking Undone.
+ *
+ * @summary Drive Chat folder rename confirms before offering Undo
+ */
+export const DriveChatFolderRenameConfirmsBeforeUndo: Story = {
+  name: 'Drive Chat · Folder Rename Confirms Before Undo',
+  args: {
+    initialTheme: 'dark',
+    initialNav: 'chat',
+    initialActiveTabId: 'home',
+    initialAiSidebarOpen: false,
+    syncWithServer: true,
+  },
+  render: (args) => <DriveChatFolderRenameHarness {...args} />,
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    const sidebarNav = canvas.getByRole('navigation', {
+      name: 'Primary Workspace Navigation',
+    })
+    await expect(
+      await within(sidebarNav).findByRole('link', { name: 'Research Notes' }),
+    ).toBeVisible()
+
+    const applyBtn = await canvas.findByRole('button', { name: 'Apply' })
+    await userEvent.click(applyBtn)
+
+    await waitFor(() => expect(resolveChatForwardRename).not.toBeNull())
+
+    // While server confirmation is pending, Undo is unavailable and card stays Pending.
+    expect(canvas.queryByRole('button', { name: 'Undo' })).toBeNull()
+    expect(canvas.getByText('Pending')).toBeVisible()
+
+    // Duplicate Apply clicks while in flight are ignored cleanly.
+    await userEvent.click(canvas.getByRole('button', { name: 'Apply' }))
+    expect(
+      recordedChatFolderPosts.filter((p) => p.action === 'rename_folder'),
+    ).toHaveLength(1)
+    expect(canvas.queryByText('Failed')).toBeNull()
+
+    // Confirm forward rename on server.
+    resolveChatForwardRename?.()
+    resolveChatForwardRename = null
+
+    await expect(await canvas.findByText('Applied')).toBeVisible()
+    const undoBtn = await canvas.findByRole('button', { name: 'Undo' })
+    await expect(
+      await within(sidebarNav).findByRole('link', { name: 'Archived Notes' }),
+    ).toBeVisible()
+
+    // Click Undo -> card must wait for reverse rename confirmation before marking Undone.
+    await userEvent.click(undoBtn)
+    await waitFor(() => expect(resolveChatUndoRename).not.toBeNull())
+
+    const renamePostsDuringUndo = recordedChatFolderPosts.filter(
+      (p) => p.action === 'rename_folder',
+    )
+    expect(renamePostsDuringUndo).toHaveLength(2)
+    expect(renamePostsDuringUndo[1]?.oldPath).toBe('Archived Notes')
+    expect(renamePostsDuringUndo[1]?.newName).toBe('Research Notes')
+    expect(canvas.queryByText('Undone')).toBeNull()
+
+    resolveChatUndoRename?.()
+    resolveChatUndoRename = null
+
+    await expect(await canvas.findByText('Undone')).toBeVisible()
+    await expect(
+      await within(sidebarNav).findByRole('link', { name: 'Research Notes' }),
+    ).toBeVisible()
   },
 }

@@ -15,6 +15,7 @@ import {
   applyServerSaveAsTemplateReply,
   deriveDocIsTemplate,
   ensureClientTemplatesFolder,
+  mergeReloadedWorkspaceDocs,
   mintClientFolderId,
   reconcileFolderRename,
   replayHeldDocEdits,
@@ -364,5 +365,100 @@ describe('template-workspace-helpers', () => {
     expect(reclaimed.fileName).toBe('example.mrbl')
     expect(reclaimed.share.publicLinkUrl).toBe('https://xdrive.app/d/example')
     expect(reclaimed.source).toContain('Replayed Held Edit')
+  })
+
+  it('preserves held rename edits and saving flags across unrelated workspace reloads', () => {
+    const heldSource =
+      '<!doctype html><html><head><title>Rename Target</title></head><body><h1 data-marble-id="h1">Edited While Queued</h1></body></html>'
+    const renamingDoc = makeDoc({
+      id: 'doc-renaming',
+      slug: 'rename-target',
+      title: 'Rename Target',
+      source: heldSource,
+      version: 3,
+      syncState: 'saving',
+      checkpoints: [
+        {
+          sha: 'cp1',
+          label: 'Queued edit',
+          timestamp: 1000,
+          author: 'You',
+          opsCount: 1,
+          source: heldSource,
+        },
+      ],
+    })
+    const movingDoc = makeDoc({
+      id: 'doc-moving',
+      slug: 'moving-doc',
+      title: 'Moving Doc',
+      syncState: 'saving',
+    })
+    const unaffectedCurrent = makeDoc({
+      id: 'doc-other',
+      slug: 'other-doc',
+      title: 'Old Other',
+    })
+
+    const serverRenameDoc = makeDoc({
+      id: 'doc-renaming',
+      slug: 'rename-target',
+      title: 'Rename Target',
+      folder: 'Archive',
+      folderId: 'folder-archive',
+      isTemplate: false,
+      version: 1,
+      syncState: 'saved',
+    })
+    const serverMovingDoc = makeDoc({
+      id: 'doc-moving',
+      slug: 'moving-doc',
+      title: 'Moving Doc',
+      syncState: 'saved',
+    })
+    const serverOtherDoc = makeDoc({
+      id: 'doc-other',
+      slug: 'other-doc',
+      title: 'Fresh From Server',
+      syncState: 'saved',
+    })
+
+    const heldMap = new Map<string, HeldDocEdit[]>([
+      [
+        'doc-renaming',
+        [
+          {
+            ops: [{ type: 'setText', id: 'h1', text: 'Edited While Queued' }],
+            nextSource: heldSource,
+            lastEditedBy: { name: 'You', initials: 'YO' },
+            updatedAt: '2026-11-26T00:10:00.000Z',
+          },
+        ],
+      ],
+    ])
+
+    const merged = mergeReloadedWorkspaceDocs({
+      reloadedDocs: [serverRenameDoc, serverMovingDoc, serverOtherDoc],
+      currentDocs: [renamingDoc, movingDoc, unaffectedCurrent],
+      pendingRenameDocIds: new Set(['doc-renaming']),
+      heldDocEdits: heldMap,
+      pendingMoveDocIds: new Set(['doc-moving']),
+    })
+
+    const mergedRenaming = merged.find((d) => d.id === 'doc-renaming')
+    expect(mergedRenaming?.source).toBe(heldSource)
+    expect(mergedRenaming?.version).toBe(3)
+    expect(mergedRenaming?.checkpoints).toHaveLength(1)
+    expect(mergedRenaming?.syncState).toBe('saving')
+    // Adopts server-reloaded folder metadata while preserving held source edits
+    expect(mergedRenaming?.folderId).toBe('folder-archive')
+    expect(mergedRenaming?.folder).toBe('Archive')
+
+    const mergedMoving = merged.find((d) => d.id === 'doc-moving')
+    expect(mergedMoving?.syncState).toBe('saving')
+
+    const mergedOther = merged.find((d) => d.id === 'doc-other')
+    expect(mergedOther?.title).toBe('Fresh From Server')
+    expect(mergedOther?.syncState).toBe('saved')
   })
 })
