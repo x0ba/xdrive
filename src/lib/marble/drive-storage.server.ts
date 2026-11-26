@@ -1007,6 +1007,17 @@ async function deleteDocumentHistory(docId: string | undefined): Promise<void> {
   }
 }
 
+async function slugIsInTrash(slug: string): Promise<boolean> {
+  if (await readTrashMeta(slug)) return true
+  return pathExists(trashFilePath(slug))
+}
+
+async function failIfSlugInTrash(slug: string, verb: string): Promise<void> {
+  if (await slugIsInTrash(slug)) {
+    fail(409, `Cannot ${verb} "${slug}" while it is in Trash`)
+  }
+}
+
 async function pathExists(target: string): Promise<boolean> {
   try {
     await stat(target)
@@ -1237,6 +1248,7 @@ export async function saveDocumentToDisk(input: {
 }): Promise<DriveDocumentLocation> {
   return await withDriveLock(async () => {
     const validSlug = assertSlug(input.slug)
+    await failIfSlugInTrash(validSlug, 'save')
     let target: DriveDocumentLocation
     if (input.folderPath !== undefined) {
       target = resolveDocumentLocation(validSlug, input.folderPath)
@@ -1295,9 +1307,10 @@ export async function updateDocumentMetaOnDisk(input: {
     if (!patch && checkpoints === undefined && intentHistory === undefined) {
       fail(400, 'meta, checkpoints, or intentHistory is required')
     }
+    const found = await findDocumentBySlug(validSlug, input.folderPath)
+    if (!found) await failIfSlugInTrash(validSlug, 'update')
     const located =
-      (await findDocumentBySlug(validSlug, input.folderPath)) ??
-      resolveDocumentLocation(validSlug, input.folderPath ?? '')
+      found ?? resolveDocumentLocation(validSlug, input.folderPath ?? '')
     const metadata = await readMetadata()
     const previous = metadata.documents[located.relPath] ?? {}
     const docId =
@@ -1348,8 +1361,10 @@ export async function moveDocumentOnDisk(input: {
     const toLoc = resolveDocumentLocation(validSlug, input.toFolderPath ?? '')
 
     await mkdir(path.dirname(toLoc.fullPath), { recursive: true })
+    const fromExists = await pathExists(fromLoc.fullPath)
+    if (!fromExists) await failIfSlugInTrash(validSlug, 'move')
     if (fromLoc.fullPath !== toLoc.fullPath) {
-      if (await pathExists(fromLoc.fullPath)) {
+      if (fromExists) {
         if (await pathExists(toLoc.fullPath)) {
           fail(
             409,
@@ -2042,17 +2057,26 @@ export async function deleteDocumentPermanentlyOnDisk(input: {
   })
 }
 
-export async function emptyTrashOnDisk(): Promise<{
+export async function emptyTrashOnDisk(ids: readonly string[]): Promise<{
   ok: true
   deletedCount: number
+  deletedIds: string[]
 }> {
+  const wanted = new Set(
+    ids.map((id) => id.trim()).filter((id) => id.length > 0),
+  )
   return await withDriveLock(async () => {
+    if (wanted.size === 0) {
+      return { ok: true, deletedCount: 0, deletedIds: [] }
+    }
     const trashDir = getTrashDir()
     let names: string[]
     try {
       names = await readdir(trashDir)
     } catch (error) {
-      if (isEnoent(error)) return { ok: true, deletedCount: 0 }
+      if (isEnoent(error)) {
+        return { ok: true, deletedCount: 0, deletedIds: [] }
+      }
       throw error
     }
 
@@ -2064,22 +2088,18 @@ export async function emptyTrashOnDisk(): Promise<{
       if (!SLUG_PATTERN.test(slug) || slug.includes('..')) continue
       const meta = await readTrashMeta(slug)
       const docId = meta?.docId ?? meta?.meta?.id
-      if (docId) docIdsToDelete.add(docId)
+      if (!docId || !wanted.has(docId)) continue
+      docIdsToDelete.add(docId)
       purgedSlugs.push(slug)
-    }
-
-    let deletedCount = 0
-    for (const name of names) {
-      if (!name.endsWith('.mrbl') && !name.endsWith('.meta.json')) continue
       await rm(path.resolve(trashDir, name), { force: true })
-      if (name.endsWith('.mrbl')) deletedCount += 1
+      await rm(trashMetaFilePath(slug), { force: true })
     }
 
     for (const docId of docIdsToDelete) {
       await deleteDocumentHistory(docId)
     }
 
-    if (deletedCount > 0) {
+    if (purgedSlugs.length > 0) {
       const metadata = await readMetadata()
       metadata.trash = {
         ...metadata.trash,
@@ -2089,7 +2109,11 @@ export async function emptyTrashOnDisk(): Promise<{
       await writeMetadata(metadata)
     }
 
-    return { ok: true, deletedCount }
+    return {
+      ok: true,
+      deletedCount: purgedSlugs.length,
+      deletedIds: [...docIdsToDelete],
+    }
   })
 }
 

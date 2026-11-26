@@ -470,9 +470,10 @@ export function applyServerRestoreDocumentReply(input: {
  * document reverts to server source. Local documents whose first save is still
  * pending are kept even when the server has not seen them yet.
  *
- * In-flight trash, restore, and permanent-delete mutations keep the server's
- * trash membership (that is what is on disk at reload time) and stay `saving`
- * until the queued mutation's own success applies the confirmed change.
+ * In-flight trash, restore, permanent-delete, and save-as-template mutations
+ * keep the server's trash membership (that is what is on disk at reload time)
+ * and stay `saving` until the queued mutation's own success applies the
+ * confirmed change.
  */
 export function mergeReloadedWorkspaceDocs(input: {
   reloadedDocs: readonly MarbleDocumentFile[]
@@ -484,6 +485,7 @@ export function mergeReloadedWorkspaceDocs(input: {
   pendingTrashDocIds?: ReadonlySet<string>
   pendingRestoreDocIds?: ReadonlySet<string>
   pendingPermanentDeleteDocIds?: ReadonlySet<string>
+  pendingSaveAsTemplateDocIds?: ReadonlySet<string>
   ignorePendingRenameDocIds?: ReadonlySet<string>
 }): MarbleDocumentFile[] {
   const mergedFromServer = input.reloadedDocs.map(
@@ -494,12 +496,13 @@ export function mergeReloadedWorkspaceDocs(input: {
         !ignoreRename && input.pendingRenameDocIds.has(serverDoc.id)
       const isMovePending = input.pendingMoveDocIds?.has(serverDoc.id) ?? false
       const hasPendingSave = input.pendingSaveDocIds?.has(serverDoc.id) ?? false
-      const hasPendingTrashMutation =
+      const hasPendingLifecycleWithoutLocalEdits =
         (input.pendingTrashDocIds?.has(serverDoc.id) ?? false) ||
         (input.pendingRestoreDocIds?.has(serverDoc.id) ?? false) ||
-        (input.pendingPermanentDeleteDocIds?.has(serverDoc.id) ?? false)
+        (input.pendingPermanentDeleteDocIds?.has(serverDoc.id) ?? false) ||
+        (input.pendingSaveAsTemplateDocIds?.has(serverDoc.id) ?? false)
       if (!isRenamePending && !isMovePending && !hasPendingSave) {
-        return hasPendingTrashMutation
+        return hasPendingLifecycleWithoutLocalEdits
           ? withSyncState(serverDoc, 'saving')
           : serverDoc
       }
@@ -543,4 +546,150 @@ export function mergeReloadedWorkspaceDocs(input: {
     ...pendingFirstSaves.map((doc) => withSyncState(doc, 'saving')),
     ...mergedFromServer,
   ]
+}
+
+export const DOC_LIFECYCLE_KINDS = [
+  'trash',
+  'restore',
+  'delete',
+  'move',
+  'rename',
+  'save_as_template',
+] as const
+
+export type DocLifecycleKind = (typeof DOC_LIFECYCLE_KINDS)[number]
+
+export type DocLifecycleAction = DocLifecycleKind | 'edit' | 'meta'
+
+export interface DocLifecyclePendingSets {
+  trash?: ReadonlySet<string>
+  restore?: ReadonlySet<string>
+  delete?: ReadonlySet<string>
+  move?: ReadonlySet<string>
+  rename?: ReadonlySet<string>
+  saveAsTemplate?: ReadonlySet<string>
+}
+
+export function pendingDocLifecycle(
+  docId: string,
+  pending: DocLifecyclePendingSets,
+): DocLifecycleKind | null {
+  if (pending.trash?.has(docId)) return 'trash'
+  if (pending.restore?.has(docId)) return 'restore'
+  if (pending.delete?.has(docId)) return 'delete'
+  if (pending.move?.has(docId)) return 'move'
+  if (pending.rename?.has(docId)) return 'rename'
+  if (pending.saveAsTemplate?.has(docId)) return 'save_as_template'
+  return null
+}
+
+export function docLifecycleKindLabel(kind: DocLifecycleKind): string {
+  switch (kind) {
+    case 'trash':
+      return 'trash'
+    case 'restore':
+      return 'restore'
+    case 'delete':
+      return 'delete'
+    case 'move':
+      return 'move'
+    case 'rename':
+      return 'rename'
+    case 'save_as_template':
+      return 'save as template'
+    default: {
+      const exhaustive: never = kind
+      return exhaustive
+    }
+  }
+}
+
+/**
+ * Rename holds edits and replays them onto the confirmed slug.
+ * Move lets the edit join the mutation queue so it is written to the confirmed
+ * folder after the move settles, including after a lost-response reload.
+ * Trash, restore, delete, and save-as-template block the edit: a save behind
+ * those would recreate or miss the file.
+ */
+export function docEditDisposition(
+  docId: string,
+  pending: DocLifecyclePendingSets,
+): 'allow' | 'hold' | 'block' {
+  const kind = pendingDocLifecycle(docId, pending)
+  if (kind === null || kind === 'move') return 'allow'
+  if (kind === 'rename') return 'hold'
+  return 'block'
+}
+
+export function docLifecycleBlocksPermanentDelete(
+  docId: string,
+  pending: DocLifecyclePendingSets,
+): boolean {
+  return pendingDocLifecycle(docId, pending) !== null
+}
+
+export function trashBinLifecyclePending(
+  pending: DocLifecyclePendingSets,
+): boolean {
+  return (
+    (pending.trash?.size ?? 0) > 0 ||
+    (pending.restore?.size ?? 0) > 0 ||
+    (pending.delete?.size ?? 0) > 0
+  )
+}
+
+/**
+ * Undo may queue restore behind an in-flight trash. Every other pair waits.
+ * Edits during rename are held, and edits during move stay on the mutation
+ * queue. Both write the confirmed file rather than the pre-change path.
+ */
+export function docLifecycleRefusalMessage(
+  docId: string,
+  next: DocLifecycleAction,
+  action: string,
+  pending: DocLifecyclePendingSets,
+): string | null {
+  const current = pendingDocLifecycle(docId, pending)
+  if (!current) return null
+  if (next === 'restore' && current === 'trash') return null
+  if (next === 'edit' && (current === 'rename' || current === 'move')) {
+    return null
+  }
+  if (current === next) {
+    switch (current) {
+      case 'trash':
+        return 'Trash is already in progress.'
+      case 'restore':
+        return 'Restore already in progress.'
+      case 'move':
+        return 'Move already in progress.'
+      case 'rename':
+        return 'Rename already in progress.'
+      case 'delete':
+        return 'Delete already in progress.'
+      case 'save_as_template':
+        return 'Save as template already in progress.'
+      default: {
+        const exhaustive: never = current
+        return exhaustive
+      }
+    }
+  }
+  return `Wait for ${docLifecycleKindLabel(current)} to finish before ${action}.`
+}
+
+export function emptyTrashDocIds(input: {
+  visibleDocIds: readonly string[]
+  pending: DocLifecyclePendingSets
+}): { blocked: true } | { blocked: false; ids: string[] } {
+  if (trashBinLifecyclePending(input.pending)) return { blocked: true }
+  const ids: string[] = []
+  const seen = new Set<string>()
+  for (const id of input.visibleDocIds) {
+    const trimmed = id.trim()
+    if (!trimmed || seen.has(trimmed)) continue
+    seen.add(trimmed)
+    ids.push(trimmed)
+  }
+  return { blocked: false, ids }
 }

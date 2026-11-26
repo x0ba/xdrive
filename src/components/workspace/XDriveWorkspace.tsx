@@ -135,6 +135,9 @@ import {
   applyServerSaveAsTemplateReply,
   applyServerTrashDocumentReply,
   deriveDocIsTemplate,
+  docEditDisposition,
+  docLifecycleRefusalMessage,
+  emptyTrashDocIds,
   ensureClientTemplatesFolder,
   getTemplateFolderIds,
   mergeReloadedWorkspaceDocs,
@@ -142,7 +145,11 @@ import {
   reconcileFolderRename,
   replayHeldDocEdits,
 } from '#/components/workspace/template-workspace-helpers'
-import type { HeldDocEdit } from '#/components/workspace/template-workspace-helpers'
+import type {
+  DocLifecycleAction,
+  DocLifecyclePendingSets,
+  HeldDocEdit,
+} from '#/components/workspace/template-workspace-helpers'
 import type { MarbleActionKind } from '#/lib/marble'
 import {
   applyAntigravityStatusToSubscriptions,
@@ -1088,11 +1095,19 @@ export function XDriveWorkspace({
     () => new Set(),
   )
   const pendingTrashDocIdsRef = useRef(new Set<string>())
+  const [pendingTrashDocIds, setPendingTrashDocIds] = useState<Set<string>>(
+    () => new Set(),
+  )
   const pendingRestoreDocIdsRef = useRef(new Set<string>())
   const [pendingRestoreDocIds, setPendingRestoreDocIds] = useState<Set<string>>(
     () => new Set(),
   )
   const pendingPermanentDeleteDocIdsRef = useRef(new Set<string>())
+  const [pendingPermanentDeleteDocIds, setPendingPermanentDeleteDocIds] =
+    useState<Set<string>>(() => new Set())
+  const pendingSaveAsTemplateDocIdsRef = useRef(new Set<string>())
+  const [pendingSaveAsTemplateDocIds, setPendingSaveAsTemplateDocIds] =
+    useState<Set<string>>(() => new Set())
   const pendingFolderIdsRef = useRef(new Set<string>())
   const [pendingFolderIds, setPendingFolderIds] = useState<Set<string>>(
     () => new Set(),
@@ -1114,6 +1129,7 @@ export function XDriveWorkspace({
   function setDocTrashPending(docId: string, pending: boolean): void {
     if (pending) pendingTrashDocIdsRef.current.add(docId)
     else pendingTrashDocIdsRef.current.delete(docId)
+    setPendingTrashDocIds(new Set(pendingTrashDocIdsRef.current))
   }
 
   function setDocRestorePending(docId: string, pending: boolean): void {
@@ -1125,6 +1141,44 @@ export function XDriveWorkspace({
   function setDocPermanentDeletePending(docId: string, pending: boolean): void {
     if (pending) pendingPermanentDeleteDocIdsRef.current.add(docId)
     else pendingPermanentDeleteDocIdsRef.current.delete(docId)
+    setPendingPermanentDeleteDocIds(
+      new Set(pendingPermanentDeleteDocIdsRef.current),
+    )
+  }
+
+  function setDocSaveAsTemplatePending(docId: string, pending: boolean): void {
+    if (pending) pendingSaveAsTemplateDocIdsRef.current.add(docId)
+    else pendingSaveAsTemplateDocIdsRef.current.delete(docId)
+    setPendingSaveAsTemplateDocIds(
+      new Set(pendingSaveAsTemplateDocIdsRef.current),
+    )
+  }
+
+  function currentLifecyclePending(): DocLifecyclePendingSets {
+    return {
+      trash: pendingTrashDocIdsRef.current,
+      restore: pendingRestoreDocIdsRef.current,
+      delete: pendingPermanentDeleteDocIdsRef.current,
+      move: pendingMoveDocIdsRef.current,
+      rename: pendingRenameDocIdsRef.current,
+      saveAsTemplate: pendingSaveAsTemplateDocIdsRef.current,
+    }
+  }
+
+  function refuseDocLifecycle(
+    docId: string,
+    next: DocLifecycleAction,
+    action: string,
+  ): boolean {
+    const message = docLifecycleRefusalMessage(
+      docId,
+      next,
+      action,
+      currentLifecyclePending(),
+    )
+    if (!message) return false
+    setAgentStatus(message)
+    return true
   }
 
   function setFoldersPending(ids: Iterable<string>, pending: boolean): void {
@@ -1149,6 +1203,28 @@ export function XDriveWorkspace({
   const selectRef = useRef<(element: SelectedMarbleElement) => void>(() => {})
   const frameRef = useRef<HTMLIFrameElement | null>(null)
   const richStageRef = useRef<HTMLDivElement | null>(null)
+
+  const lifecycleLockedDocIds = useMemo(() => {
+    const ids = new Set<string>()
+    for (const id of pendingTrashDocIds) ids.add(id)
+    for (const id of pendingRestoreDocIds) ids.add(id)
+    for (const id of pendingPermanentDeleteDocIds) ids.add(id)
+    for (const id of pendingMoveDocIds) ids.add(id)
+    for (const id of pendingRenameDocIds) ids.add(id)
+    for (const id of pendingSaveAsTemplateDocIds) ids.add(id)
+    return ids
+  }, [
+    pendingTrashDocIds,
+    pendingRestoreDocIds,
+    pendingPermanentDeleteDocIds,
+    pendingMoveDocIds,
+    pendingRenameDocIds,
+    pendingSaveAsTemplateDocIds,
+  ])
+  const trashBinBusy =
+    pendingTrashDocIds.size > 0 ||
+    pendingRestoreDocIds.size > 0 ||
+    pendingPermanentDeleteDocIds.size > 0
 
   const activeDocs = useMemo(() => docs.filter((doc) => !doc.trashedAt), [docs])
   const trashedDocs = useMemo(
@@ -1417,6 +1493,7 @@ export function XDriveWorkspace({
         pendingTrashDocIds: pendingTrashDocIdsRef.current,
         pendingRestoreDocIds: pendingRestoreDocIdsRef.current,
         pendingPermanentDeleteDocIds: pendingPermanentDeleteDocIdsRef.current,
+        pendingSaveAsTemplateDocIds: pendingSaveAsTemplateDocIdsRef.current,
         ignorePendingRenameDocIds: options?.ignorePendingRenameDocIds,
       }).filter((doc) => !suppressedLocalDocIdsRef.current.has(doc.id))
       foldersRef.current = data.folders
@@ -2532,6 +2609,7 @@ export function XDriveWorkspace({
       !pendingTrashDocIdsRef.current.has(id) &&
       !pendingRestoreDocIdsRef.current.has(id) &&
       !pendingPermanentDeleteDocIdsRef.current.has(id) &&
+      !pendingSaveAsTemplateDocIdsRef.current.has(id) &&
       (pendingSaveCountsRef.current.get(id) ?? 0) === 0 &&
       (heldDocEditsRef.current.get(id)?.length ?? 0) === 0
     )
@@ -2570,7 +2648,7 @@ export function XDriveWorkspace({
     nextSource: string,
     docOverride?: MarbleDocumentFile,
   ) {
-    if (pendingRenameDocIdsRef.current.has(id)) {
+    if (docEditDisposition(id, currentLifecyclePending()) === 'hold') {
       const held = heldDocEditsRef.current.get(id) ?? []
       held.push({
         ops: [...ops],
@@ -2584,6 +2662,7 @@ export function XDriveWorkspace({
       setAgentStatus('Rename in progress — holding edits until confirmed…')
       return
     }
+    if (refuseDocLifecycle(id, 'edit', 'editing this file')) return
 
     const doc = docOverride ?? allDocsRef.current.find((item) => item.id === id)
     const token = (saveTokens.current.get(id) ?? 0) + 1
@@ -2680,10 +2759,7 @@ export function XDriveWorkspace({
   }
 
   function rememberProposal(id: string, proposal: MarbleOpProposal) {
-    if (pendingRenameDocIdsRef.current.has(id)) {
-      setAgentStatus('Wait for rename to finish before updating proposals.')
-      return
-    }
+    if (refuseDocLifecycle(id, 'meta', 'updating proposals')) return
     const targetDoc = allDocsRef.current.find((doc) => doc.id === id)
     const nextHistory = targetDoc
       ? [
@@ -2727,6 +2803,7 @@ export function XDriveWorkspace({
   hostOpRef.current = (op, options) => {
     const id = activeTabRef.current
     if (!id || id === 'home' || !isMarbleOp(op)) return
+    if (refuseDocLifecycle(id, 'edit', 'editing this file')) return
     const prior = sourceRef.current.get(id)
     const meta = libraryRef.current.find((doc) => doc.id === id)
     if (!prior || !meta) return
@@ -3287,6 +3364,7 @@ export function XDriveWorkspace({
       setAgentStatus('Wait for rename to finish before applying proposals.')
       return
     }
+    if (refuseDocLifecycle(activeDoc.id, 'edit', 'applying proposals')) return
     const message = (threads[activeDoc.id] ?? []).find(
       (item) => item.proposal?.id === proposalId,
     )
@@ -3372,8 +3450,7 @@ export function XDriveWorkspace({
 
   function discardProposal(proposalId: string) {
     if (!activeDoc) return
-    if (pendingRenameDocIdsRef.current.has(activeDoc.id)) {
-      setAgentStatus('Wait for rename to finish before discarding proposals.')
+    if (refuseDocLifecycle(activeDoc.id, 'meta', 'discarding proposals')) {
       return
     }
     previewRun.current += 1
@@ -3445,12 +3522,13 @@ export function XDriveWorkspace({
     if (!cleanTitle) return
     const liveSourceDoc =
       allDocsRef.current.find((doc) => doc.id === sourceDoc.id) ?? sourceDoc
-    if (pendingRenameDocIdsRef.current.has(liveSourceDoc.id)) {
-      setAgentStatus('Wait for rename to finish before saving as a template.')
-      return
-    }
-    if (pendingMoveDocIdsRef.current.has(liveSourceDoc.id)) {
-      setAgentStatus('Wait for move to finish before saving as a template.')
+    if (
+      refuseDocLifecycle(
+        liveSourceDoc.id,
+        'save_as_template',
+        'saving as a template',
+      )
+    ) {
       return
     }
     const cleanDescription = input.description.trim()
@@ -3524,6 +3602,8 @@ export function XDriveWorkspace({
     }
 
     const tplId = `tpl-${shortSha()}`
+    setDocSaveAsTemplatePending(liveSourceDoc.id, true)
+    patchFile(liveSourceDoc.id, (doc) => ({ ...doc, syncState: 'saving' }))
     setAgentStatus(`Saving "${cleanTitle}" to ${TEMPLATES_FOLDER_NAME}…`)
     void syncDriveApi(
       () => {
@@ -3556,6 +3636,8 @@ export function XDriveWorkspace({
       {
         reloadOnError: true,
         onSuccess: (res) => {
+          setDocSaveAsTemplatePending(liveSourceDoc.id, false)
+          markDocSavedIfSettled(liveSourceDoc.id)
           const applied = applyServerSaveAsTemplateReply(
             foldersRef.current,
             allDocsRef.current,
@@ -3575,6 +3657,10 @@ export function XDriveWorkspace({
             `Saved "${applied.doc?.title ?? cleanTitle}" to ${TEMPLATES_FOLDER_NAME}`,
           )
         },
+        onError: () => {
+          setDocSaveAsTemplatePending(liveSourceDoc.id, false)
+          markDocSavedIfSettled(liveSourceDoc.id)
+        },
       },
     )
   }
@@ -3587,12 +3673,7 @@ export function XDriveWorkspace({
     if (!cleanTitle) return
     const liveDoc =
       allDocsRef.current.find((doc) => doc.id === targetDoc.id) ?? targetDoc
-    if (pendingRenameDocIdsRef.current.has(liveDoc.id)) {
-      setAgentStatus('Rename already in progress.')
-      return
-    }
-    if (pendingMoveDocIdsRef.current.has(liveDoc.id)) {
-      setAgentStatus('Wait for move to finish before renaming this file.')
+    if (refuseDocLifecycle(liveDoc.id, 'rename', 'renaming this file')) {
       return
     }
     const nextDescription = input.description.trim()
@@ -4077,13 +4158,7 @@ export function XDriveWorkspace({
       onError?: (message: string) => void
     },
   ): boolean {
-    if (pendingRenameDocIdsRef.current.has(docId)) {
-      setAgentStatus('Wait for rename to finish before moving this file.')
-      setMoveDocId(null)
-      return false
-    }
-    if (pendingMoveDocIdsRef.current.has(docId)) {
-      setAgentStatus('Move already in progress.')
+    if (refuseDocLifecycle(docId, 'move', 'moving this file')) {
       setMoveDocId(null)
       return false
     }
@@ -4213,10 +4288,7 @@ export function XDriveWorkspace({
   }
 
   function toggleFlag(id: string, flag: 'starred' | 'pinned') {
-    if (pendingRenameDocIdsRef.current.has(id)) {
-      setAgentStatus('Wait for rename to finish before modifying this file.')
-      return
-    }
+    if (refuseDocLifecycle(id, 'meta', 'modifying this file')) return
     const targetDoc = allDocsRef.current.find((doc) => doc.id === id)
     patchFile(id, (doc) => ({ ...doc, [flag]: !doc[flag] }))
     if (targetDoc) {
@@ -4309,20 +4381,9 @@ export function XDriveWorkspace({
   }
 
   function moveDocumentToTrash(docId: string) {
-    if (pendingRenameDocIdsRef.current.has(docId)) {
-      setAgentStatus('Wait for rename to finish before trashing this file.')
-      return
-    }
-    if (pendingMoveDocIdsRef.current.has(docId)) {
-      setAgentStatus('Wait for move to finish before trashing this file.')
-      return
-    }
+    if (refuseDocLifecycle(docId, 'trash', 'trashing this file')) return
     const target = allDocsRef.current.find((doc) => doc.id === docId)
     if (!target || target.trashedAt) return
-    if (pendingRestoreDocIdsRef.current.has(docId)) {
-      setAgentStatus('Wait for restore to finish before trashing this file.')
-      return
-    }
     const trashedAt = new Date().toISOString()
     if (!syncWithServer) {
       patchFile(docId, (doc) => ({ ...doc, trashedAt }))
@@ -4344,11 +4405,6 @@ export function XDriveWorkspace({
       })
       return
     }
-    if (pendingTrashDocIdsRef.current.has(docId)) {
-      setAgentStatus('Trash is already in progress.')
-      return
-    }
-
     setDocTrashPending(docId, true)
     patchFile(docId, (doc) => ({ ...doc, syncState: 'saving' }))
     setTrashUndo({ docId: target.id, title: target.title, pending: true })
@@ -4405,16 +4461,9 @@ export function XDriveWorkspace({
   function restoreDocumentFromTrash(docId: string) {
     const target = allDocsRef.current.find((doc) => doc.id === docId)
     if (!target) return
+    if (refuseDocLifecycle(docId, 'restore', 'restoring this file')) return
     const trashPending = pendingTrashDocIdsRef.current.has(docId)
     if (!target.trashedAt && !trashPending) return
-    if (pendingRestoreDocIdsRef.current.has(docId)) {
-      setAgentStatus('Restore already in progress.')
-      return
-    }
-    if (pendingPermanentDeleteDocIdsRef.current.has(docId)) {
-      setAgentStatus('Wait for delete to finish before restoring this file.')
-      return
-    }
     const parentFolder = target.folderId
       ? foldersRef.current.find((folder) => folder.id === target.folderId)
       : null
@@ -4489,19 +4538,8 @@ export function XDriveWorkspace({
   }
 
   function permanentlyDeleteDocument(docId: string) {
-    if (pendingRenameDocIdsRef.current.has(docId)) {
+    if (refuseDocLifecycle(docId, 'delete', 'deleting this file')) {
       setPermanentDeleteTarget(null)
-      setAgentStatus('Wait for rename to finish before deleting this file.')
-      return
-    }
-    if (pendingMoveDocIdsRef.current.has(docId)) {
-      setPermanentDeleteTarget(null)
-      setAgentStatus('Wait for move to finish before deleting this file.')
-      return
-    }
-    if (pendingRestoreDocIdsRef.current.has(docId)) {
-      setPermanentDeleteTarget(null)
-      setAgentStatus('Wait for restore to finish before deleting this file.')
       return
     }
     const target = allDocsRef.current.find((doc) => doc.id === docId)
@@ -4558,28 +4596,27 @@ export function XDriveWorkspace({
   }
 
   function emptyTrash() {
-    const removable = trashedDocs.filter(
-      (doc) => !pendingRestoreDocIdsRef.current.has(doc.id),
-    )
-    if (removable.length === 0) {
-      setPermanentDeleteTarget(null)
-      if (trashedDocs.length > 0) {
-        setAgentStatus('Wait for restore to finish before emptying Trash.')
-      }
+    const decision = emptyTrashDocIds({
+      visibleDocIds: trashedDocs.map((doc) => doc.id),
+      pending: currentLifecyclePending(),
+    })
+    setPermanentDeleteTarget(null)
+    if (decision.blocked) {
+      setAgentStatus('Wait for Trash changes to finish before emptying Trash.')
       return
     }
-    const removedIds = new Set(removable.map((doc) => doc.id))
-    const count = removable.length
+    if (decision.ids.length === 0) return
+    const removedIds = new Set(decision.ids)
+    const count = decision.ids.length
     allDocsRef.current = allDocsRef.current.filter(
       (doc) => !removedIds.has(doc.id),
     )
     setDocs((prev) => prev.filter((doc) => !removedIds.has(doc.id)))
     cleanupRemovedDocIds(removedIds)
-    setPermanentDeleteTarget(null)
     setAgentStatus(
       `Permanently deleted ${count} ${count === 1 ? 'file' : 'files'} from Trash`,
     )
-    void syncTrashApi({ action: 'empty_trash' })
+    void syncTrashApi({ action: 'empty_trash', ids: decision.ids })
   }
 
   useEffect(() => {
@@ -4662,6 +4699,13 @@ export function XDriveWorkspace({
         if (!target) {
           throw new Error(`Document "${action.docTitle}" was not found.`)
         }
+        const editRefusal = docLifecycleRefusalMessage(
+          target.id,
+          'edit',
+          'editing this file',
+          currentLifecyclePending(),
+        )
+        if (editRefusal) throw new Error(editRefusal)
         const priorSource = sourceRef.current.get(target.id) ?? target.source
         let nextSource = priorSource
         if (action.replacementSource) {
@@ -4847,12 +4891,13 @@ export function XDriveWorkspace({
         if (!target) {
           throw new Error(`Document "${action.docTitle}" was not found.`)
         }
-        if (pendingRenameDocIdsRef.current.has(target.id)) {
-          throw new Error('Document rename is already in progress.')
-        }
-        if (pendingMoveDocIdsRef.current.has(target.id)) {
-          throw new Error('Wait for move to finish before renaming this file.')
-        }
+        const renameRefusal = docLifecycleRefusalMessage(
+          target.id,
+          'meta',
+          'renaming this file',
+          currentLifecyclePending(),
+        )
+        if (renameRefusal) throw new Error(renameRefusal)
         const prevTitle = target.title
         const prevDescription = target.description
         const prevTags = target.tags
@@ -4915,12 +4960,13 @@ export function XDriveWorkspace({
         if (!target) {
           throw new Error(`Document "${action.docTitle}" was not found.`)
         }
-        if (pendingRenameDocIdsRef.current.has(target.id)) {
-          throw new Error('Wait for rename to finish before moving this file.')
-        }
-        if (pendingMoveDocIdsRef.current.has(target.id)) {
-          throw new Error('Move already in progress.')
-        }
+        const moveRefusal = docLifecycleRefusalMessage(
+          target.id,
+          'move',
+          'moving this file',
+          currentLifecyclePending(),
+        )
+        if (moveRefusal) throw new Error(moveRefusal)
         const prevFolderId = target.folderId ?? null
         const resolvedFolder =
           (action.targetFolderId
@@ -5005,14 +5051,13 @@ export function XDriveWorkspace({
         if (!target) {
           throw new Error(`Document "${action.docTitle}" was not found.`)
         }
-        if (pendingRenameDocIdsRef.current.has(target.id)) {
-          throw new Error(
-            'Wait for rename to finish before modifying metadata.',
-          )
-        }
-        if (pendingMoveDocIdsRef.current.has(target.id)) {
-          throw new Error('Wait for move to finish before modifying metadata.')
-        }
+        const metaRefusal = docLifecycleRefusalMessage(
+          target.id,
+          'meta',
+          'modifying metadata',
+          currentLifecyclePending(),
+        )
+        if (metaRefusal) throw new Error(metaRefusal)
         const prevStarred = target.starred
         const prevPinned = target.pinned
         const prevTags = target.tags
@@ -5077,14 +5122,13 @@ export function XDriveWorkspace({
       }
 
       if (action.kind === 'trash_document') {
-        if (pendingRenameDocIdsRef.current.has(action.docId)) {
-          throw new Error(
-            'Wait for rename to finish before trashing this file.',
-          )
-        }
-        if (pendingMoveDocIdsRef.current.has(action.docId)) {
-          throw new Error('Wait for move to finish before trashing this file.')
-        }
+        const trashRefusal = docLifecycleRefusalMessage(
+          action.docId,
+          'trash',
+          'trashing this file',
+          currentLifecyclePending(),
+        )
+        if (trashRefusal) throw new Error(trashRefusal)
         moveDocumentToTrash(action.docId)
         chatUndoMapRef.current.set(action.id, () => {
           restoreDocumentFromTrash(action.docId)
@@ -5098,6 +5142,13 @@ export function XDriveWorkspace({
       }
 
       if (action.kind === 'restore_document') {
+        const restoreRefusal = docLifecycleRefusalMessage(
+          action.docId,
+          'restore',
+          'restoring this file',
+          currentLifecyclePending(),
+        )
+        if (restoreRefusal) throw new Error(restoreRefusal)
         restoreDocumentFromTrash(action.docId)
         chatUndoMapRef.current.set(action.id, () => {
           moveDocumentToTrash(action.docId)
@@ -5997,6 +6048,7 @@ export function XDriveWorkspace({
 
   function handleRichAppSourceChange(nextSource: string, label: string) {
     if (!activeDoc) return
+    if (refuseDocLifecycle(activeDoc.id, 'edit', 'editing this file')) return
     const id = activeDoc.id
     const prior = sourceRef.current.get(id) ?? activeDoc.source
     if (prior === nextSource) return
@@ -6398,6 +6450,15 @@ export function XDriveWorkspace({
                         selectNodeAndOpenAi(activeDoc.id, element)
                       }}
                       onApplySource={(nextSource, ops) => {
+                        if (
+                          refuseDocLifecycle(
+                            activeDoc.id,
+                            'edit',
+                            'editing this file',
+                          )
+                        ) {
+                          return
+                        }
                         const prior = activeDoc.source
                         sourceRef.current.set(activeDoc.id, nextSource)
                         const checkpoint: MarbleCheckpoint = {
@@ -7102,19 +7163,29 @@ export function XDriveWorkspace({
                     }
                     formatTrashedAt={relativeTime}
                     onRestoreDoc={(doc) => restoreDocumentFromTrash(doc.id)}
-                    deleteForeverBlockedDocIds={pendingRestoreDocIds}
+                    deleteForeverBlockedDocIds={lifecycleLockedDocIds}
+                    emptyTrashBlocked={trashBinBusy}
                     onDeleteForeverDoc={(doc) => {
-                      if (pendingRestoreDocIdsRef.current.has(doc.id)) {
-                        setAgentStatus(
-                          'Wait for restore to finish before deleting this file.',
+                      if (
+                        refuseDocLifecycle(
+                          doc.id,
+                          'delete',
+                          'deleting this file',
                         )
+                      ) {
                         return
                       }
                       setPermanentDeleteTarget({ mode: 'single', doc })
                     }}
-                    onEmptyTrash={() =>
+                    onEmptyTrash={() => {
+                      if (trashBinBusy) {
+                        setAgentStatus(
+                          'Wait for Trash changes to finish before emptying Trash.',
+                        )
+                        return
+                      }
                       setPermanentDeleteTarget({ mode: 'empty' })
-                    }
+                    }}
                   />
                 </div>
               )}
@@ -7618,16 +7689,9 @@ export function XDriveWorkspace({
             simulatedRole === 'owner' ? undefined : simulatedRole
           }
           onConfigChange={(config) => {
-            if (pendingRenameDocIdsRef.current.has(shareDoc.id)) {
-              setAgentStatus(
-                'Wait for rename to finish before updating share settings.',
-              )
-              return
-            }
-            if (pendingMoveDocIdsRef.current.has(shareDoc.id)) {
-              setAgentStatus(
-                'Wait for move to finish before updating share settings.',
-              )
+            if (
+              refuseDocLifecycle(shareDoc.id, 'meta', 'updating share settings')
+            ) {
               return
             }
             patchFile(shareDoc.id, (doc) => ({ ...doc, share: config }))

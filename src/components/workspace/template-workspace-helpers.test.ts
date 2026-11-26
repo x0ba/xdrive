@@ -16,6 +16,10 @@ import {
   applyServerSaveAsTemplateReply,
   applyServerTrashDocumentReply,
   deriveDocIsTemplate,
+  docEditDisposition,
+  docLifecycleBlocksPermanentDelete,
+  docLifecycleRefusalMessage,
+  emptyTrashDocIds,
   ensureClientTemplatesFolder,
   mergeReloadedWorkspaceDocs,
   mintClientFolderId,
@@ -709,5 +713,132 @@ describe('template-workspace-helpers', () => {
     const syncState: MarbleDocumentFile['syncState'] = trashed.syncState
     expect(trashed.trashedAt).toBe('2026-11-26T00:04:00.000Z')
     expect(syncState).toBe('saving')
+  })
+})
+
+describe('pending document lifecycle gate', () => {
+  it('blocks a queued save while trash is pending so the save cannot recreate the file', () => {
+    const pending = { trash: new Set(['doc-race']) }
+    expect(docEditDisposition('doc-race', pending)).toBe('block')
+    expect(docEditDisposition('doc-other', pending)).toBe('allow')
+    expect(
+      docLifecycleRefusalMessage(
+        'doc-race',
+        'edit',
+        'editing this file',
+        pending,
+      ),
+    ).toBe('Wait for trash to finish before editing this file.')
+    expect(
+      docLifecycleRefusalMessage(
+        'doc-race',
+        'meta',
+        'modifying metadata',
+        pending,
+      ),
+    ).toBe('Wait for trash to finish before modifying metadata.')
+    expect(docLifecycleBlocksPermanentDelete('doc-race', pending)).toBe(true)
+  })
+
+  it('blocks emptying Trash while any trash, restore, or delete is pending and otherwise sends only the shown ids', () => {
+    expect(
+      emptyTrashDocIds({
+        visibleDocIds: ['shown-keep', 'pending-restore'],
+        pending: { restore: new Set(['pending-restore']) },
+      }),
+    ).toEqual({ blocked: true })
+    expect(
+      emptyTrashDocIds({
+        visibleDocIds: ['shown-keep'],
+        pending: { trash: new Set(['doc-leaving']) },
+      }),
+    ).toEqual({ blocked: true })
+    expect(
+      emptyTrashDocIds({
+        visibleDocIds: ['shown-keep'],
+        pending: { delete: new Set(['shown-keep']) },
+      }),
+    ).toEqual({ blocked: true })
+    expect(
+      emptyTrashDocIds({
+        visibleDocIds: ['shown-a', ' shown-b ', 'shown-a', ''],
+        pending: { move: new Set(['active-doc']) },
+      }),
+    ).toEqual({ blocked: false, ids: ['shown-a', 'shown-b'] })
+  })
+
+  it('holds edits only for rename, queues edits behind move, and blocks the other pending lifecycle pairs', () => {
+    expect(
+      docEditDisposition('doc-race', { rename: new Set(['doc-race']) }),
+    ).toBe('hold')
+    expect(
+      docLifecycleRefusalMessage('doc-race', 'edit', 'editing this file', {
+        rename: new Set(['doc-race']),
+      }),
+    ).toBeNull()
+    expect(
+      docEditDisposition('doc-race', { move: new Set(['doc-race']) }),
+    ).toBe('allow')
+    expect(
+      docLifecycleRefusalMessage('doc-race', 'edit', 'editing this file', {
+        move: new Set(['doc-race']),
+      }),
+    ).toBeNull()
+    expect(
+      docLifecycleBlocksPermanentDelete('doc-race', {
+        move: new Set(['doc-race']),
+      }),
+    ).toBe(true)
+    expect(
+      docLifecycleRefusalMessage('doc-race', 'restore', 'restoring this file', {
+        trash: new Set(['doc-race']),
+      }),
+    ).toBeNull()
+
+    const blocking = ['restore', 'delete', 'save_as_template'] as const
+    for (const kind of blocking) {
+      const pending =
+        kind === 'save_as_template'
+          ? { saveAsTemplate: new Set(['doc-race']) }
+          : { [kind]: new Set(['doc-race']) }
+      expect(docEditDisposition('doc-race', pending)).toBe('block')
+      expect(docLifecycleBlocksPermanentDelete('doc-race', pending)).toBe(true)
+      expect(
+        docLifecycleRefusalMessage(
+          'doc-race',
+          'edit',
+          'editing this file',
+          pending,
+        ),
+      ).toBe(
+        `Wait for ${kind === 'save_as_template' ? 'save as template' : kind} to finish before editing this file.`,
+      )
+    }
+
+    expect(
+      docLifecycleRefusalMessage('doc-race', 'trash', 'trashing this file', {
+        trash: new Set(['doc-race']),
+      }),
+    ).toBe('Trash is already in progress.')
+  })
+
+  it('keeps a source doc saving while save-as-template is pending', () => {
+    const serverDoc = makeDoc({
+      id: 'doc-source',
+      slug: 'source-doc',
+      title: 'Source Doc',
+      syncState: 'saved',
+    })
+    const merged = mergeReloadedWorkspaceDocs({
+      reloadedDocs: [serverDoc],
+      currentDocs: [{ ...serverDoc, syncState: 'saving' }],
+      pendingRenameDocIds: new Set(),
+      heldDocEdits: new Map(),
+      pendingSaveAsTemplateDocIds: new Set(['doc-source']),
+    })
+    const reloaded = merged[0]
+    const syncState: MarbleDocumentFile['syncState'] = reloaded.syncState
+    expect(syncState).toBe('saving')
+    expect(reloaded.source).toBe(serverDoc.source)
   })
 })

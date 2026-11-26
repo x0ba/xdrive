@@ -373,6 +373,18 @@ function optionalString(value: unknown): string | undefined {
   return typeof value === 'string' ? value : undefined
 }
 
+function requireIdList(value: unknown): string[] {
+  if (!Array.isArray(value)) fail(400, 'empty_trash requires an ids array')
+  const ids: string[] = []
+  for (const item of value) {
+    if (typeof item !== 'string' || item.trim().length === 0) {
+      fail(400, 'empty_trash ids must be non-empty strings')
+    }
+    ids.push(item.trim())
+  }
+  return ids
+}
+
 export async function GET({ request }: { request: Request }) {
   const url = new URL(request.url)
   try {
@@ -650,7 +662,7 @@ export async function POST({ request }: { request: Request }) {
       )
     }
     if (action === 'empty_trash') {
-      return json(await emptyTrashOnDisk())
+      return json(await emptyTrashOnDisk(requireIdList(body.ids)))
     }
     if (action === 'purge_expired') {
       const settings = await readDriveSettingsOnDisk()
@@ -695,7 +707,14 @@ export async function DELETE({ request }: { request: Request }) {
   const url = new URL(request.url)
   try {
     if (url.searchParams.get('empty') === '1') {
-      return json(await emptyTrashOnDisk())
+      if (!url.searchParams.has('ids')) {
+        fail(400, 'empty requires an ids list')
+      }
+      const ids = (url.searchParams.get('ids') ?? '')
+        .split(',')
+        .map((id) => id.trim())
+        .filter((id) => id.length > 0)
+      return json(await emptyTrashOnDisk(ids))
     }
     const slug = requireSlug(url.searchParams.get('slug'))
     const folderPath = url.searchParams.get('folderPath')

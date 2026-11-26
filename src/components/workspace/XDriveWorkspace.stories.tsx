@@ -3094,3 +3094,329 @@ export const UndoDuringLostTrashReload: Story = {
     ).toBeNull()
   },
 }
+
+const LIFECYCLE_GATE_SOURCE =
+  '<!doctype html><html lang="en" data-marble="1"><head><meta charset="utf-8"><title>Lifecycle Gate</title></head><body><main><h1 data-marble-id="h1" data-marble-editable>Gate Body</h1></main></body></html>'
+
+const LIFECYCLE_GATE_DOC: MarbleDocumentFile = {
+  ...TRASH_RELOAD_DOC,
+  id: 'doc-lifecycle-gate',
+  slug: 'lifecycle-gate',
+  fileName: 'lifecycle-gate.mrbl',
+  title: 'Lifecycle Gate',
+  source: LIFECYCLE_GATE_SOURCE,
+}
+
+const PENDING_RESTORE_DOC: MarbleDocumentFile = {
+  ...TRASH_RELOAD_DOC,
+  id: 'doc-pending-restore',
+  slug: 'pending-restore',
+  fileName: 'pending-restore.mrbl',
+  title: 'Pending Restore',
+  source: LIFECYCLE_GATE_SOURCE,
+  trashedAt: '2026-11-26T00:04:00.000Z',
+}
+
+const IDLE_TRASH_DOC: MarbleDocumentFile = {
+  ...TRASH_RELOAD_DOC,
+  id: 'doc-idle-trash',
+  slug: 'idle-trash',
+  fileName: 'idle-trash.mrbl',
+  title: 'Idle Trash',
+  source: LIFECYCLE_GATE_SOURCE,
+  trashedAt: '2026-11-26T00:04:00.000Z',
+}
+
+let resolveLifecycleTrash: (() => void) | null = null
+let recordedLifecycleTrashPosts: RecordedMarblePost[] = []
+
+function PendingTrashBlocksSaveHarness(
+  args: ComponentProps<typeof XDriveWorkspace>,
+) {
+  const [ready, setReady] = useState(false)
+
+  useEffect(() => {
+    recordedLifecycleTrashPosts = []
+    let trashed = false
+    const originalFetch = window.fetch.bind(window)
+    window.fetch = async (input, init) => {
+      const url =
+        typeof input === 'string'
+          ? input
+          : input instanceof Request
+            ? input.url
+            : String(input)
+      if (url.includes('/api/marble')) {
+        const method = (init?.method ?? 'GET').toUpperCase()
+        if (method === 'GET' && url.includes('action=workspace')) {
+          return new Response(
+            JSON.stringify({
+              ok: true,
+              folders: [],
+              docs: [
+                {
+                  ...LIFECYCLE_GATE_DOC,
+                  trashedAt: trashed ? '2026-11-26T00:05:00.000Z' : null,
+                },
+              ],
+            }),
+            {
+              status: 200,
+              headers: { 'content-type': 'application/json' },
+            },
+          )
+        }
+        if (method === 'POST' && typeof init?.body === 'string') {
+          const payload = JSON.parse(init.body) as RecordedMarblePost
+          if (payload.action === 'diff' || payload.action === 'doctor') {
+            return new Response(JSON.stringify({ ok: false }), {
+              status: 404,
+              headers: { 'content-type': 'application/json' },
+            })
+          }
+          recordedLifecycleTrashPosts.push(payload)
+          if (payload.action === 'trash') {
+            await new Promise<void>((resolve) => {
+              resolveLifecycleTrash = resolve
+            })
+            trashed = true
+            return new Response(
+              JSON.stringify({
+                ok: true,
+                slug: payload.slug,
+                trashedAt: '2026-11-26T00:05:00.000Z',
+                purgeAt: '2026-12-26T00:05:00.000Z',
+                existedOnDisk: true,
+                retentionDays: 30,
+              }),
+              {
+                status: 200,
+                headers: { 'content-type': 'application/json' },
+              },
+            )
+          }
+          return new Response(JSON.stringify({ ok: true }), {
+            status: 200,
+            headers: { 'content-type': 'application/json' },
+          })
+        }
+      }
+      return originalFetch(input, init)
+    }
+    setReady(true)
+    return () => {
+      resolveLifecycleTrash?.()
+      resolveLifecycleTrash = null
+      window.fetch = originalFetch
+    }
+  }, [])
+
+  if (!ready) return null
+  return <XDriveWorkspace {...args} />
+}
+
+/**
+ * Verifies that a save queued behind a pending trash is not sent, so the server cannot recreate the file at the old path.
+ *
+ * @summary Pending trash blocks edits and queued saves
+ */
+export const PendingTrashBlocksQueuedSave: Story = {
+  name: 'Drive · Pending Trash Blocks Queued Save',
+  args: {
+    initialTheme: 'dark',
+    initialNav: 'drive',
+    initialActiveTabId: 'doc-lifecycle-gate',
+    initialOpenDocIds: ['doc-lifecycle-gate'],
+    initialDocs: [LIFECYCLE_GATE_DOC],
+    initialMode: 'source',
+    initialAiSidebarOpen: false,
+    syncWithServer: true,
+  },
+  render: (args) => <PendingTrashBlocksSaveHarness {...args} />,
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    const sourceTextarea = await canvas.findByLabelText<HTMLTextAreaElement>(
+      'Marble HTML5 source',
+    )
+    await waitFor(() => expect(sourceTextarea.value).toContain('Gate Body'))
+
+    await userEvent.click(canvas.getByRole('button', { name: 'Move to trash' }))
+    await waitFor(() => expect(resolveLifecycleTrash).not.toBeNull())
+
+    const start = sourceTextarea.value.indexOf('Gate Body')
+    expect(start).toBeGreaterThan(-1)
+    sourceTextarea.focus()
+    await userEvent.type(sourceTextarea, 'Queued Save Body', {
+      initialSelectionStart: start,
+      initialSelectionEnd: start + 'Gate Body'.length,
+    })
+    await userEvent.click(canvas.getByRole('button', { name: 'Apply' }))
+    await expect(
+      await canvas.findByText(
+        'Wait for trash to finish before editing this file.',
+      ),
+    ).toBeVisible()
+    expect(
+      recordedLifecycleTrashPosts.filter(
+        (post) => post.action === 'save' || post.action === 'apply_ops',
+      ),
+    ).toEqual([])
+    expect(
+      recordedLifecycleTrashPosts.filter((post) => post.action === 'trash'),
+    ).toHaveLength(1)
+
+    const releaseTrash = resolveLifecycleTrash
+    resolveLifecycleTrash = null
+    releaseTrash?.()
+
+    const sidebarNav = canvas.getByRole('navigation', {
+      name: 'Primary Workspace Navigation',
+    })
+    await userEvent.click(
+      within(sidebarNav).getByRole('link', { name: /^Trash/ }),
+    )
+    await expect(await canvas.findByText('lifecycle-gate.mrbl')).toBeVisible()
+    expect(canvas.queryAllByText('lifecycle-gate.mrbl')).toHaveLength(1)
+    expect(
+      recordedLifecycleTrashPosts.filter(
+        (post) => post.action === 'save' || post.action === 'apply_ops',
+      ),
+    ).toEqual([])
+  },
+}
+
+let resolveLifecycleRestore: (() => void) | null = null
+let recordedLifecycleEmptyPosts: RecordedMarblePost[] = []
+
+function PendingRestoreBlocksEmptyHarness(
+  args: ComponentProps<typeof XDriveWorkspace>,
+) {
+  const [ready, setReady] = useState(false)
+
+  useEffect(() => {
+    recordedLifecycleEmptyPosts = []
+    let restored = false
+    const originalFetch = window.fetch.bind(window)
+    window.fetch = async (input, init) => {
+      const url =
+        typeof input === 'string'
+          ? input
+          : input instanceof Request
+            ? input.url
+            : String(input)
+      if (url.includes('/api/marble')) {
+        const method = (init?.method ?? 'GET').toUpperCase()
+        if (method === 'GET' && url.includes('action=workspace')) {
+          return new Response(
+            JSON.stringify({
+              ok: true,
+              folders: [],
+              docs: [
+                {
+                  ...PENDING_RESTORE_DOC,
+                  trashedAt: restored ? null : PENDING_RESTORE_DOC.trashedAt,
+                },
+                IDLE_TRASH_DOC,
+              ],
+            }),
+            {
+              status: 200,
+              headers: { 'content-type': 'application/json' },
+            },
+          )
+        }
+        if (method === 'POST' && typeof init?.body === 'string') {
+          const payload = JSON.parse(init.body) as RecordedMarblePost
+          if (payload.action === 'diff' || payload.action === 'doctor') {
+            return new Response(JSON.stringify({ ok: false }), {
+              status: 404,
+              headers: { 'content-type': 'application/json' },
+            })
+          }
+          recordedLifecycleEmptyPosts.push(payload)
+          if (payload.action === 'restore') {
+            await new Promise<void>((resolve) => {
+              resolveLifecycleRestore = resolve
+            })
+            restored = true
+            return new Response(
+              JSON.stringify({
+                ok: true,
+                slug: payload.slug,
+                restoredOnDisk: true,
+                folderPath: '',
+              }),
+              {
+                status: 200,
+                headers: { 'content-type': 'application/json' },
+              },
+            )
+          }
+          return new Response(JSON.stringify({ ok: true }), {
+            status: 200,
+            headers: { 'content-type': 'application/json' },
+          })
+        }
+      }
+      return originalFetch(input, init)
+    }
+    setReady(true)
+    return () => {
+      resolveLifecycleRestore?.()
+      resolveLifecycleRestore = null
+      window.fetch = originalFetch
+    }
+  }, [])
+
+  if (!ready) return null
+  return <XDriveWorkspace {...args} />
+}
+
+/**
+ * Verifies that Empty Trash stays blocked for the whole bin while a restore is pending, including a file the page still shows.
+ *
+ * @summary Pending restore blocks emptying Trash
+ */
+export const PendingRestoreBlocksEmptyTrash: Story = {
+  name: 'Drive · Pending Restore Blocks Empty Trash',
+  args: {
+    initialTheme: 'dark',
+    initialNav: 'trash',
+    initialActiveTabId: 'home',
+    initialDocs: [PENDING_RESTORE_DOC, IDLE_TRASH_DOC],
+    initialTrashedDocIds: ['doc-pending-restore', 'doc-idle-trash'],
+    initialAiSidebarOpen: false,
+    syncWithServer: true,
+  },
+  render: (args) => <PendingRestoreBlocksEmptyHarness {...args} />,
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    await userEvent.click(
+      await canvas.findByRole('button', { name: 'Restore Pending Restore' }),
+    )
+    await waitFor(() => expect(resolveLifecycleRestore).not.toBeNull())
+
+    expect(canvas.getByRole('button', { name: 'Empty trash' })).toBeDisabled()
+    expect(
+      canvas.getByRole('button', { name: 'Delete Pending Restore forever' }),
+    ).toBeDisabled()
+    expect(
+      canvas.getByRole('button', { name: 'Delete Idle Trash forever' }),
+    ).toBeEnabled()
+    expect(
+      recordedLifecycleEmptyPosts.some((post) => post.action === 'empty_trash'),
+    ).toBe(false)
+    expect(
+      recordedLifecycleEmptyPosts.filter((post) => post.action === 'restore'),
+    ).toHaveLength(1)
+
+    const releaseRestore = resolveLifecycleRestore
+    resolveLifecycleRestore = null
+    releaseRestore?.()
+    await waitFor(() =>
+      expect(canvas.queryByText('pending-restore.mrbl')).toBeNull(),
+    )
+    expect(canvas.getByRole('button', { name: 'Empty trash' })).toBeEnabled()
+    expect(canvas.getByText('idle-trash.mrbl')).toBeVisible()
+  },
+}

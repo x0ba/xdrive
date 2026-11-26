@@ -11,10 +11,13 @@ import {
   countMarbleNodes,
 } from './index'
 import {
+  DriveStorageError,
   createFolderOnDisk,
   deleteDocumentPermanentlyOnDisk,
   deleteFolderOnDisk,
+  emptyTrashOnDisk,
   getTemplatesDir,
+  getTrashDir,
   listTemplatesOnDisk,
   loadDriveWorkspace,
   moveDocumentOnDisk,
@@ -27,7 +30,11 @@ import {
   trashDocumentOnDisk,
   updateDocumentMetaOnDisk,
 } from './drive-storage.server'
-import { GET as marbleGet, POST as marblePost } from '#/routes/api.marble'
+import {
+  DELETE as marbleDelete,
+  GET as marbleGet,
+  POST as marblePost,
+} from '#/routes/api.marble'
 
 const SAMPLE_HTML = `<!doctype html>
 <html lang="en" data-marble="1">
@@ -646,5 +653,164 @@ describe('drive-storage templates and seeding', () => {
     expect(
       afterTrash.docs.find((doc) => doc.id === activePremade.id)?.source,
     ).toBe(activePremade.source)
+  })
+
+  it('14. save, move, and metadata updates refuse a slug that is already in Trash', async () => {
+    const original = SAMPLE_HTML.replace('Original Heading', 'Trashed Body')
+    await saveDocumentToDisk({
+      slug: 'trashed-note',
+      folderPath: '',
+      source: original,
+      meta: { id: 'doc-trashed-note', title: 'Trashed Note' },
+    })
+    await trashDocumentOnDisk({ slug: 'trashed-note', folderPath: '' })
+
+    const rewritten = original.replace('Trashed Body', 'Resurrected Body')
+    await expect(
+      saveDocumentToDisk({
+        slug: 'trashed-note',
+        folderPath: '',
+        source: rewritten,
+        meta: { id: 'doc-trashed-note', title: 'Trashed Note' },
+      }),
+    ).rejects.toBeInstanceOf(DriveStorageError)
+    await expect(
+      saveDocumentToDisk({
+        slug: 'trashed-note',
+        folderPath: '',
+        source: rewritten,
+        meta: { id: 'doc-trashed-note', title: 'Trashed Note' },
+      }),
+    ).rejects.toMatchObject({ status: 409 })
+    await expect(
+      moveDocumentOnDisk({
+        slug: 'trashed-note',
+        fromFolderPath: '',
+        toFolderPath: 'Archive',
+        source: rewritten,
+        meta: { id: 'doc-trashed-note', title: 'Trashed Note' },
+      }),
+    ).rejects.toMatchObject({ status: 409 })
+    await expect(
+      updateDocumentMetaOnDisk({
+        slug: 'trashed-note',
+        folderPath: '',
+        meta: { id: 'doc-trashed-note', title: 'Ghost Title' },
+      }),
+    ).rejects.toMatchObject({ status: 409 })
+
+    await expect(
+      readFile(path.join(tempDir, 'trashed-note.mrbl'), 'utf8'),
+    ).rejects.toThrow()
+    await expect(
+      readFile(path.join(tempDir, 'Archive', 'trashed-note.mrbl'), 'utf8'),
+    ).rejects.toThrow()
+    expect(
+      await readFile(path.join(getTrashDir(), 'trashed-note.mrbl'), 'utf8'),
+    ).toBe(original)
+
+    const saveResponse = await marblePost({
+      request: new Request('http://local/api/marble', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          action: 'save',
+          slug: 'trashed-note',
+          folderPath: '',
+          source: rewritten,
+        }),
+      }),
+    })
+    expect(saveResponse.status).toBe(409)
+    const applyResponse = await marblePost({
+      request: new Request('http://local/api/marble', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          action: 'apply_ops',
+          slug: 'trashed-note',
+          folderPath: '',
+          source: original,
+          ops: [],
+        }),
+      }),
+    })
+    expect(applyResponse.status).toBe(409)
+    expect(
+      await readFile(path.join(getTrashDir(), 'trashed-note.mrbl'), 'utf8'),
+    ).toBe(original)
+    await expect(
+      readFile(path.join(tempDir, 'trashed-note.mrbl'), 'utf8'),
+    ).rejects.toThrow()
+  })
+
+  it('15. empty_trash deletes only the listed ids and never wipes Trash', async () => {
+    await saveDocumentToDisk({
+      slug: 'trash-keep',
+      folderPath: '',
+      source: SAMPLE_HTML.replace('Original Heading', 'Keep Body'),
+      meta: { id: 'doc-keep', title: 'Keep' },
+    })
+    await saveDocumentToDisk({
+      slug: 'trash-drop',
+      folderPath: '',
+      source: SAMPLE_HTML.replace('Original Heading', 'Drop Body'),
+      meta: { id: 'doc-drop', title: 'Drop' },
+    })
+    await trashDocumentOnDisk({ slug: 'trash-keep', folderPath: '' })
+    await trashDocumentOnDisk({ slug: 'trash-drop', folderPath: '' })
+
+    const emptiedNone = await emptyTrashOnDisk([])
+    expect(emptiedNone).toEqual({
+      ok: true,
+      deletedCount: 0,
+      deletedIds: [],
+    })
+    expect(
+      await readFile(path.join(getTrashDir(), 'trash-keep.mrbl'), 'utf8'),
+    ).toContain('Keep Body')
+    expect(
+      await readFile(path.join(getTrashDir(), 'trash-drop.mrbl'), 'utf8'),
+    ).toContain('Drop Body')
+
+    const missingIds = await marblePost({
+      request: new Request('http://local/api/marble', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ action: 'empty_trash' }),
+      }),
+    })
+    expect(missingIds.status).toBe(400)
+    const unrestrictedDelete = await marbleDelete({
+      request: new Request('http://local/api/marble?empty=1', {
+        method: 'DELETE',
+      }),
+    })
+    expect(unrestrictedDelete.status).toBe(400)
+    expect(
+      await readFile(path.join(getTrashDir(), 'trash-keep.mrbl'), 'utf8'),
+    ).toContain('Keep Body')
+    expect(
+      await readFile(path.join(getTrashDir(), 'trash-drop.mrbl'), 'utf8'),
+    ).toContain('Drop Body')
+
+    const emptiedOne = await emptyTrashOnDisk(['doc-drop'])
+    expect(emptiedOne.deletedCount).toBe(1)
+    expect(emptiedOne.deletedIds).toEqual(['doc-drop'])
+    await expect(
+      readFile(path.join(getTrashDir(), 'trash-drop.mrbl'), 'utf8'),
+    ).rejects.toThrow()
+    expect(
+      await readFile(path.join(getTrashDir(), 'trash-keep.mrbl'), 'utf8'),
+    ).toContain('Keep Body')
+
+    const restored = await restoreDocumentOnDisk({
+      slug: 'trash-keep',
+      targetFolderPath: '',
+    })
+    expect(restored.restoredOnDisk).toBe(true)
+    expect(
+      await readFile(path.join(tempDir, 'trash-keep.mrbl'), 'utf8'),
+    ).toContain('Keep Body')
   })
 })

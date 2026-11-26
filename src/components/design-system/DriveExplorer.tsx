@@ -2138,6 +2138,7 @@ export interface DriveTrashListProps {
   onRestoreDoc?: (doc: MarbleDocumentFile) => void
   onDeleteForeverDoc?: (doc: MarbleDocumentFile) => void
   deleteForeverBlockedDocIds?: ReadonlySet<string>
+  emptyTrashBlocked?: boolean
   onEmptyTrash?: () => void
 }
 
@@ -2150,6 +2151,7 @@ export function DriveTrashList({
   onRestoreDoc,
   onDeleteForeverDoc,
   deleteForeverBlockedDocIds,
+  emptyTrashBlocked = false,
   onEmptyTrash,
 }: DriveTrashListProps) {
   const effectiveTotal = totalCount ?? docs.length
@@ -2181,7 +2183,13 @@ export function DriveTrashList({
           <button
             type="button"
             onClick={onEmptyTrash}
-            className="inline-flex h-7 items-center gap-1.5 rounded border border-[var(--xd-danger)]/35 bg-[var(--xd-danger-soft)] px-2.5 text-[11.5px] font-medium text-[var(--xd-danger)] transition-colors hover:border-[var(--xd-danger)]/60 hover:bg-[var(--xd-danger)] hover:text-white"
+            disabled={emptyTrashBlocked}
+            title={
+              emptyTrashBlocked
+                ? 'Wait for Trash changes to finish'
+                : 'Empty trash'
+            }
+            className="inline-flex h-7 items-center gap-1.5 rounded border border-[var(--xd-danger)]/35 bg-[var(--xd-danger-soft)] px-2.5 text-[11.5px] font-medium text-[var(--xd-danger)] transition-colors hover:border-[var(--xd-danger)]/60 hover:bg-[var(--xd-danger)] hover:text-white disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:border-[var(--xd-danger)]/35 disabled:hover:bg-[var(--xd-danger-soft)] disabled:hover:text-[var(--xd-danger)]"
           >
             <Trash2 className="h-3 w-3" />
             <span>Empty trash</span>
@@ -2353,7 +2361,7 @@ export function DriveTrashList({
                             aria-label={`Delete ${doc.title} forever`}
                             title={
                               deleteForeverBlocked
-                                ? 'Wait for restore to finish'
+                                ? 'Wait for the current change to finish'
                                 : 'Delete forever'
                             }
                             className="inline-flex h-7 w-7 items-center justify-center rounded border border-[var(--xd-border)] text-[var(--xd-ink-muted)] transition-colors hover:border-[var(--xd-danger)]/45 hover:bg-[var(--xd-danger-soft)] hover:text-[var(--xd-danger)] disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:border-[var(--xd-border)] disabled:hover:bg-transparent disabled:hover:text-[var(--xd-ink-muted)]"
