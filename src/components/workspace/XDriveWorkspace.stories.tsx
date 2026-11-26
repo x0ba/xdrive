@@ -6,9 +6,10 @@ import {
   INITIAL_WORKSPACE_DOCS,
   PREDEFINED_MARBLE_TEMPLATES,
   TEMPLATES_FOLDER_NAME,
+  applyMarbleOpsClient,
 } from '#/lib/marble'
 import type { DriveChatThread } from '#/lib/ai/drive-chat-types'
-import type { DriveFolder, MarbleDocumentFile } from '#/lib/types'
+import type { DriveFolder, MarbleDocumentFile, MarbleOp } from '#/lib/types'
 import { XDriveWorkspace } from './XDriveWorkspace'
 
 /**
@@ -1369,6 +1370,7 @@ function QueuedEditBeforeMoveHarness(
   useEffect(() => {
     recordedMoveRacePosts = []
     let saveAttempt = 0
+    let serverDoc: MarbleDocumentFile = { ...MOVE_RACE_DOC }
     const originalFetch = window.fetch.bind(window)
     window.fetch = async (input, init) => {
       const url =
@@ -1384,7 +1386,7 @@ function QueuedEditBeforeMoveHarness(
             JSON.stringify({
               ok: true,
               folders: [MOVE_RACE_ARCHIVE_FOLDER, MOVE_RACE_BLOCKED_FOLDER],
-              docs: [MOVE_RACE_DOC],
+              docs: [serverDoc],
             }),
             {
               status: 200,
@@ -1408,12 +1410,24 @@ function QueuedEditBeforeMoveHarness(
                 resolveFirstMoveRaceSave = resolve
               })
             }
+            const nextSource =
+              payload.action === 'apply_ops' &&
+              typeof payload.source === 'string' &&
+              Array.isArray(payload.ops)
+                ? applyMarbleOpsClient(
+                    payload.source,
+                    payload.ops as MarbleOp[],
+                  ).source
+                : typeof payload.source === 'string'
+                  ? payload.source
+                  : serverDoc.source
+            serverDoc = { ...serverDoc, source: nextSource }
             return new Response(
               JSON.stringify({
                 ok: true,
                 slug: payload.slug,
                 folderPath: payload.folderPath ?? '',
-                source: payload.source,
+                source: nextSource,
               }),
               {
                 status: 200,
@@ -1433,6 +1447,15 @@ function QueuedEditBeforeMoveHarness(
                   headers: { 'content-type': 'application/json' },
                 },
               )
+            }
+            serverDoc = {
+              ...serverDoc,
+              source:
+                typeof payload.source === 'string'
+                  ? payload.source
+                  : serverDoc.source,
+              folderId: MOVE_RACE_ARCHIVE_FOLDER.id,
+              folder: MOVE_RACE_ARCHIVE_FOLDER.name,
             }
             return new Response(
               JSON.stringify({
@@ -2071,5 +2094,204 @@ export const DriveChatFolderRenameConfirmsBeforeUndo: Story = {
     await expect(
       await within(sidebarNav).findByRole('link', { name: 'Research Notes' }),
     ).toBeVisible()
+  },
+}
+
+let rejectLostMoveResponse: ((reason?: unknown) => void) | null = null
+let resolveReloadAfterLostMove: (() => void) | null = null
+let recordedLostMovePosts: RecordedMarblePost[] = []
+
+function MoveLostResponseHarness(args: ComponentProps<typeof XDriveWorkspace>) {
+  const [ready, setReady] = useState(false)
+
+  useEffect(() => {
+    recordedLostMovePosts = []
+    let serverDoc: MarbleDocumentFile = { ...MOVE_RACE_DOC }
+    let moveCommittedOnServer = false
+    const originalFetch = window.fetch.bind(window)
+    window.fetch = async (input, init) => {
+      const url =
+        typeof input === 'string'
+          ? input
+          : input instanceof Request
+            ? input.url
+            : String(input)
+      if (url.includes('/api/marble')) {
+        const method = (init?.method ?? 'GET').toUpperCase()
+        if (method === 'GET' && url.includes('action=workspace')) {
+          if (moveCommittedOnServer) {
+            await new Promise<void>((resolve) => {
+              resolveReloadAfterLostMove = resolve
+            })
+          }
+          return new Response(
+            JSON.stringify({
+              ok: true,
+              folders: [MOVE_RACE_ARCHIVE_FOLDER],
+              docs: [serverDoc],
+            }),
+            {
+              status: 200,
+              headers: { 'content-type': 'application/json' },
+            },
+          )
+        }
+        if (method === 'POST' && typeof init?.body === 'string') {
+          const payload = JSON.parse(init.body) as RecordedMarblePost
+          if (payload.action === 'diff' || payload.action === 'doctor') {
+            return new Response(JSON.stringify({ ok: false }), {
+              status: 404,
+              headers: { 'content-type': 'application/json' },
+            })
+          }
+          recordedLostMovePosts.push(payload)
+          if (payload.action === 'move_document') {
+            serverDoc = {
+              ...serverDoc,
+              folderId: MOVE_RACE_ARCHIVE_FOLDER.id,
+              folder: MOVE_RACE_ARCHIVE_FOLDER.name,
+            }
+            moveCommittedOnServer = true
+            await new Promise<void>((_resolve, reject) => {
+              rejectLostMoveResponse = reject
+            })
+          }
+          return new Response(
+            JSON.stringify({
+              ok: true,
+              slug: payload.slug,
+              folderPath: payload.folderPath ?? '',
+              source: payload.source,
+            }),
+            {
+              status: 200,
+              headers: { 'content-type': 'application/json' },
+            },
+          )
+        }
+      }
+      return originalFetch(input, init)
+    }
+    setReady(true)
+    return () => {
+      rejectLostMoveResponse?.(new Error('unmounted'))
+      rejectLostMoveResponse = null
+      resolveReloadAfterLostMove?.()
+      resolveReloadAfterLostMove = null
+      window.fetch = originalFetch
+    }
+  }, [])
+
+  if (!ready) return null
+  return <XDriveWorkspace {...args} />
+}
+
+/**
+ * Verifies that if move_document succeeds on disk before its HTTP response is lost, reloadWorkspaceFromServer finishes before queued edits continue so they save to the confirmed destination.
+ *
+ * @summary Lost move response reloads actual folder before queued writes continue
+ */
+export const MoveLostResponseReloadsActualFolder: Story = {
+  name: 'Document · Lost Move Response Reloads Confirmed Folder',
+  args: {
+    initialTheme: 'dark',
+    initialActiveTabId: 'doc-move-race',
+    initialDocs: [MOVE_RACE_DOC],
+    initialOpenDocIds: ['doc-move-race'],
+    initialMode: 'source',
+    initialAiSidebarOpen: false,
+    syncWithServer: true,
+  },
+  render: (args) => <MoveLostResponseHarness {...args} />,
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    const sourceTextarea = await canvas.findByLabelText<HTMLTextAreaElement>(
+      'Marble HTML5 source',
+    )
+    await waitFor(() => expect(sourceTextarea.value).toContain('Initial Body'))
+
+    const sidebarNav = canvas.getByRole('navigation', {
+      name: 'Primary Workspace Navigation',
+    })
+    const sidebarContainer = sidebarNav.parentElement
+    expect(sidebarContainer).not.toBeNull()
+    await expect(
+      await within(sidebarContainer!).findByRole('link', { name: 'Archive' }),
+    ).toBeVisible()
+
+    // Start Move -> Archive, then queue an edit while the move response is pending.
+    const pinnedLink = await within(sidebarContainer!).findByRole('link', {
+      name: 'Move Race Doc',
+    })
+    await userEvent.pointer({ keys: '[MouseRight]', target: pinnedLink })
+    const menu = await canvas.findByRole('menu', {
+      name: 'Actions for Move Race Doc',
+    })
+    await userEvent.click(
+      within(menu).getByRole('menuitem', { name: 'Move to folder…' }),
+    )
+    const dialog = await canvas.findByRole('dialog', {
+      name: 'Move file to folder',
+    })
+    await userEvent.click(
+      within(dialog).getByRole('button', { name: 'Archive' }),
+    )
+    await userEvent.click(
+      within(dialog).getByRole('button', { name: 'Move here' }),
+    )
+    await waitFor(() => expect(rejectLostMoveResponse).not.toBeNull())
+
+    const replaceBodyText = async (currentText: string, nextText: string) => {
+      const start = sourceTextarea.value.indexOf(currentText)
+      expect(start).toBeGreaterThan(-1)
+      sourceTextarea.focus()
+      await userEvent.type(sourceTextarea, nextText, {
+        initialSelectionStart: start,
+        initialSelectionEnd: start + currentText.length,
+      })
+      await userEvent.click(canvas.getByRole('button', { name: 'Apply' }))
+      await waitFor(() =>
+        expect(canvas.getByRole('button', { name: 'Apply' })).toBeDisabled(),
+      )
+    }
+
+    await replaceBodyText('Initial Body', 'Edited During Lost Move')
+    expect(
+      recordedLostMovePosts.filter(
+        (post) => post.action === 'save' || post.action === 'apply_ops',
+      ),
+    ).toHaveLength(0)
+
+    // Drop the move response -> reload starts and blocks queued writes until reload resolves.
+    rejectLostMoveResponse?.(new TypeError('Failed to fetch'))
+    rejectLostMoveResponse = null
+    await waitFor(() => expect(resolveReloadAfterLostMove).not.toBeNull())
+    expect(
+      recordedLostMovePosts.filter(
+        (post) => post.action === 'save' || post.action === 'apply_ops',
+      ),
+    ).toHaveLength(0)
+
+    resolveReloadAfterLostMove?.()
+    resolveReloadAfterLostMove = null
+
+    await waitFor(() => {
+      const savePosts = recordedLostMovePosts.filter(
+        (post) => post.action === 'save' || post.action === 'apply_ops',
+      )
+      expect(savePosts).toHaveLength(1)
+      expect(savePosts[0]?.folderPath).toBe('Archive')
+      expect(JSON.stringify(savePosts[0])).toContain('Edited During Lost Move')
+    })
+    expect(sourceTextarea.value).toContain('Edited During Lost Move')
+
+    await replaceBodyText('Edited During Lost Move', 'Second Edit After Reload')
+    await waitFor(() => {
+      const savePosts = recordedLostMovePosts.filter(
+        (post) => post.action === 'save' || post.action === 'apply_ops',
+      )
+      expect(savePosts).toHaveLength(2)
+      expect(savePosts[1]?.folderPath).toBe('Archive')
+    })
   },
 }

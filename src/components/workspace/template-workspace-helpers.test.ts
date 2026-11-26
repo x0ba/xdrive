@@ -461,4 +461,57 @@ describe('template-workspace-helpers', () => {
     expect(mergedOther?.title).toBe('Fresh From Server')
     expect(mergedOther?.syncState).toBe('saved')
   })
+
+  it('adopts server location while preserving queued save source across lost-response move reloads', () => {
+    const queuedSource =
+      '<!doctype html><html><head><title>Move Doc</title></head><body><h1 data-marble-id="h1">Edited During Lost Move</h1></body></html>'
+    const clientStaleFolderDoc = makeDoc({
+      id: 'doc-lost-move',
+      slug: 'move-doc',
+      title: 'Move Doc',
+      folder: 'My Drive',
+      folderId: null,
+      isTemplate: false,
+      source: queuedSource,
+      version: 2,
+      syncState: 'saving',
+      checkpoints: [
+        {
+          sha: 'cp-queued',
+          label: 'Queued edit',
+          timestamp: 2000,
+          author: 'You',
+          opsCount: 1,
+          source: queuedSource,
+        },
+      ],
+    })
+    const serverMovedDoc = makeDoc({
+      id: 'doc-lost-move',
+      slug: 'move-doc',
+      title: 'Move Doc',
+      folder: 'Archive',
+      folderId: 'folder-archive',
+      isTemplate: false,
+      version: 1,
+      syncState: 'saved',
+    })
+
+    const merged = mergeReloadedWorkspaceDocs({
+      reloadedDocs: [serverMovedDoc],
+      currentDocs: [clientStaleFolderDoc],
+      pendingRenameDocIds: new Set(),
+      heldDocEdits: new Map(),
+      pendingMoveDocIds: new Set(['doc-lost-move']),
+      pendingSaveDocIds: new Set(['doc-lost-move']),
+    })
+
+    expect(merged).toHaveLength(1)
+    expect(merged[0]?.folderId).toBe('folder-archive')
+    expect(merged[0]?.folder).toBe('Archive')
+    expect(merged[0]?.source).toBe(queuedSource)
+    expect(merged[0]?.version).toBe(2)
+    expect(merged[0]?.checkpoints).toHaveLength(1)
+    expect(merged[0]?.syncState).toBe('saving')
+  })
 })

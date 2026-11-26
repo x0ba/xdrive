@@ -380,9 +380,9 @@ export function replayHeldDocEdits(
 }
 
 /**
- * Merges freshly loaded server documents with in-flight client rename/move
- * mutations so unrelated workspace reloads never erase held edits or clear
- * saving indicators for queued mutations.
+ * Merges freshly loaded server documents with in-flight client rename/move/save
+ * mutations so workspace reloads preserve queued edits while adopting the
+ * server's confirmed folder location and metadata.
  */
 export function mergeReloadedWorkspaceDocs(input: {
   reloadedDocs: readonly MarbleDocumentFile[]
@@ -390,32 +390,37 @@ export function mergeReloadedWorkspaceDocs(input: {
   pendingRenameDocIds: ReadonlySet<string>
   heldDocEdits: ReadonlyMap<string, readonly HeldDocEdit[]>
   pendingMoveDocIds?: ReadonlySet<string>
+  pendingSaveDocIds?: ReadonlySet<string>
 }): MarbleDocumentFile[] {
   return input.reloadedDocs.map((serverDoc) => {
     const isRenamePending = input.pendingRenameDocIds.has(serverDoc.id)
     const isMovePending = input.pendingMoveDocIds?.has(serverDoc.id) ?? false
-    if (!isRenamePending && !isMovePending) {
+    const hasPendingSave = input.pendingSaveDocIds?.has(serverDoc.id) ?? false
+    if (!isRenamePending && !isMovePending && !hasPendingSave) {
       return serverDoc
     }
-    if (!isRenamePending) {
-      return { ...serverDoc, syncState: 'saving' }
-    }
-    const held = input.heldDocEdits.get(serverDoc.id)
-    const currentDoc = input.currentDocs.find(
-      (item) => item.id === serverDoc.id,
-    )
-    if (held && held.length > 0 && currentDoc) {
-      return {
-        ...serverDoc,
-        source: currentDoc.source,
-        nodeCount: currentDoc.nodeCount,
-        byteSize: currentDoc.byteSize,
-        version: currentDoc.version,
-        checkpoints: currentDoc.checkpoints,
-        intentHistory: currentDoc.intentHistory,
-        updatedAt: currentDoc.updatedAt,
-        lastEditedBy: currentDoc.lastEditedBy,
-        syncState: 'saving',
+    const held = isRenamePending
+      ? input.heldDocEdits.get(serverDoc.id)
+      : undefined
+    const preserveLocalEdits =
+      Boolean(held && held.length > 0) || hasPendingSave
+    if (preserveLocalEdits) {
+      const currentDoc = input.currentDocs.find(
+        (item) => item.id === serverDoc.id,
+      )
+      if (currentDoc) {
+        return {
+          ...serverDoc,
+          source: currentDoc.source,
+          nodeCount: currentDoc.nodeCount,
+          byteSize: currentDoc.byteSize,
+          version: currentDoc.version,
+          checkpoints: currentDoc.checkpoints,
+          intentHistory: currentDoc.intentHistory,
+          updatedAt: currentDoc.updatedAt,
+          lastEditedBy: currentDoc.lastEditedBy,
+          syncState: 'saving',
+        }
       }
     }
     return { ...serverDoc, syncState: 'saving' }

@@ -1074,6 +1074,7 @@ export function XDriveWorkspace({
   const shownSourceRef = useRef<string | null>(null)
   const shownSigRef = useRef('')
   const saveTokens = useRef(new Map<string, number>())
+  const pendingSaveCountsRef = useRef(new Map<string, number>())
   const pendingRenameDocIdsRef = useRef(new Set<string>())
   const [pendingRenameDocIds, setPendingRenameDocIds] = useState<Set<string>>(
     () => new Set(),
@@ -1348,15 +1349,15 @@ export function XDriveWorkspace({
     setDocs(fallback.docs)
   }
 
-  async function reloadWorkspaceFromServer() {
-    if (!syncWithServer) return
+  async function reloadWorkspaceFromServer(): Promise<boolean> {
+    if (!syncWithServer) return false
     try {
       const response = await fetch('/api/marble?action=workspace', {
         cache: 'no-store',
       })
       if (!response.ok) {
         populateFallbackTemplatesIfEmpty()
-        return
+        return false
       }
       const data = (await response.json()) as {
         ok?: boolean
@@ -1370,7 +1371,11 @@ export function XDriveWorkspace({
         !Array.isArray(data.docs)
       ) {
         populateFallbackTemplatesIfEmpty()
-        return
+        return false
+      }
+      const pendingSaveDocIds = new Set<string>()
+      for (const [docId, count] of pendingSaveCountsRef.current) {
+        if (count > 0) pendingSaveDocIds.add(docId)
       }
       const mergedDocs = mergeReloadedWorkspaceDocs({
         reloadedDocs: data.docs,
@@ -1378,6 +1383,7 @@ export function XDriveWorkspace({
         pendingRenameDocIds: pendingRenameDocIdsRef.current,
         heldDocEdits: heldDocEditsRef.current,
         pendingMoveDocIds: pendingMoveDocIdsRef.current,
+        pendingSaveDocIds,
       })
       foldersRef.current = data.folders
       allDocsRef.current = mergedDocs
@@ -1443,9 +1449,11 @@ export function XDriveWorkspace({
           }
         }
       }
+      return true
     } catch {
       // Static/Storybook environments do not expose /api/marble.
       populateFallbackTemplatesIfEmpty()
+      return false
     } finally {
       setDriveLoading(false)
     }
@@ -2386,7 +2394,7 @@ export function XDriveWorkspace({
     options?: {
       reloadOnError?: boolean
       onSuccess?: (data: Record<string, unknown>) => void | Promise<void>
-      onError?: (message: string) => void
+      onError?: (message: string) => void | Promise<void>
     },
   ) {
     return enqueueDriveMutation(async () => {
@@ -2412,10 +2420,10 @@ export function XDriveWorkspace({
           if (syncWithServer) {
             setAgentStatus(message)
           }
-          options?.onError?.(message)
           if (syncWithServer && options?.reloadOnError) {
             await reloadWorkspaceFromServer()
           }
+          await options?.onError?.(message)
           return null
         }
         await options?.onSuccess?.(data)
@@ -2428,10 +2436,10 @@ export function XDriveWorkspace({
         if (syncWithServer) {
           setAgentStatus(message)
         }
-        options?.onError?.(message)
         if (syncWithServer && options?.reloadOnError) {
           await reloadWorkspaceFromServer()
         }
+        await options?.onError?.(message)
         return null
       }
     })
@@ -2520,41 +2528,51 @@ export function XDriveWorkspace({
       : undefined
     const checkpoints = doc?.checkpoints
     const intentHistory = doc?.intentHistory
+    pendingSaveCountsRef.current.set(
+      id,
+      (pendingSaveCountsRef.current.get(id) ?? 0) + 1,
+    )
     void enqueueDriveMutation(async () => {
-      const liveDoc = allDocsRef.current.find((item) => item.id === id)
-      const confirmedSlug = liveDoc?.slug ?? slug
-      const folderPath = folderDiskPath(
-        foldersRef.current,
-        liveDoc ? (liveDoc.folderId ?? null) : targetFolderId,
-      )
-      const resolvedMeta = meta ? { ...meta, slug: confirmedSlug } : undefined
-      const body =
-        ops.length > 0
-          ? {
-              action: 'apply_ops',
-              slug: confirmedSlug,
-              folderPath,
-              source: prior,
-              ops,
-              meta: resolvedMeta,
-              checkpoints,
-              intentHistory,
-            }
-          : {
-              action: 'save',
-              slug: confirmedSlug,
-              folderPath,
-              source: nextSource,
-              meta: resolvedMeta,
-              checkpoints,
-              intentHistory,
-            }
-      const response = await fetch('/api/marble', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify(body),
-      })
-      if (!response.ok) throw new Error('Marble save failed')
+      try {
+        const liveDoc = allDocsRef.current.find((item) => item.id === id)
+        const confirmedSlug = liveDoc?.slug ?? slug
+        const folderPath = folderDiskPath(
+          foldersRef.current,
+          liveDoc ? (liveDoc.folderId ?? null) : targetFolderId,
+        )
+        const resolvedMeta = meta ? { ...meta, slug: confirmedSlug } : undefined
+        const body =
+          ops.length > 0
+            ? {
+                action: 'apply_ops',
+                slug: confirmedSlug,
+                folderPath,
+                source: prior,
+                ops,
+                meta: resolvedMeta,
+                checkpoints,
+                intentHistory,
+              }
+            : {
+                action: 'save',
+                slug: confirmedSlug,
+                folderPath,
+                source: nextSource,
+                meta: resolvedMeta,
+                checkpoints,
+                intentHistory,
+              }
+        const response = await fetch('/api/marble', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify(body),
+        })
+        if (!response.ok) throw new Error('Marble save failed')
+      } finally {
+        const nextCount = (pendingSaveCountsRef.current.get(id) ?? 1) - 1
+        if (nextCount <= 0) pendingSaveCountsRef.current.delete(id)
+        else pendingSaveCountsRef.current.set(id, nextCount)
+      }
     })
       .then(() => {
         if (
@@ -3449,6 +3467,7 @@ export function XDriveWorkspace({
         }
       },
       {
+        reloadOnError: true,
         onSuccess: (res) => {
           const applied = applyServerSaveAsTemplateReply(
             foldersRef.current,
@@ -3549,28 +3568,40 @@ export function XDriveWorkspace({
         }
       },
       {
-        onError: (message) => {
-          setDocRenamePending(liveDoc.id, false)
+        onError: async (message) => {
           const hadHeld =
             (heldDocEditsRef.current.get(liveDoc.id)?.length ?? 0) > 0
           heldDocEditsRef.current.delete(liveDoc.id)
+          const reloaded = await reloadWorkspaceFromServer()
+          heldDocEditsRef.current.delete(liveDoc.id)
+          setDocRenamePending(liveDoc.id, false)
           if (allDocsRef.current.some((doc) => doc.id === liveDoc.id)) {
-            sourceRef.current.set(liveDoc.id, confirmedSnapshot.source)
-            if (activeTabRef.current === liveDoc.id) {
-              shownSourceRef.current = confirmedSnapshot.source
+            if (reloaded) {
+              if ((pendingSaveCountsRef.current.get(liveDoc.id) ?? 0) === 0) {
+                patchFile(liveDoc.id, (doc) =>
+                  doc.syncState === 'saving'
+                    ? { ...doc, syncState: 'saved' }
+                    : doc,
+                )
+              }
+            } else {
+              sourceRef.current.set(liveDoc.id, confirmedSnapshot.source)
+              if (activeTabRef.current === liveDoc.id) {
+                shownSourceRef.current = null
+              }
+              patchFile(liveDoc.id, (doc) => ({
+                ...doc,
+                source: confirmedSnapshot.source,
+                nodeCount: confirmedSnapshot.nodeCount,
+                byteSize: confirmedSnapshot.byteSize,
+                version: confirmedSnapshot.version,
+                checkpoints: confirmedSnapshot.checkpoints,
+                intentHistory: confirmedSnapshot.intentHistory,
+                updatedAt: confirmedSnapshot.updatedAt,
+                lastEditedBy: confirmedSnapshot.lastEditedBy,
+                syncState: 'saved',
+              }))
             }
-            patchFile(liveDoc.id, (doc) => ({
-              ...doc,
-              source: confirmedSnapshot.source,
-              nodeCount: confirmedSnapshot.nodeCount,
-              byteSize: confirmedSnapshot.byteSize,
-              version: confirmedSnapshot.version,
-              checkpoints: confirmedSnapshot.checkpoints,
-              intentHistory: confirmedSnapshot.intentHistory,
-              updatedAt: confirmedSnapshot.updatedAt,
-              lastEditedBy: confirmedSnapshot.lastEditedBy,
-              syncState: 'saved',
-            }))
           }
           if (hadHeld) {
             setAgentStatus(
@@ -3739,6 +3770,7 @@ export function XDriveWorkspace({
         }
       },
       {
+        reloadOnError: true,
         onError: (message) => {
           setFoldersPending([folderId], false)
           callbacks?.onError?.(message)
@@ -3818,6 +3850,7 @@ export function XDriveWorkspace({
           updatedAt: now,
         }),
         {
+          reloadOnError: true,
           onSuccess: (res) => {
             const serverFolder = res.folder as DriveFolder | undefined
             if (!serverFolder) return
@@ -3918,6 +3951,7 @@ export function XDriveWorkspace({
         return { action: 'delete_folder', folderPath }
       },
       {
+        reloadOnError: true,
         onError: (message) => {
           setFoldersPending(removed, false)
           callbacks?.onError?.(message)
@@ -4071,11 +4105,14 @@ export function XDriveWorkspace({
         }
       },
       {
+        reloadOnError: true,
         onError: (message) => {
           setDocMovePending(docId, false)
-          patchFile(docId, (doc) =>
-            doc.syncState === 'saving' ? { ...doc, syncState: 'saved' } : doc,
-          )
+          if ((pendingSaveCountsRef.current.get(docId) ?? 0) === 0) {
+            patchFile(docId, (doc) =>
+              doc.syncState === 'saving' ? { ...doc, syncState: 'saved' } : doc,
+            )
+          }
           callbacks?.onError?.(message)
         },
         onSuccess: () => {
@@ -4844,6 +4881,7 @@ export function XDriveWorkspace({
             updatedAt: now,
           }),
           {
+            reloadOnError: true,
             onError: (message) => {
               pendingChatActionIdsRef.current.delete(action.id)
               updateChatAction(threadId, msgId, action.id, (act) => ({
