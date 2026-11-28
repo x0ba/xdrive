@@ -110,7 +110,7 @@ interface VisibleFileEntry {
 const stateByDriveDir = new Map<string, DriveSearchState>()
 let searchLock: Promise<void> = Promise.resolve()
 
-async function withSearchLock<T>(fn: () => Promise<T>): Promise<T> {
+export async function withSearchLock<T>(fn: () => Promise<T>): Promise<T> {
   let release!: () => void
   const gate = new Promise<void>((resolve) => {
     release = resolve

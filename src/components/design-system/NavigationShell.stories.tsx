@@ -228,6 +228,10 @@ export const LeftNavigationRail: Story = {
       'href',
       '/settings/models',
     )
+    await expect(canvas.getByRole('link', { name: 'Backup' })).toHaveAttribute(
+      'href',
+      '/settings/backup',
+    )
     await expect(
       canvas.getByRole('link', { name: 'Floquet Surface Codes' }),
     ).toHaveAttribute('href', '/d/doc-qec/quantum-error-correction')

@@ -208,6 +208,8 @@ export function navHref(nav: PrimaryNavId): string {
       return '/search'
     case 'subscriptions':
       return '/settings/models'
+    case 'backup':
+      return '/settings/backup'
   }
 }
 
@@ -267,6 +269,10 @@ export function searchHref(params?: {
 export function settingsProviderHref(providerId?: AIProviderId): string {
   if (!providerId) return '/settings/models'
   return `/settings/models/${encodeURIComponent(providerId)}`
+}
+
+export function settingsBackupHref(): string {
+  return '/settings/backup'
 }
 
 export function modalToNewAppMode(
@@ -334,6 +340,7 @@ export type WorkspaceRouteMatch =
   | { kind: 'search' }
   | { kind: 'chat'; threadId?: string }
   | { kind: 'settings'; providerId: AIProviderId; isExplicitProvider: boolean }
+  | { kind: 'settings-backup' }
   | { kind: 'not-found'; section?: 'settings' | 'workspace'; path: string }
 
 export interface WorkspaceRouteContextValue {

@@ -19,6 +19,7 @@ import { Route as WorkspaceStarredRouteImport } from './routes/_workspace/starre
 import { Route as WorkspaceTemplatesRouteImport } from './routes/_workspace/templates'
 import { Route as WorkspaceTrashRouteImport } from './routes/_workspace/trash'
 import { Route as ApiAiRouteImport } from './routes/api.ai'
+import { Route as ApiBackupRouteImport } from './routes/api.backup'
 import { Route as ApiDriveChatRouteImport } from './routes/api.drive-chat'
 import { Route as ApiLatexRouteImport } from './routes/api.latex'
 import { Route as ApiMarbleRouteImport } from './routes/api.marble'
@@ -28,6 +29,7 @@ import { Route as WorkspaceChatIndexRouteImport } from './routes/_workspace/chat
 import { Route as WorkspaceChatThreadIdRouteImport } from './routes/_workspace/chat/$threadId'
 import { Route as WorkspaceSettingsIndexRouteImport } from './routes/_workspace/settings/index'
 import { Route as WorkspaceSettingsSplatRouteImport } from './routes/_workspace/settings/$'
+import { Route as WorkspaceSettingsBackupRouteImport } from './routes/_workspace/settings/backup'
 import { Route as ApiAiHistoryRouteImport } from './routes/api.ai.history'
 import { Route as ApiDriveChatThreadsRouteImport } from './routes/api.drive-chat.threads'
 import { Route as WorkspaceDDocIdIndexRouteImport } from './routes/_workspace/d/$docId/index'
@@ -88,6 +90,11 @@ const ApiAiRoute = ApiAiRouteImport.update({
   path: '/api/ai',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiBackupRoute = ApiBackupRouteImport.update({
+  id: '/api/backup',
+  path: '/api/backup',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ApiDriveChatRoute = ApiDriveChatRouteImport.update({
   id: '/api/drive-chat',
   path: '/api/drive-chat',
@@ -131,6 +138,11 @@ const WorkspaceSettingsIndexRoute = WorkspaceSettingsIndexRouteImport.update({
 const WorkspaceSettingsSplatRoute = WorkspaceSettingsSplatRouteImport.update({
   id: '/settings/$',
   path: '/settings/$',
+  getParentRoute: () => WorkspaceRoute,
+} as any)
+const WorkspaceSettingsBackupRoute = WorkspaceSettingsBackupRouteImport.update({
+  id: '/settings/backup',
+  path: '/settings/backup',
   getParentRoute: () => WorkspaceRoute,
 } as any)
 const ApiAiHistoryRoute = ApiAiHistoryRouteImport.update({
@@ -197,6 +209,7 @@ export interface FileRoutesByFullPath {
   '/templates': typeof WorkspaceTemplatesRoute
   '/trash': typeof WorkspaceTrashRoute
   '/api/ai': typeof ApiAiRouteWithChildren
+  '/api/backup': typeof ApiBackupRoute
   '/api/drive-chat': typeof ApiDriveChatRouteWithChildren
   '/api/latex': typeof ApiLatexRoute
   '/api/marble': typeof ApiMarbleRoute
@@ -204,6 +217,7 @@ export interface FileRoutesByFullPath {
   '/api/versions': typeof ApiVersionsRoute
   '/chat/$threadId': typeof WorkspaceChatThreadIdRoute
   '/settings/$': typeof WorkspaceSettingsSplatRoute
+  '/settings/backup': typeof WorkspaceSettingsBackupRoute
   '/api/ai/history': typeof ApiAiHistoryRouteWithChildren
   '/api/drive-chat/threads': typeof ApiDriveChatThreadsRouteWithChildren
   '/chat/': typeof WorkspaceChatIndexRoute
@@ -227,6 +241,7 @@ export interface FileRoutesByTo {
   '/templates': typeof WorkspaceTemplatesRoute
   '/trash': typeof WorkspaceTrashRoute
   '/api/ai': typeof ApiAiRouteWithChildren
+  '/api/backup': typeof ApiBackupRoute
   '/api/drive-chat': typeof ApiDriveChatRouteWithChildren
   '/api/latex': typeof ApiLatexRoute
   '/api/marble': typeof ApiMarbleRoute
@@ -234,6 +249,7 @@ export interface FileRoutesByTo {
   '/api/versions': typeof ApiVersionsRoute
   '/chat/$threadId': typeof WorkspaceChatThreadIdRoute
   '/settings/$': typeof WorkspaceSettingsSplatRoute
+  '/settings/backup': typeof WorkspaceSettingsBackupRoute
   '/api/ai/history': typeof ApiAiHistoryRouteWithChildren
   '/api/drive-chat/threads': typeof ApiDriveChatThreadsRouteWithChildren
   '/chat': typeof WorkspaceChatIndexRoute
@@ -259,6 +275,7 @@ export interface FileRoutesById {
   '/_workspace/templates': typeof WorkspaceTemplatesRoute
   '/_workspace/trash': typeof WorkspaceTrashRoute
   '/api/ai': typeof ApiAiRouteWithChildren
+  '/api/backup': typeof ApiBackupRoute
   '/api/drive-chat': typeof ApiDriveChatRouteWithChildren
   '/api/latex': typeof ApiLatexRoute
   '/api/marble': typeof ApiMarbleRoute
@@ -266,6 +283,7 @@ export interface FileRoutesById {
   '/api/versions': typeof ApiVersionsRoute
   '/_workspace/chat/$threadId': typeof WorkspaceChatThreadIdRoute
   '/_workspace/settings/$': typeof WorkspaceSettingsSplatRoute
+  '/_workspace/settings/backup': typeof WorkspaceSettingsBackupRoute
   '/api/ai/history': typeof ApiAiHistoryRouteWithChildren
   '/api/drive-chat/threads': typeof ApiDriveChatThreadsRouteWithChildren
   '/_workspace/chat/': typeof WorkspaceChatIndexRoute
@@ -291,6 +309,7 @@ export interface FileRouteTypes {
     | '/templates'
     | '/trash'
     | '/api/ai'
+    | '/api/backup'
     | '/api/drive-chat'
     | '/api/latex'
     | '/api/marble'
@@ -298,6 +317,7 @@ export interface FileRouteTypes {
     | '/api/versions'
     | '/chat/$threadId'
     | '/settings/$'
+    | '/settings/backup'
     | '/api/ai/history'
     | '/api/drive-chat/threads'
     | '/chat/'
@@ -321,6 +341,7 @@ export interface FileRouteTypes {
     | '/templates'
     | '/trash'
     | '/api/ai'
+    | '/api/backup'
     | '/api/drive-chat'
     | '/api/latex'
     | '/api/marble'
@@ -328,6 +349,7 @@ export interface FileRouteTypes {
     | '/api/versions'
     | '/chat/$threadId'
     | '/settings/$'
+    | '/settings/backup'
     | '/api/ai/history'
     | '/api/drive-chat/threads'
     | '/chat'
@@ -352,6 +374,7 @@ export interface FileRouteTypes {
     | '/_workspace/templates'
     | '/_workspace/trash'
     | '/api/ai'
+    | '/api/backup'
     | '/api/drive-chat'
     | '/api/latex'
     | '/api/marble'
@@ -359,6 +382,7 @@ export interface FileRouteTypes {
     | '/api/versions'
     | '/_workspace/chat/$threadId'
     | '/_workspace/settings/$'
+    | '/_workspace/settings/backup'
     | '/api/ai/history'
     | '/api/drive-chat/threads'
     | '/_workspace/chat/'
@@ -377,6 +401,7 @@ export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   WorkspaceRoute: typeof WorkspaceRouteWithChildren
   ApiAiRoute: typeof ApiAiRouteWithChildren
+  ApiBackupRoute: typeof ApiBackupRoute
   ApiDriveChatRoute: typeof ApiDriveChatRouteWithChildren
   ApiLatexRoute: typeof ApiLatexRoute
   ApiMarbleRoute: typeof ApiMarbleRoute
@@ -456,6 +481,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiAiRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/backup': {
+      id: '/api/backup'
+      path: '/api/backup'
+      fullPath: '/api/backup'
+      preLoaderRoute: typeof ApiBackupRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/api/drive-chat': {
       id: '/api/drive-chat'
       path: '/api/drive-chat'
@@ -517,6 +549,13 @@ declare module '@tanstack/react-router' {
       path: '/settings/$'
       fullPath: '/settings/$'
       preLoaderRoute: typeof WorkspaceSettingsSplatRouteImport
+      parentRoute: typeof WorkspaceRoute
+    }
+    '/_workspace/settings/backup': {
+      id: '/_workspace/settings/backup'
+      path: '/settings/backup'
+      fullPath: '/settings/backup'
+      preLoaderRoute: typeof WorkspaceSettingsBackupRouteImport
       parentRoute: typeof WorkspaceRoute
     }
     '/api/ai/history': {
@@ -602,6 +641,7 @@ interface WorkspaceRouteChildren {
   WorkspaceTrashRoute: typeof WorkspaceTrashRoute
   WorkspaceChatThreadIdRoute: typeof WorkspaceChatThreadIdRoute
   WorkspaceSettingsSplatRoute: typeof WorkspaceSettingsSplatRoute
+  WorkspaceSettingsBackupRoute: typeof WorkspaceSettingsBackupRoute
   WorkspaceChatIndexRoute: typeof WorkspaceChatIndexRoute
   WorkspaceSettingsIndexRoute: typeof WorkspaceSettingsIndexRoute
   WorkspaceDDocIdSlugRoute: typeof WorkspaceDDocIdSlugRoute
@@ -622,6 +662,7 @@ const WorkspaceRouteChildren: WorkspaceRouteChildren = {
   WorkspaceTrashRoute: WorkspaceTrashRoute,
   WorkspaceChatThreadIdRoute: WorkspaceChatThreadIdRoute,
   WorkspaceSettingsSplatRoute: WorkspaceSettingsSplatRoute,
+  WorkspaceSettingsBackupRoute: WorkspaceSettingsBackupRoute,
   WorkspaceChatIndexRoute: WorkspaceChatIndexRoute,
   WorkspaceSettingsIndexRoute: WorkspaceSettingsIndexRoute,
   WorkspaceDDocIdSlugRoute: WorkspaceDDocIdSlugRoute,
@@ -686,6 +727,7 @@ const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   WorkspaceRoute: WorkspaceRouteWithChildren,
   ApiAiRoute: ApiAiRouteWithChildren,
+  ApiBackupRoute: ApiBackupRoute,
   ApiDriveChatRoute: ApiDriveChatRouteWithChildren,
   ApiLatexRoute: ApiLatexRoute,
   ApiMarbleRoute: ApiMarbleRoute,
