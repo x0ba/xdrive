@@ -185,16 +185,67 @@ const DEMO_CHATS: DriveChatThread[] = [
   },
 ]
 
+const PAGED_DOCS: MarbleDocumentFile[] = Array.from(
+  { length: 55 },
+  (_, idx) => {
+    const num = String(idx + 1).padStart(2, '0')
+    const timestamp = new Date(
+      Date.UTC(2026, 10, 28, 12, 0, 55 - idx),
+    ).toISOString()
+    return {
+      id: `doc-paged-${num}`,
+      slug: `paged-surface-note-${num}`,
+      fileName: `paged-surface-note-${num}.mrbl`,
+      title: `Paged Surface Note ${num}`,
+      description: `Paginated benchmark note ${num}.`,
+      category: 'document',
+      isTemplate: false,
+      source: `<!doctype html><html><body><p data-marble-id="p1">Uniform lattice telemetry sample ${num}.</p></body></html>`,
+      nodeCount: 1,
+      byteSize: 180,
+      version: 1,
+      syncState: 'saved',
+      createdAt: timestamp,
+      updatedAt: timestamp,
+      createdBy: { name: 'You', initials: 'YO' },
+      lastEditedBy: { name: 'You', initials: 'YO' },
+      starred: false,
+      pinned: false,
+      tags: ['lattice'],
+      folder: 'My Drive',
+      folderId: null,
+      trashedAt: null,
+      share: DEFAULT_SHARE,
+      checkpoints: [],
+      intentHistory: [],
+    }
+  },
+)
+
 function SearchStoryHarness({
   initialQuery = '',
   initialType = 'all',
   initialIncludeTrash = false,
   failMode = false,
+  trimQuery = false,
+  debounceMs = 0,
+  docs = DEMO_DOCS,
+  folders = DEMO_FOLDERS,
+  chatThreads = DEMO_CHATS,
+  pageSize,
+  externalNavQuery,
 }: {
   initialQuery?: string
   initialType?: SearchFilterType
   initialIncludeTrash?: boolean
   failMode?: boolean
+  trimQuery?: boolean
+  debounceMs?: number
+  docs?: MarbleDocumentFile[]
+  folders?: DriveFolder[]
+  chatThreads?: DriveChatThread[]
+  pageSize?: number
+  externalNavQuery?: string
 }) {
   const [query, setQuery] = useState(initialQuery)
   const [typeFilter, setTypeFilter] = useState<SearchFilterType>(initialType)
@@ -204,11 +255,11 @@ function SearchStoryHarness({
   const index = useMemo(
     () =>
       buildClientSearchIndex({
-        docs: DEMO_DOCS,
-        folders: DEMO_FOLDERS,
-        chatThreads: DEMO_CHATS,
+        docs,
+        folders,
+        chatThreads,
       }),
-    [],
+    [docs, folders, chatThreads],
   )
 
   const searchFn = async (
@@ -223,16 +274,28 @@ function SearchStoryHarness({
 
   return (
     <div className="min-h-screen bg-[var(--xd-canvas)] text-[var(--xd-ink)]">
+      {externalNavQuery !== undefined && (
+        <div className="mx-auto flex w-full max-w-4xl justify-end px-6 pt-4">
+          <button
+            type="button"
+            onClick={() => setQuery(externalNavQuery)}
+            className="rounded border border-[var(--xd-border)] px-2.5 py-1 text-[11.5px] text-[var(--xd-ink-secondary)] hover:bg-[var(--xd-surface-hover)]"
+          >
+            Jump to {externalNavQuery}
+          </button>
+        </div>
+      )}
       <DriveSearchView
         query={query}
         typeFilter={typeFilter}
         includeTrash={includeTrash}
-        onQueryChange={setQuery}
+        onQueryChange={(next) => setQuery(trimQuery ? next.trim() : next)}
         onTypeFilterChange={setTypeFilter}
         onIncludeTrashChange={setIncludeTrash}
         searchFn={searchFn}
         onOpenResult={() => {}}
-        debounceMs={0}
+        debounceMs={debounceMs}
+        pageSize={pageSize}
         initialIndexedCount={index.size}
       />
     </div>
@@ -420,5 +483,89 @@ export const ErrorState: Story = {
         canvas.getByRole('link', { name: /Logical Memory Specification/i }),
       ).toBeVisible()
     })
+  },
+}
+
+export const PreservesTrailingSpaceAcrossDebounce: Story = {
+  args: {
+    ...WithResults.args,
+    query: '',
+  },
+  render: () => (
+    <SearchStoryHarness
+      initialQuery=""
+      trimQuery={true}
+      debounceMs={40}
+      externalNavQuery="PyMatching"
+    />
+  ),
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    const input = canvas.getByRole('searchbox', { name: /Search Drive/i })
+
+    await userEvent.type(input, 'surface ')
+
+    // Wait for debounce + host trim echo to settle results while keeping the trailing space.
+    await waitFor(() => {
+      expect(
+        canvas.getByRole('link', { name: /Logical Memory Specification/i }),
+      ).toBeVisible()
+    })
+    await expect(input).toHaveValue('surface ')
+
+    await userEvent.type(input, 'code')
+    await expect(input).toHaveValue('surface code')
+
+    // External navigation should still sync the input value and rerun results.
+    await userEvent.click(
+      canvas.getByRole('button', { name: /Jump to PyMatching/i }),
+    )
+    await expect(input).toHaveValue('PyMatching')
+    await waitFor(() => {
+      expect(
+        canvas.queryByRole('link', { name: /Decoder Architecture Board/i }),
+      ).toBeNull()
+    })
+    await expect(
+      canvas.getByRole('link', { name: /Logical Memory Specification/i }),
+    ).toBeVisible()
+  },
+}
+
+export const PaginationLoadMore: Story = {
+  args: {
+    ...WithResults.args,
+    query: 'lattice',
+  },
+  render: () => (
+    <SearchStoryHarness
+      initialQuery="lattice"
+      docs={PAGED_DOCS}
+      folders={[]}
+      chatThreads={[]}
+    />
+  ),
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    await waitFor(() => {
+      expect(canvas.getByText('Showing 50 of 55 results')).toBeVisible()
+    })
+
+    const list = canvas.getByRole('list', { name: 'Search results' })
+    await expect(within(list).getAllByRole('listitem')).toHaveLength(50)
+    expect(
+      canvas.queryByRole('link', { name: /Paged Surface Note 55/i }),
+    ).toBeNull()
+
+    await userEvent.click(canvas.getByRole('button', { name: /Load more/i }))
+
+    await waitFor(() => {
+      expect(
+        canvas.getByRole('link', { name: /Paged Surface Note 55/i }),
+      ).toBeVisible()
+    })
+    await expect(within(list).getAllByRole('listitem')).toHaveLength(55)
+    await expect(canvas.getByText(/55 results/i)).toBeVisible()
+    expect(canvas.queryByRole('button', { name: /Load more/i })).toBeNull()
   },
 }

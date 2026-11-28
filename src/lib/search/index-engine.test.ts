@@ -39,6 +39,50 @@ describe('DriveSearchIndex & tokenizer', () => {
     ])
   })
 
+  it('matches composed (NFC) and decomposed (NFD) accented words identically with intact highlight ranges', () => {
+    const decomposed = 'nai\u0308ve'
+    const composed = 'na\u00efve'
+    expect(tokenize(decomposed)).toEqual(['naive'])
+    expect(tokenize(composed)).toEqual(['naive'])
+
+    const index = new DriveSearchIndex()
+    index.upsert(
+      makeItem({
+        id: 'nfd-doc',
+        title: `NFD ${decomposed} decoder`,
+        body: `Decomposed ${decomposed} threshold benchmark.`,
+      }),
+    )
+    index.upsert(
+      makeItem({
+        id: 'nfc-doc',
+        title: `NFC ${composed} decoder`,
+        body: `Composed ${composed} threshold benchmark.`,
+      }),
+    )
+
+    expect(index.search({ query: composed }).total).toBe(2)
+    expect(index.search({ query: decomposed }).total).toBe(2)
+    expect(index.search({ query: 'naive' }).total).toBe(2)
+
+    const sample = `Use ${decomposed} matching`
+    expect(
+      findHighlightRanges(sample, ['naive']).map((r) =>
+        sample.slice(r.start, r.end),
+      ),
+    ).toEqual([decomposed])
+    expect(
+      findHighlightRanges(sample, ['nai']).map((r) =>
+        sample.slice(r.start, r.end),
+      ),
+    ).toEqual(['nai\u0308'])
+    expect(
+      findHighlightRanges(sample, ['naiv']).map((r) =>
+        sample.slice(r.start, r.end),
+      ),
+    ).toEqual(['nai\u0308v'])
+  })
+
   it('ranks title matches above body matches and exact matches above prefix matches', () => {
     const index = new DriveSearchIndex()
     index.upsert(

@@ -13,7 +13,7 @@ const DOCS_STATE_RE =
 const ACTION_FENCE_RE = /```xdrive-actions[\s\S]*?```/gi
 
 const BLOCK_BOUNDARY_RE =
-  /<\/?(?:h[1-6]|p|div|section|article|aside|blockquote|li|ul|ol|tr|td|th|pre|hr|br|header|footer|main|nav)\b[^>]*>/gi
+  /<\/?(?:h[1-6]|p|div|section|article|aside|blockquote|li|ul|ol|dl|dt|dd|figure|figcaption|table|thead|tbody|tfoot|caption|tr|td|th|pre|hr|br|header|footer|main|nav|details|summary|address|form|fieldset|legend)\b[^>]*>/gi
 
 const RICH_TEXT_BLOCK_NODES = new Set([
   'doc',
@@ -295,7 +295,7 @@ function extractVisibleHtmlText(source: string): string {
     .replace(/<template\b[^>]*>[\s\S]*?<\/template>/gi, ' ')
     .replace(/<noscript\b[^>]*>[\s\S]*?<\/noscript>/gi, ' ')
     .replace(BLOCK_BOUNDARY_RE, '\n')
-    .replace(/<[^>]+>/g, ' ')
+    .replace(/<[^>]+>/g, '')
 
   const decoded = decodeHtmlEntities(stripped)
   return normalizeExtractedLines([decoded])

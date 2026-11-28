@@ -88,8 +88,11 @@ export interface DriveSearchViewProps {
   ) => Promise<SearchDriveResponse>
   onOpenResult?: (item: SearchResultItem) => void
   debounceMs?: number
+  pageSize?: number
   initialIndexedCount?: number
 }
+
+const DEFAULT_PAGE_SIZE = 50
 
 const FILTER_TABS: Array<{ id: SearchFilterType; label: string }> = [
   { id: 'all', label: 'All' },
@@ -156,20 +159,42 @@ export function DriveSearchView({
   searchFn,
   onOpenResult,
   debounceMs = 150,
+  pageSize = DEFAULT_PAGE_SIZE,
   initialIndexedCount,
 }: DriveSearchViewProps) {
+  const effectivePageSize = Number.isFinite(pageSize)
+    ? Math.max(1, Math.trunc(pageSize))
+    : DEFAULT_PAGE_SIZE
+
   const [inputValue, setInputValue] = useState(query)
   const [response, setResponse] = useState<SearchDriveResponse | null>(null)
   const [loading, setLoading] = useState(false)
+  const [loadingMore, setLoadingMore] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [loadMoreError, setLoadMoreError] = useState<string | null>(null)
   const [retryTick, setRetryTick] = useState(0)
 
   const inputRef = useRef<HTMLInputElement | null>(null)
   const debounceTimerRef = useRef<number | null>(null)
+  const loadMoreAbortRef = useRef<AbortController | null>(null)
+  const committedQueryRef = useRef(query.trim())
+  const onQueryChangeRef = useRef(onQueryChange)
+  onQueryChangeRef.current = onQueryChange
   const searchFnRef = useRef(searchFn)
   searchFnRef.current = searchFn
 
+  // Sync only genuine external navigation changes; ignore post-debounce trims
+  // of the user's in-progress draft (e.g. typing a trailing space between words).
   useEffect(() => {
+    const normalizedQuery = query.trim()
+    if (normalizedQuery === committedQueryRef.current) {
+      return
+    }
+    committedQueryRef.current = normalizedQuery
+    if (debounceTimerRef.current !== null) {
+      window.clearTimeout(debounceTimerRef.current)
+      debounceTimerRef.current = null
+    }
     setInputValue(query)
   }, [query])
 
@@ -178,6 +203,7 @@ export function DriveSearchView({
       if (debounceTimerRef.current !== null) {
         window.clearTimeout(debounceTimerRef.current)
       }
+      loadMoreAbortRef.current?.abort()
     }
   }, [])
 
@@ -207,6 +233,11 @@ export function DriveSearchView({
   const trimmedQuery = query.trim()
 
   useEffect(() => {
+    loadMoreAbortRef.current?.abort()
+    loadMoreAbortRef.current = null
+    setLoadingMore(false)
+    setLoadMoreError(null)
+
     if (!trimmedQuery) {
       setLoading(false)
       setError(null)
@@ -224,7 +255,8 @@ export function DriveSearchView({
           query: trimmedQuery,
           types: typeFilter === 'all' ? undefined : [typeFilter],
           includeTrash,
-          limit: 50,
+          limit: effectivePageSize,
+          offset: 0,
         },
         controller.signal,
       )
@@ -249,15 +281,22 @@ export function DriveSearchView({
 
     return () => {
       controller.abort()
+      loadMoreAbortRef.current?.abort()
+      loadMoreAbortRef.current = null
     }
-  }, [trimmedQuery, typeFilter, includeTrash, retryTick])
+  }, [trimmedQuery, typeFilter, includeTrash, retryTick, effectivePageSize])
+
+  const emitQuery = (next: string) => {
+    committedQueryRef.current = next.trim()
+    onQueryChangeRef.current(next)
+  }
 
   const commitQueryImmediate = (next: string) => {
     if (debounceTimerRef.current !== null) {
       window.clearTimeout(debounceTimerRef.current)
       debounceTimerRef.current = null
     }
-    onQueryChange(next)
+    emitQuery(next)
   }
 
   const handleInputChange = (next: string) => {
@@ -266,12 +305,12 @@ export function DriveSearchView({
       window.clearTimeout(debounceTimerRef.current)
     }
     if (debounceMs <= 0) {
-      onQueryChange(next)
+      emitQuery(next)
       return
     }
     debounceTimerRef.current = window.setTimeout(() => {
       debounceTimerRef.current = null
-      onQueryChange(next)
+      emitQuery(next)
     }, debounceMs)
   }
 
@@ -281,9 +320,79 @@ export function DriveSearchView({
     inputRef.current?.focus()
   }
 
+  const handleLoadMore = () => {
+    if (!trimmedQuery || loading || loadingMore || !response) return
+    if (response.results.length >= response.total) return
+
+    loadMoreAbortRef.current?.abort()
+    const controller = new AbortController()
+    loadMoreAbortRef.current = controller
+    setLoadingMore(true)
+    setLoadMoreError(null)
+
+    searchFnRef
+      .current(
+        {
+          query: trimmedQuery,
+          types: typeFilter === 'all' ? undefined : [typeFilter],
+          includeTrash,
+          limit: effectivePageSize,
+          offset: response.results.length,
+        },
+        controller.signal,
+      )
+      .then((nextPage) => {
+        if (controller.signal.aborted) return
+        setResponse((prev) => {
+          if (!prev) return nextPage
+          const seen = new Set(
+            prev.results.map((item) => `${item.type}:${item.id}`),
+          )
+          const appended = nextPage.results.filter(
+            (item) => !seen.has(`${item.type}:${item.id}`),
+          )
+          const mergedResults = [...prev.results, ...appended]
+          const nextTotal =
+            nextPage.results.length === 0
+              ? Math.min(nextPage.total, mergedResults.length)
+              : nextPage.total
+          return {
+            ...nextPage,
+            total: nextTotal,
+            results: mergedResults,
+          }
+        })
+        setLoadingMore(false)
+        if (loadMoreAbortRef.current === controller) {
+          loadMoreAbortRef.current = null
+        }
+      })
+      .catch((err: unknown) => {
+        if (controller.signal.aborted) return
+        if (
+          err &&
+          typeof err === 'object' &&
+          'name' in err &&
+          (err as { name?: unknown }).name === 'AbortError'
+        ) {
+          return
+        }
+        setLoadMoreError(
+          err instanceof Error ? err.message : 'Unable to load more results',
+        )
+        setLoadingMore(false)
+        if (loadMoreAbortRef.current === controller) {
+          loadMoreAbortRef.current = null
+        }
+      })
+  }
+
   const counts =
     response && response.query.trim() === trimmedQuery ? response.counts : null
   const results = response?.results ?? []
+  const hasMore = Boolean(
+    response && !loading && results.length < response.total,
+  )
   const indexedTotal = response?.indexedCount ?? initialIndexedCount
 
   return (
@@ -492,97 +601,133 @@ export function DriveSearchView({
           </div>
         </div>
       ) : (
-        <ul
-          aria-label="Search results"
-          className={`divide-y divide-[var(--xd-border)] overflow-hidden rounded-md border border-[var(--xd-border)] bg-[var(--xd-canvas)] transition-opacity ${
-            loading ? 'opacity-70' : 'opacity-100'
-          }`}
-        >
-          {results.map((item) => (
-            <li
-              key={`${item.type}:${item.id}`}
-              className="group relative flex items-start gap-3 px-4 py-3.5 transition-colors hover:bg-[var(--xd-surface-hover)]/45"
-            >
-              <span className="mt-0.5 inline-flex h-7 w-7 shrink-0 items-center justify-center rounded border border-[var(--xd-border)] bg-[var(--xd-rail)]">
-                {renderItemIcon(item)}
-              </span>
+        <div className="flex flex-col gap-3">
+          <ul
+            aria-label="Search results"
+            className={`divide-y divide-[var(--xd-border)] overflow-hidden rounded-md border border-[var(--xd-border)] bg-[var(--xd-canvas)] transition-opacity ${
+              loading ? 'opacity-70' : 'opacity-100'
+            }`}
+          >
+            {results.map((item) => (
+              <li
+                key={`${item.type}:${item.id}`}
+                className="group relative flex items-start gap-3 px-4 py-3.5 transition-colors hover:bg-[var(--xd-surface-hover)]/45"
+              >
+                <span className="mt-0.5 inline-flex h-7 w-7 shrink-0 items-center justify-center rounded border border-[var(--xd-border)] bg-[var(--xd-rail)]">
+                  {renderItemIcon(item)}
+                </span>
 
-              <div className="min-w-0 flex-1">
-                <div className="flex flex-wrap items-center gap-2">
-                  <WorkspaceLink
-                    href={item.href}
-                    onNavigate={
-                      onOpenResult ? () => onOpenResult(item) : undefined
-                    }
-                    className="truncate text-[13.5px] font-medium text-[var(--xd-ink)] transition-colors after:absolute after:inset-0 group-hover:text-[var(--xd-accent)]"
-                  >
-                    <HighlightedText
-                      text={item.title}
-                      matches={item.titleMatches}
-                    />
-                  </WorkspaceLink>
+                <div className="min-w-0 flex-1">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <WorkspaceLink
+                      href={item.href}
+                      onNavigate={
+                        onOpenResult ? () => onOpenResult(item) : undefined
+                      }
+                      className="truncate text-[13.5px] font-medium text-[var(--xd-ink)] transition-colors after:absolute after:inset-0 group-hover:text-[var(--xd-accent)]"
+                    >
+                      <HighlightedText
+                        text={item.title}
+                        matches={item.titleMatches}
+                      />
+                    </WorkspaceLink>
 
-                  <span className="rounded border border-[var(--xd-border)] bg-[var(--xd-rail)] px-1.5 py-0.5 text-[10.5px] font-medium leading-none text-[var(--xd-ink-secondary)]">
-                    {itemTypeLabel(item)}
-                  </span>
-
-                  {item.isTemplate && (
-                    <span className="xd-mono rounded border border-[var(--xd-accent-border)] bg-[var(--xd-accent-soft)] px-1.5 py-0.5 text-[10px] leading-none text-[var(--xd-accent)]">
-                      Template
+                    <span className="rounded border border-[var(--xd-border)] bg-[var(--xd-rail)] px-1.5 py-0.5 text-[10.5px] font-medium leading-none text-[var(--xd-ink-secondary)]">
+                      {itemTypeLabel(item)}
                     </span>
+
+                    {item.isTemplate && (
+                      <span className="xd-mono rounded border border-[var(--xd-accent-border)] bg-[var(--xd-accent-soft)] px-1.5 py-0.5 text-[10px] leading-none text-[var(--xd-accent)]">
+                        Template
+                      </span>
+                    )}
+
+                    {item.trashed && (
+                      <span className="rounded border border-[var(--xd-danger)]/40 bg-[var(--xd-danger-soft)] px-1.5 py-0.5 text-[10.5px] font-medium leading-none text-[var(--xd-danger)]">
+                        In Trash
+                      </span>
+                    )}
+                  </div>
+
+                  {item.snippet && (
+                    <p className="mt-1 line-clamp-2 text-[12.5px] leading-relaxed text-[var(--xd-ink-secondary)]">
+                      <HighlightedText
+                        text={item.snippet}
+                        matches={item.snippetMatches}
+                      />
+                    </p>
                   )}
 
-                  {item.trashed && (
-                    <span className="rounded border border-[var(--xd-danger)]/40 bg-[var(--xd-danger-soft)] px-1.5 py-0.5 text-[10.5px] font-medium leading-none text-[var(--xd-danger)]">
-                      In Trash
-                    </span>
-                  )}
-                </div>
-
-                {item.snippet && (
-                  <p className="mt-1 line-clamp-2 text-[12.5px] leading-relaxed text-[var(--xd-ink-secondary)]">
-                    <HighlightedText
-                      text={item.snippet}
-                      matches={item.snippetMatches}
-                    />
-                  </p>
-                )}
-
-                <div className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11.5px] text-[var(--xd-ink-muted)]">
-                  <span>{item.location}</span>
-                  {item.fileName && (
-                    <>
-                      <span aria-hidden="true">·</span>
-                      <span className="xd-mono truncate">{item.fileName}</span>
-                    </>
-                  )}
-                  {item.type === 'chat' &&
-                    typeof item.messageCount === 'number' && (
+                  <div className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11.5px] text-[var(--xd-ink-muted)]">
+                    <span>{item.location}</span>
+                    {item.fileName && (
                       <>
                         <span aria-hidden="true">·</span>
-                        <span className="xd-tabular">
-                          {item.messageCount}{' '}
-                          {item.messageCount === 1 ? 'message' : 'messages'}
+                        <span className="xd-mono truncate">
+                          {item.fileName}
                         </span>
                       </>
                     )}
-                  <span aria-hidden="true">·</span>
-                  <span className="xd-tabular">
-                    {formatRelativeDate(item.updatedAt)}
-                  </span>
-                  {item.tags && item.tags.length > 0 && (
-                    <>
-                      <span aria-hidden="true">·</span>
-                      <span className="truncate">
-                        {item.tags.slice(0, 3).join(', ')}
-                      </span>
-                    </>
-                  )}
+                    {item.type === 'chat' &&
+                      typeof item.messageCount === 'number' && (
+                        <>
+                          <span aria-hidden="true">·</span>
+                          <span className="xd-tabular">
+                            {item.messageCount}{' '}
+                            {item.messageCount === 1 ? 'message' : 'messages'}
+                          </span>
+                        </>
+                      )}
+                    <span aria-hidden="true">·</span>
+                    <span className="xd-tabular">
+                      {formatRelativeDate(item.updatedAt)}
+                    </span>
+                    {item.tags && item.tags.length > 0 && (
+                      <>
+                        <span aria-hidden="true">·</span>
+                        <span className="truncate">
+                          {item.tags.slice(0, 3).join(', ')}
+                        </span>
+                      </>
+                    )}
+                  </div>
                 </div>
+              </li>
+            ))}
+          </ul>
+
+          {hasMore && response && (
+            <div className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-[var(--xd-border)] bg-[var(--xd-rail)]/35 px-4 py-2.5">
+              <div className="flex flex-col gap-0.5">
+                <span className="xd-tabular text-[12px] text-[var(--xd-ink-muted)]">
+                  Showing {results.length} of {response.total} results
+                </span>
+                {loadMoreError && (
+                  <span
+                    role="alert"
+                    className="text-[11.5px] text-[var(--xd-danger)]"
+                  >
+                    {loadMoreError}
+                  </span>
+                )}
               </div>
-            </li>
-          ))}
-        </ul>
+              <button
+                type="button"
+                onClick={handleLoadMore}
+                disabled={loadingMore}
+                className="inline-flex h-7 items-center gap-1.5 rounded border border-[var(--xd-border-strong)] bg-[var(--xd-canvas)] px-3 text-[12px] font-medium text-[var(--xd-ink)] transition-colors hover:bg-[var(--xd-surface-hover)] disabled:cursor-wait disabled:opacity-70"
+              >
+                {loadingMore && (
+                  <Loader2
+                    aria-hidden="true"
+                    className="h-3.5 w-3.5 animate-spin text-[var(--xd-ink-muted)]"
+                  />
+                )}
+                <span>{loadingMore ? 'Loading more…' : 'Load more'}</span>
+              </button>
+            </div>
+          )}
+        </div>
       )}
     </div>
   )

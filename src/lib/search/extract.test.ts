@@ -36,6 +36,33 @@ describe('search text extractors', () => {
     expect(text).not.toContain('color: red')
   })
 
+  it('preserves words containing mid-word inline HTML formatting while separating block elements', () => {
+    const html = `<!doctype html>
+<html>
+<body>
+  <main data-marble-id="root">
+    <p data-marble-id="p1">Examine the micro<strong>scope</strong>, <em>syn</em>drome, and re<span class="hl">search</span> notes.</p>
+    <p data-marble-id="p2">NextSection</p>
+    <table><tr><td>AlphaCell</td><td>BetaCell</td></tr></table>
+  </main>
+</body>
+</html>`
+
+    const text = extractMarbleDocumentText(html)
+    expect(text).toContain('microscope')
+    expect(text).toContain('syndrome')
+    expect(text).toContain('research')
+    expect(text).not.toContain('micro scope')
+    expect(text).not.toContain('syn drome')
+    expect(text).not.toContain('re search')
+    expect(text.split('\n')).toEqual([
+      'Examine the microscope, syndrome, and research notes.',
+      'NextSection',
+      'AlphaCell',
+      'BetaCell',
+    ])
+  })
+
   it('extracts all files from embedded LaTeX project state beyond the HTML excerpt', () => {
     const latexState = {
       title: 'Concatenated Quantum Memory',

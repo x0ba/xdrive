@@ -1,4 +1,4 @@
-import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises'
+import { mkdtemp, mkdir, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
@@ -420,6 +420,57 @@ describe('drive-search.server', () => {
     })
     const resilient = await searchDrive({ query: 'resilient' })
     expect(resilient.total).toBe(1)
+  })
+
+  it('does not rewrite the persisted cache on read-only queries when folders are unchanged', async () => {
+    await createFolderOnDisk({ id: 'fld-res', name: 'Research' })
+    await createFolderOnDisk({
+      id: 'fld-sub',
+      name: 'Subfolder',
+      parentPath: 'Research',
+    })
+    await saveDocumentToDisk({
+      slug: 'folder-cache-check',
+      folderPath: 'Research/Subfolder',
+      source: makeHtmlDoc(
+        'Folder Cache Check',
+        'Stabilizer telemetry inside nested folders.',
+      ),
+      meta: { id: 'doc-folder-cache', title: 'Folder Cache Check' },
+    })
+
+    const initial = await searchDrive({ query: 'research' })
+    expect(initial.total).toBe(3)
+
+    const cacheFile = getSearchIndexFilePath()
+    const initialStat = await stat(cacheFile)
+    const initialJson = await readFile(cacheFile, 'utf8')
+
+    // Subsequent warm queries must not replace the persisted cache file.
+    expect((await searchDrive({ query: 'subfolder' })).total).toBe(2)
+    expect((await searchDrive({ query: 'telemetry' })).total).toBe(1)
+
+    const afterWarmStat = await stat(cacheFile)
+    expect(afterWarmStat.ino).toBe(initialStat.ino)
+    expect(afterWarmStat.mtimeMs).toBe(initialStat.mtimeMs)
+    expect(await readFile(cacheFile, 'utf8')).toBe(initialJson)
+
+    // Cold reload from disk with folders present must also avoid rewriting the cache.
+    resetDriveSearchCache()
+    expect((await searchDrive({ query: 'telemetry' })).total).toBe(1)
+
+    const afterColdStat = await stat(cacheFile)
+    expect(afterColdStat.ino).toBe(initialStat.ino)
+    expect(afterColdStat.mtimeMs).toBe(initialStat.mtimeMs)
+    expect(await readFile(cacheFile, 'utf8')).toBe(initialJson)
+
+    // Real folder mutations still update the cache and results.
+    await renameFolderOnDisk({
+      oldPath: 'Research/Subfolder',
+      newName: 'CryoSub',
+    })
+    expect((await searchDrive({ query: 'cryosub' })).total).toBe(2)
+    expect((await searchDrive({ query: 'subfolder' })).total).toBe(0)
   })
 
   it('serves GET and POST /api/search requests including plural type aliases and rebuild', async () => {

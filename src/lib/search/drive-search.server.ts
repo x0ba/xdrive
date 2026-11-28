@@ -178,6 +178,44 @@ function manifestsEqual(
   return true
 }
 
+function stringArraysEqual(
+  a: readonly string[],
+  b: readonly string[],
+): boolean {
+  if (a === b) return true
+  if (a.length !== b.length) return false
+  for (let i = 0; i < a.length; i += 1) {
+    if (a[i] !== b[i]) return false
+  }
+  return true
+}
+
+function indexableItemsEqual(a: IndexableItem, b: IndexableItem): boolean {
+  if (a === b) return true
+  return (
+    a.key === b.key &&
+    a.id === b.id &&
+    a.type === b.type &&
+    a.title === b.title &&
+    a.href === b.href &&
+    a.body === b.body &&
+    a.description === b.description &&
+    a.location === b.location &&
+    a.path === b.path &&
+    stringArraysEqual(a.tags, b.tags) &&
+    a.slug === b.slug &&
+    a.fileName === b.fileName &&
+    a.category === b.category &&
+    Boolean(a.isTemplate) === Boolean(b.isTemplate) &&
+    Boolean(a.starred) === Boolean(b.starred) &&
+    Boolean(a.pinned) === Boolean(b.pinned) &&
+    a.trashed === b.trashed &&
+    (a.trashedAt ?? null) === (b.trashedAt ?? null) &&
+    a.updatedAt === b.updatedAt &&
+    a.messageCount === b.messageCount
+  )
+}
+
 function isValidStamp(raw: unknown): raw is FileStamp {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return false
   const rec = raw as Record<string, unknown>
@@ -468,6 +506,7 @@ async function scanVisibleDriveTree(driveDir: string): Promise<{
 function buildFolderMaps(
   directories: readonly VisibleDirEntry[],
   meta: ParsedDriveMetadata,
+  prevByEntryKey?: ReadonlyMap<string, IndexableItem>,
 ): {
   folderItems: IndexableItem[]
   locationByRelPath: Map<string, string>
@@ -497,7 +536,7 @@ function buildFolderMaps(
     const displayPath = dir.relPath.split('/').join(' / ')
     locationByRelPath.set(dir.relPath, displayPath)
 
-    folderItems.push({
+    const candidate: IndexableItem = {
       key: `folder:${id}`,
       id,
       type: 'folder',
@@ -510,7 +549,11 @@ function buildFolderMaps(
       tags: [],
       trashed: false,
       updatedAt: stored?.updatedAt ?? dir.mtimeIso,
-    })
+    }
+    const prev = prevByEntryKey?.get(candidate.key)
+    folderItems.push(
+      prev && indexableItemsEqual(prev, candidate) ? prev : candidate,
+    )
   }
 
   return { folderItems, locationByRelPath }
@@ -608,6 +651,7 @@ async function syncIndexWithDisk(options?: {
   const { folderItems, locationByRelPath } = buildFolderMaps(
     directories,
     metadata,
+    prevByEntryKey,
   )
   for (const dir of directories) {
     nextManifest[`folder:${dir.relPath}`] = dir.stamp
@@ -905,7 +949,7 @@ async function syncIndexWithDisk(options?: {
 
   for (const entry of nextEntries) {
     const prevEntry = prevByEntryKey.get(entry.key)
-    if (prevEntry !== entry) {
+    if (!prevEntry || !indexableItemsEqual(prevEntry, entry)) {
       index.upsert(entry)
       mutated = true
     }

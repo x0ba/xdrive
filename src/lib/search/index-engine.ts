@@ -14,7 +14,8 @@ import type {
   SearchResultItem,
 } from './types'
 
-const TOKEN_RE = /[\p{L}\p{N}]+/gu
+const TOKEN_RE = /[\p{L}\p{N}][\p{L}\p{N}\p{M}]*/gu
+const COMBINING_MARK_RE = /^\p{M}$/u
 const MAX_PREFIX_EXPANSIONS = 200
 const DEFAULT_LIMIT = 50
 const MAX_LIMIT = 200
@@ -95,6 +96,33 @@ function mergeRanges(ranges: SearchMatchRange[]): SearchMatchRange[] {
   return merged
 }
 
+function findPrefixEndInRaw(raw: string, qTerm: string): number {
+  let offset = 0
+  let normalizedLen = 0
+
+  while (offset < raw.length && normalizedLen < qTerm.length) {
+    const cp = raw.codePointAt(offset)
+    if (cp === undefined) break
+    const step = cp > 0xffff ? 2 : 1
+    const ch = raw.slice(offset, offset + step)
+    offset += step
+    normalizedLen += normalizeToken(ch).length
+  }
+
+  // Keep trailing combining marks attached to the last matched base character
+  // so highlight tags never split a character from its diacritics.
+  while (offset < raw.length) {
+    const cp = raw.codePointAt(offset)
+    if (cp === undefined) break
+    const step = cp > 0xffff ? 2 : 1
+    const ch = raw.slice(offset, offset + step)
+    if (!COMBINING_MARK_RE.test(ch)) break
+    offset += step
+  }
+
+  return normalizeToken(raw.slice(0, offset)) === qTerm ? offset : raw.length
+}
+
 /**
  * Compute sorted, non-overlapping UTF-16 highlight ranges in `text` for exact
  * or prefix matches against `queryTerms`.
@@ -116,11 +144,7 @@ export function findHighlightRanges(
         break
       }
       if (span.token.startsWith(qTerm)) {
-        const prefixEnd =
-          span.raw.length >= qTerm.length &&
-          normalizeToken(span.raw.slice(0, qTerm.length)) === qTerm
-            ? span.start + qTerm.length
-            : span.end
+        const prefixEnd = span.start + findPrefixEndInRaw(span.raw, qTerm)
         if (prefixEnd > bestEnd) {
           bestEnd = prefixEnd
         }
