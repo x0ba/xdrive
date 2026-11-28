@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import type { Meta, StoryObj } from '@storybook/tanstack-react'
-import { expect, fn, userEvent, within } from 'storybook/test'
+import { expect, fn, userEvent, waitFor, within } from 'storybook/test'
 
 import type {
   BackupProviderDescriptor,
@@ -217,6 +217,7 @@ export const HealthyLocalDirectory: Story = {
 
     const dialog = within(document.body).getByRole('dialog')
     const dialogScope = within(dialog)
+    await expect(dialog.contains(document.activeElement)).toBe(true)
     const confirmButton = dialogScope.getByRole('button', {
       name: /Restore Drive/i,
     })
@@ -398,5 +399,38 @@ export const InvalidDestinationError: Story = {
       },
       snapshots: [],
     }),
+  },
+}
+
+/**
+ * Verifies Radix modal focus management: initial focus inside dialog, Tab/Shift+Tab trapping, and Escape focus restoration.
+ *
+ * @summary Restore confirmation focus trap and restoration
+ */
+export const RestoreDialogFocusTrap: Story = {
+  render: () => <InteractiveRestoreHarness />,
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    const restoreButtons = canvas.getAllByRole('button', { name: 'Restore' })
+    const triggerButton = restoreButtons[0]
+    triggerButton.focus()
+    await userEvent.click(triggerButton)
+
+    const dialog = within(document.body).getByRole('dialog')
+    await expect(dialog.contains(document.activeElement)).toBe(true)
+
+    for (let i = 0; i < 5; i += 1) {
+      await userEvent.tab()
+      await expect(dialog.contains(document.activeElement)).toBe(true)
+    }
+
+    for (let i = 0; i < 2; i += 1) {
+      await userEvent.tab({ shift: true })
+      await expect(dialog.contains(document.activeElement)).toBe(true)
+    }
+
+    await userEvent.keyboard('{Escape}')
+    await expect(within(document.body).queryByRole('dialog')).toBeNull()
+    await waitFor(() => expect(document.activeElement).toBe(triggerButton))
   },
 }
