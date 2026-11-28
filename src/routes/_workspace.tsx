@@ -74,6 +74,9 @@ function resolveWorkspaceMatch(
   if (routeId === '/_workspace/templates') {
     return { kind: 'templates' }
   }
+  if (routeId === '/_workspace/search') {
+    return { kind: 'search' }
+  }
   if (routeId === '/_workspace/chat/') {
     return { kind: 'chat' }
   }

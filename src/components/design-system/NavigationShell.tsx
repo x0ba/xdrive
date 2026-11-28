@@ -447,6 +447,7 @@ export type PrimaryNavId =
   | 'drive'
   | 'chat'
   | 'agent-studio'
+  | 'search'
   | 'templates'
   | 'shared'
   | 'starred'
@@ -841,6 +842,11 @@ export function SidebarRail({
     label: string
     icon: React.ReactNode
   }> = [
+    {
+      id: 'search',
+      label: 'Search',
+      icon: <Search className="h-3.5 w-3.5" />,
+    },
     {
       id: 'shared',
       label: 'Shared',
