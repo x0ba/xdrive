@@ -69,6 +69,7 @@ export interface DriveChatViewProps {
   onThreadSearchChange?: (query: string) => void
   initialScopeFolderId?: string | null
   onScopeFolderChange?: (folderId: string | null) => void
+  prefillDraft?: { nonce: number; text: string } | null
   className?: string
 }
 
@@ -127,6 +128,7 @@ export function DriveChatView({
   onThreadSearchChange,
   initialScopeFolderId,
   onScopeFolderChange,
+  prefillDraft,
   className,
 }: DriveChatViewProps) {
   const [internalHistoryOpen, setInternalHistoryOpen] =
@@ -149,6 +151,13 @@ export function DriveChatView({
     onThreadSearchChange?.(value)
   }
   const [draft, setDraft] = useState('')
+  const lastPrefillNonceRef = useRef<number | null>(null)
+  useEffect(() => {
+    if (!prefillDraft) return
+    if (lastPrefillNonceRef.current === prefillDraft.nonce) return
+    lastPrefillNonceRef.current = prefillDraft.nonce
+    setDraft(prefillDraft.text)
+  }, [prefillDraft])
   const [contextRefs, setContextRefs] = useState<DriveContextRef[]>(() => {
     if (!initialScopeFolderId) return []
     const folder = folders.find((item) => item.id === initialScopeFolderId)
@@ -715,6 +724,7 @@ export function DriveChatView({
                 onAddContextRef={handleAddContextRef}
                 onRemoveContextRef={handleRemoveContextRef}
                 onOpenProviders={onOpenProviders}
+                focusNonce={prefillDraft?.nonce}
               />
             </div>
           ) : (
@@ -778,6 +788,7 @@ export function DriveChatView({
               onAddContextRef={handleAddContextRef}
               onRemoveContextRef={handleRemoveContextRef}
               onOpenProviders={onOpenProviders}
+              focusNonce={prefillDraft?.nonce}
             />
           </div>
         )}

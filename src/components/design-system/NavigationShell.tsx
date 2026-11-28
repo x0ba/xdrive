@@ -44,6 +44,7 @@ import {
 import { AppContextMenu } from '#/components/apps/shared'
 import type { ContextMenuItem } from '#/components/apps/shared'
 import { WorkspaceLink } from '#/components/routing/WorkspaceLink'
+import { useCommandPaletteShortcutLabel } from '#/components/command-palette/shortcuts'
 import { isTemplatesRootFolder } from '#/lib/marble'
 import { docHref, folderHref, navHref } from '#/lib/routing'
 import type {
@@ -213,6 +214,7 @@ export interface BrowserTabStripProps {
   aiSidebarOpen?: boolean
   onToggleAiSidebar?: () => void
   pendingProposalsCount?: number
+  onOpenCommandPalette?: () => void
 }
 
 export function BrowserTabStrip({
@@ -238,7 +240,9 @@ export function BrowserTabStrip({
   aiSidebarOpen = false,
   onToggleAiSidebar,
   pendingProposalsCount = 0,
+  onOpenCommandPalette,
 }: BrowserTabStripProps) {
+  const paletteShortcut = useCommandPaletteShortcutLabel()
   return (
     <div className="flex h-9 w-full select-none items-center justify-between border-b border-[var(--xd-border)] bg-[var(--xd-rail)] px-2 text-[12px]">
       <div className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto">
@@ -380,6 +384,22 @@ export function BrowserTabStrip({
               </button>
             )}
           </div>
+        )}
+
+        {onOpenCommandPalette && (
+          <button
+            type="button"
+            onClick={onOpenCommandPalette}
+            aria-label={`Open command palette (${paletteShortcut.label})`}
+            title={`Command palette (${paletteShortcut.label})`}
+            className="inline-flex h-7 items-center gap-1.5 rounded border border-[var(--xd-border)] bg-[var(--xd-canvas)] px-2 text-[11.5px] text-[var(--xd-ink-secondary)] transition-colors hover:bg-[var(--xd-surface-hover)] hover:text-[var(--xd-ink)]"
+          >
+            <Search className="h-3 w-3 text-[var(--xd-ink-muted)]" />
+            <span className="hidden sm:inline">Search</span>
+            <kbd className="xd-mono text-[10px] text-[var(--xd-ink-muted)]">
+              {paletteShortcut.label}
+            </kbd>
+          </button>
         )}
 
         <button
@@ -529,6 +549,7 @@ export function SidebarRail({
   onUnpinApp,
   onDeleteApp,
 }: SidebarRailProps) {
+  const paletteShortcut = useCommandPaletteShortcutLabel()
   const [driveExpanded, setDriveExpanded] = useState(true)
   const [expandedFolderIds, setExpandedFolderIds] = useState<Set<string>>(
     () => new Set(),
@@ -887,12 +908,12 @@ export function SidebarRail({
         <button
           type="button"
           onClick={onOpenCommandPalette}
-          aria-label="Search (⌘K)"
-          title="Search (⌘K)"
+          aria-label={`Search (${paletteShortcut.label})`}
+          title={`Command palette (${paletteShortcut.label})`}
           className="inline-flex h-6 items-center gap-1 rounded px-1.5 text-[11px] text-[var(--xd-ink-muted)] transition-colors hover:bg-[var(--xd-surface-hover)] hover:text-[var(--xd-ink)]"
         >
           <Search className="h-3 w-3" />
-          <kbd className="xd-mono text-[10px]">⌘K</kbd>
+          <kbd className="xd-mono text-[10px]">{paletteShortcut.label}</kbd>
         </button>
       </div>
 
