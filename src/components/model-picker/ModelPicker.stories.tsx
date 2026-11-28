@@ -237,7 +237,7 @@ export const OpenFavorites: Story = {
     <InteractiveStandardPicker defaultOpen defaultTab="favorites" />
   ),
   play: async () => {
-    const body = within(document.body)
+    const body = within(await findOpenModelPickerPopup())
     const search = await body.findByPlaceholderText('Search models...')
     await expect(search).toBeVisible()
     await expect(body.getByText('GLM-5.3')).toBeVisible()
@@ -262,19 +262,18 @@ export const ProviderTab: Story = {
     <InteractiveStandardPicker defaultOpen defaultTab="opencode-go" />
   ),
   play: async () => {
-    const body = within(document.body)
+    const popup = await findOpenModelPickerPopup()
+    const body = within(popup)
     const search = await body.findByPlaceholderText('Search models...')
     await expect(search).toBeVisible()
     await expect(body.getByText('GLM-5.3')).toBeVisible()
     await expect(body.getByText('Tidepool Alpha')).toBeVisible()
     await expect(body.getByText('Big Pickle')).toBeVisible()
-    const freeSection = document.body.querySelector(
+    const freeSection = popup.querySelector(
       '[data-model-picker-section="free"]',
     )
     await expect(freeSection).not.toBeNull()
-    const freeBadges = document.body.querySelectorAll(
-      '[data-model-free-badge="true"]',
-    )
+    const freeBadges = popup.querySelectorAll('[data-model-free-badge="true"]')
     await expect(freeBadges.length).toBeGreaterThanOrEqual(4)
   },
 }

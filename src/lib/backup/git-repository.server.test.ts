@@ -248,4 +248,68 @@ describe('git-repository backup target', () => {
     expect(headAfterFail.trim()).toBe(headBeforeFail.trim())
     expect(remoteAfterFail.trim()).toBe(remoteBeforeFail.trim())
   })
+
+  it('does not discard uncommitted tracked edits when a backup would fail verification', async () => {
+    await mkdir(repoDir, { recursive: true })
+    await execFileAsync('git', ['init', '-b', 'backups'], { cwd: repoDir })
+    await execFileAsync('git', ['config', 'user.name', 'Test'], {
+      cwd: repoDir,
+    })
+    await execFileAsync('git', ['config', 'user.email', 'test@local'], {
+      cwd: repoDir,
+    })
+    const readmePath = path.join(repoDir, 'README.md')
+    await writeFile(readmePath, 'original\n', 'utf8')
+    await execFileAsync('git', ['add', 'README.md'], { cwd: repoDir })
+    await execFileAsync(
+      'git',
+      ['-c', 'commit.gpgsign=false', 'commit', '-m', 'Initial README'],
+      { cwd: repoDir },
+    )
+    const { stdout: headBefore } = await execFileAsync(
+      'git',
+      ['rev-parse', 'HEAD'],
+      { cwd: repoDir },
+    )
+
+    await writeFile(readmePath, 'edited-uncommitted\n', 'utf8')
+    await writeFile(
+      path.join(driveDir, 'large.mrbl'),
+      'a'.repeat(10_000),
+      'utf8',
+    )
+
+    await manager.updateConfig({
+      activeProvider: 'git-repository',
+      targets: {
+        'git-repository': {
+          directory: repoDir,
+          branch: 'backups',
+          remoteUrl: '',
+          autoPush: false,
+        },
+      },
+    })
+
+    await expect(
+      manager.runBackup({
+        trigger: 'manual',
+        limits: { maxArchiveBytes: 200 },
+      }),
+    ).rejects.toMatchObject({ code: 'GIT_PENDING_CHANGES' })
+
+    expect(await readFile(readmePath, 'utf8')).toBe('edited-uncommitted\n')
+    const { stdout: diff } = await execFileAsync(
+      'git',
+      ['diff', '--', 'README.md'],
+      { cwd: repoDir },
+    )
+    expect(diff).toContain('edited-uncommitted')
+    const { stdout: headAfter } = await execFileAsync(
+      'git',
+      ['rev-parse', 'HEAD'],
+      { cwd: repoDir },
+    )
+    expect(headAfter.trim()).toBe(headBefore.trim())
+  })
 })

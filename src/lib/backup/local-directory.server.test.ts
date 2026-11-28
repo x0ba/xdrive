@@ -13,6 +13,10 @@ import JSZip from 'jszip'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
 import { readChatThread, saveChatThread } from '#/lib/ai/chat-storage.server'
+import {
+  resetDriveSearchCache,
+  searchDrive,
+} from '#/lib/search/drive-search.server'
 import { getDefaultLocalBackupDir } from './config-storage.server'
 import { BackupManager } from './manager.server'
 import { BackupTargetRegistry } from './provider.server'
@@ -370,5 +374,115 @@ describe('local-directory backup target and safe restore', () => {
       if (prevDriveDir === undefined) delete process.env.XDRIVE_DRIVE_DIR
       else process.env.XDRIVE_DRIVE_DIR = prevDriveDir
     }
+  })
+
+  it('holds the search lock across restore so an in-flight search cannot recreate the Drive between renames', async () => {
+    const prevDriveDir = process.env.XDRIVE_DRIVE_DIR
+    process.env.XDRIVE_DRIVE_DIR = driveDir
+    resetDriveSearchCache()
+
+    try {
+      await writeFile(path.join(driveDir, 'doc.mrbl'), '<h1>v1</h1>', 'utf8')
+      await manager.updateConfig({
+        activeProvider: 'local-directory',
+        targets: {
+          'local-directory': { directory: backupDir, retentionCount: 5 },
+        },
+      })
+      const run1 = await manager.runBackup({ trigger: 'manual' })
+
+      let releaseRestore!: () => void
+      const restoreGate = new Promise<void>((resolve) => {
+        releaseRestore = resolve
+      })
+      let restoreHoldingLocks!: () => void
+      const holdingLocksPromise = new Promise<void>((resolve) => {
+        restoreHoldingLocks = resolve
+      })
+
+      const gatedRegistry = new BackupTargetRegistry()
+      gatedRegistry.register({
+        ...localDirectoryBackupTarget,
+        async restoreSnapshotToDir(cfg, id, stagingDir, ctx) {
+          restoreHoldingLocks()
+          await restoreGate
+          return await localDirectoryBackupTarget.restoreSnapshotToDir(
+            cfg,
+            id,
+            stagingDir,
+            ctx,
+          )
+        },
+      })
+
+      const lockedManager = new BackupManager({
+        getDriveDir: () => driveDir,
+        getConfigDir: () => configDir,
+        registry: gatedRegistry,
+        now: () => {
+          clockMs += 1_000
+          return new Date(clockMs)
+        },
+      })
+
+      const restorePromise = lockedManager.restoreSnapshot(run1.snapshotId!)
+      await holdingLocksPromise
+
+      let searchSettled = false
+      const searchPromise = searchDrive({ query: 'v1' }).finally(() => {
+        searchSettled = true
+      })
+
+      await new Promise((resolve) => setTimeout(resolve, 100))
+      expect(searchSettled).toBe(false)
+      await expect(stat(path.join(driveDir, '.search'))).rejects.toThrow()
+
+      releaseRestore()
+      await restorePromise
+      await searchPromise
+
+      expect(searchSettled).toBe(true)
+      expect(await readFile(path.join(driveDir, 'doc.mrbl'), 'utf8')).toBe(
+        '<h1>v1</h1>',
+      )
+      const siblings = await readdir(path.dirname(driveDir))
+      expect(
+        siblings.some((name) => name.startsWith('.marble-drive.restore-')),
+      ).toBe(false)
+    } finally {
+      resetDriveSearchCache()
+      if (prevDriveDir === undefined) delete process.env.XDRIVE_DRIVE_DIR
+      else process.env.XDRIVE_DRIVE_DIR = prevDriveDir
+    }
+  })
+
+  it('rejects a backslash filename before writing a backup or pruning older snapshots', async () => {
+    await manager.updateConfig({
+      activeProvider: 'local-directory',
+      targets: {
+        'local-directory': { directory: backupDir, retentionCount: 1 },
+      },
+    })
+
+    await writeFile(path.join(driveDir, 'doc.mrbl'), '<h1>keep</h1>', 'utf8')
+    const run1 = await manager.runBackup({ trigger: 'manual', label: 'good' })
+    expect(run1.status).toBe('success')
+
+    await writeFile(path.join(driveDir, 'notes\\old.txt'), 'unsafe', 'utf8')
+    await expect(
+      manager.runBackup({ trigger: 'manual' }),
+    ).rejects.toMatchObject({ code: 'UNSAFE_ARCHIVE_ENTRY' })
+
+    const status = await manager.getStatus()
+    expect(status.snapshots.map((snapshot) => snapshot.id)).toEqual([
+      run1.snapshotId,
+    ])
+    const archiveNames = (await readdir(backupDir)).filter((name) =>
+      name.endsWith('.zip'),
+    )
+    expect(archiveNames).toHaveLength(1)
+    expect(await readFile(path.join(driveDir, 'notes\\old.txt'), 'utf8')).toBe(
+      'unsafe',
+    )
   })
 })

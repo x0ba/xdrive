@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto'
 import { createWriteStream } from 'node:fs'
 import { mkdir, readdir, readFile, rm, stat } from 'node:fs/promises'
+import os from 'node:os'
 import path from 'node:path'
 
 import JSZip from 'jszip'
@@ -115,7 +116,24 @@ export async function scanDriveForBackup(
   files.sort((a, b) =>
     a.relPosix < b.relPosix ? -1 : a.relPosix > b.relPosix ? 1 : 0,
   )
+  // Reject names restore cannot extract (for example a Linux file named
+  // `notes\old.txt`) before any archive is written or an older snapshot pruned.
+  for (const relPosix of directories) {
+    assertRestorableArchivePath(relPosix)
+  }
+  for (const file of files) {
+    assertRestorableArchivePath(file.relPosix)
+  }
   return { directories, files }
+}
+
+const RESTORE_PATH_PROBE_ROOT = path.join(
+  os.tmpdir(),
+  'xdrive-backup-restore-probe',
+)
+
+function assertRestorableArchivePath(relPosix: string): void {
+  resolveSafeArchiveEntryPath(RESTORE_PATH_PROBE_ROOT, relPosix)
 }
 
 export async function buildDriveSnapshotEntries(options: {

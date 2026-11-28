@@ -1,6 +1,15 @@
 import { execFile, spawn } from 'node:child_process'
-import { randomBytes } from 'node:crypto'
-import { mkdir, readFile, rm, stat, writeFile } from 'node:fs/promises'
+import { createHash, randomBytes } from 'node:crypto'
+import { createReadStream } from 'node:fs'
+import {
+  lstat,
+  mkdir,
+  readFile,
+  readlink,
+  rm,
+  stat,
+  writeFile,
+} from 'node:fs/promises'
 import path from 'node:path'
 
 import {
@@ -311,6 +320,104 @@ async function ensureGitRepoInitialized(
   }
 }
 
+function pendingGitChangesError(): BackupError {
+  return new BackupError(
+    409,
+    'Git backup repository has uncommitted tracked changes. Commit or stash them before backing up so a failed backup cannot discard them.',
+    'GIT_PENDING_CHANGES',
+  )
+}
+
+async function assertNoPendingTrackedChanges(repoDir: string): Promise<void> {
+  // `status` treats clean/smudge filters and autocrlf as modifications even
+  // when the worktree bytes match the index. Compare the index to HEAD, then
+  // raw worktree bytes to the index, so only changes `reset --hard` would
+  // discard block the backup.
+  const head = await runGitText(
+    ['rev-parse', '--verify', '--quiet', 'HEAD'],
+    repoDir,
+  ).catch(() => '')
+  const listed = await runGitText(['ls-files', '-s', '-z'], repoDir)
+  if (!head.trim()) {
+    if (listed.length > 0) throw pendingGitChangesError()
+    return
+  }
+
+  const staged = await runGitText(
+    ['diff-index', '--cached', '--name-only', 'HEAD'],
+    repoDir,
+  )
+  if (staged.trim().length > 0) throw pendingGitChangesError()
+  const root = path.resolve(repoDir)
+  const rootPrefix = root.endsWith(path.sep) ? root : `${root}${path.sep}`
+  for (const record of listed.split('\0')) {
+    if (!record) continue
+    const tab = record.indexOf('\t')
+    if (tab < 0) throw pendingGitChangesError()
+    const meta = record.slice(0, tab).split(' ')
+    const mode = meta[0]
+    const oid = meta[1]
+    const stage = meta[2]
+    const relativePath = record.slice(tab + 1)
+    if (!mode || !oid || stage !== '0') throw pendingGitChangesError()
+    if (mode === '160000') continue
+
+    const absolute = path.resolve(repoDir, relativePath)
+    if (absolute !== root && !absolute.startsWith(rootPrefix)) {
+      throw pendingGitChangesError()
+    }
+    const info = await lstat(absolute).catch(() => null)
+    if (!info || !trackedWorktreeModeMatches(mode, info)) {
+      throw pendingGitChangesError()
+    }
+
+    const algorithm = oid.length === 64 ? 'sha256' : 'sha1'
+    const worktreeOid =
+      mode === '120000'
+        ? gitBlobOid(Buffer.from(await readlink(absolute)), algorithm)
+        : await hashWorktreeBlob(absolute, info.size, algorithm)
+    if (worktreeOid !== oid) throw pendingGitChangesError()
+  }
+}
+
+function trackedWorktreeModeMatches(
+  mode: string,
+  info: { mode: number; isSymbolicLink: () => boolean },
+): boolean {
+  if (mode === '120000') return info.isSymbolicLink()
+  if (info.isSymbolicLink()) return false
+  const executable = (info.mode & 0o111) !== 0
+  if (mode === '100755') return executable
+  if (mode === '100644') return !executable
+  return false
+}
+
+function gitBlobOid(content: Buffer, algorithm: 'sha1' | 'sha256'): string {
+  return createHash(algorithm)
+    .update(`blob ${content.byteLength}\0`)
+    .update(content)
+    .digest('hex')
+}
+
+function hashWorktreeBlob(
+  filePath: string,
+  size: number,
+  algorithm: 'sha1' | 'sha256',
+): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const hash = createHash(algorithm)
+    hash.update(`blob ${size}\0`)
+    const stream = createReadStream(filePath)
+    stream.on('data', (chunk) => {
+      hash.update(chunk)
+    })
+    stream.on('error', reject)
+    stream.on('end', () => {
+      resolve(hash.digest('hex'))
+    })
+  })
+}
+
 function parseMetaTrailer(body: string): GitCommitMetaTrailer | null {
   for (const line of body.split(/\r?\n/)) {
     if (!line.startsWith('XDrive-Meta:')) continue
@@ -463,6 +570,7 @@ export const gitRepositoryBackupTarget: BackupTarget<GitRepositoryTargetConfig> 
         options.driveDir,
       )
       await ensureGitRepoInitialized(repoDir, branch, remoteUrl)
+      await assertNoPendingTrackedChanges(repoDir)
 
       const snapshotId = `${now.toISOString().replace(/[:.]/g, '-')}-${randomBytes(3).toString('hex')}`
       const createdAt = now.toISOString()

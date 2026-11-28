@@ -4,7 +4,10 @@ import path from 'node:path'
 
 import { withChatLock } from '#/lib/ai/chat-storage.server'
 import { getDriveDir, withDriveLock } from '#/lib/marble/drive-storage.server'
-import { resetDriveSearchCache } from '#/lib/search/drive-search.server'
+import {
+  resetDriveSearchCache,
+  withSearchLock,
+} from '#/lib/search/drive-search.server'
 import { scanDriveForBackup } from './archive.server'
 import {
   getBackupConfigDir,
@@ -50,7 +53,11 @@ async function pathExists(targetPath: string): Promise<boolean> {
 }
 
 async function withExclusiveDriveLocks<T>(fn: () => Promise<T>): Promise<T> {
-  return await withDriveLock(() => withChatLock(fn))
+  // Search persists under driveDir/.search with its own lock. Hold that lock
+  // across the directory swap, after Drive and chat, so an in-flight search
+  // cannot recreate driveDir between the two renames. Search never acquires
+  // the Drive or chat locks, so taking it last cannot deadlock.
+  return await withDriveLock(() => withChatLock(() => withSearchLock(fn)))
 }
 
 export class BackupManager {
