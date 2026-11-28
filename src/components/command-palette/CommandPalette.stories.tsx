@@ -610,6 +610,11 @@ export const WorkspaceIntegration: Story = {
     />
   ),
   play: async ({ canvasElement }) => {
+    // Default user-event delay is 0, which inserts a setTimeout between
+    // keystrokes. Under a full parallel Storybook run those timers starve
+    // and this workspace flow exceeds the 15s test timeout. `delay: null`
+    // keeps the same keyboard sequence without yielding between keys.
+    const user = userEvent.setup({ delay: null })
     const body = within(document.body)
     const workspace = canvasElement.querySelector<HTMLElement>(
       '[data-component="xdrive-workspace"]',
@@ -618,16 +623,16 @@ export const WorkspaceIntegration: Story = {
     await expect(workspace!.classList.contains('dark')).toBe(true)
 
     // 1. Open palette via global Ctrl-K and jump to a document
-    await userEvent.keyboard('{Control>}k{/Control}')
+    await user.keyboard('{Control>}k{/Control}')
     const dialog1 = await body.findByRole('dialog', { name: 'Command palette' })
     const combobox1 = within(dialog1).getByRole('combobox')
-    await userEvent.type(combobox1, 'threshold rotated')
+    await user.type(combobox1, 'threshold rotated')
     await expect(
       await within(dialog1).findByRole('option', {
         name: /Threshold of the Rotated Surface Code/i,
       }),
     ).toBeVisible()
-    await userEvent.keyboard('{Enter}')
+    await user.keyboard('{Enter}')
 
     await expect(
       await within(workspace!).findByText(
@@ -636,32 +641,32 @@ export const WorkspaceIntegration: Story = {
     ).toBeVisible()
 
     // 2. Reopen palette and toggle theme to light
-    await userEvent.keyboard('{Control>}k{/Control}')
+    await user.keyboard('{Control>}k{/Control}')
     const dialog2 = await body.findByRole('dialog', { name: 'Command palette' })
-    await userEvent.type(within(dialog2).getByRole('combobox'), 'light theme')
+    await user.type(within(dialog2).getByRole('combobox'), 'light theme')
     await expect(
       await within(dialog2).findByRole('option', {
         name: /Switch to light theme/i,
       }),
     ).toBeVisible()
-    await userEvent.keyboard('{Enter}')
+    await user.keyboard('{Enter}')
     await waitFor(() => {
       expect(workspace!.classList.contains('dark')).toBe(false)
     })
 
     // 3. Create a truly blank document (not copied from a populated template)
-    await userEvent.keyboard('{Control>}k{/Control}')
+    await user.keyboard('{Control>}k{/Control}')
     const dialogBlank = await body.findByRole('dialog', {
       name: 'Command palette',
     })
-    await userEvent.type(
+    await user.type(
       within(dialogBlank).getByRole('combobox'),
       'New blank document',
     )
     const blankOption = await within(dialogBlank).findByRole('option', {
       name: /^New blank document,/i,
     })
-    await userEvent.click(blankOption)
+    await user.click(blankOption)
 
     const blankDocBody = await within(workspace!).findByRole('textbox', {
       name: 'Document body',
@@ -671,16 +676,16 @@ export const WorkspaceIntegration: Story = {
     })
 
     // 4. Start AI prompt prefilled from palette query
-    await userEvent.keyboard('{Control>}k{/Control}')
+    await user.keyboard('{Control>}k{/Control}')
     const dialog3 = await body.findByRole('dialog', { name: 'Command palette' })
-    await userEvent.type(
+    await user.type(
       within(dialog3).getByRole('combobox'),
       'summarize recent ablations',
     )
     const askAiOption = await within(dialog3).findByRole('option', {
       name: /Ask AI: "summarize recent ablations"/i,
     })
-    await userEvent.click(askAiOption)
+    await user.click(askAiOption)
 
     const chatComposer = await within(
       workspace!,
@@ -690,25 +695,25 @@ export const WorkspaceIntegration: Story = {
     })
 
     // Clear the prefilled draft so returning to chat later must keep it cleared
-    await userEvent.clear(chatComposer)
+    await user.clear(chatComposer)
     await expect(chatComposer.value).toBe('')
 
     // 5. Open NotesApp and confirm Cmd/Ctrl-K inserts a link instead of opening palette
-    await userEvent.keyboard('{Control>}k{/Control}')
+    await user.keyboard('{Control>}k{/Control}')
     const dialog4 = await body.findByRole('dialog', { name: 'Command palette' })
-    await userEvent.type(within(dialog4).getByRole('combobox'), 'week 12 head')
+    await user.type(within(dialog4).getByRole('combobox'), 'week 12 head')
     await expect(
       await within(dialog4).findByRole('option', {
         name: /Week 12: Head Ablations/i,
       }),
     ).toBeVisible()
-    await userEvent.keyboard('{Enter}')
+    await user.keyboard('{Enter}')
 
     const notesEditor = await within(
       workspace!,
     ).findByLabelText<HTMLTextAreaElement>('Note markdown editor')
-    await userEvent.click(notesEditor)
-    await userEvent.keyboard('{Control>}k{/Control}')
+    await user.click(notesEditor)
+    await user.keyboard('{Control>}k{/Control}')
     await waitFor(() => {
       expect(notesEditor.value).toContain('[link text](https://)')
       expect(body.queryByRole('dialog', { name: 'Command palette' })).toBeNull()
@@ -719,7 +724,7 @@ export const WorkspaceIntegration: Story = {
       name: 'Primary Workspace Navigation',
     })
     const chatLink = within(sidebarNav).getByRole('link', { name: 'Chat' })
-    await userEvent.click(chatLink)
+    await user.click(chatLink)
     const remountedComposer = await within(
       workspace!,
     ).findByLabelText<HTMLTextAreaElement>('Message xDrive Assistant')

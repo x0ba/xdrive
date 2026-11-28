@@ -4,6 +4,7 @@ import path from 'node:path'
 
 import { withChatLock } from '#/lib/ai/chat-storage.server'
 import { getDriveDir, withDriveLock } from '#/lib/marble/drive-storage.server'
+import { resetDriveSearchCache } from '#/lib/search/drive-search.server'
 import { scanDriveForBackup } from './archive.server'
 import {
   getBackupConfigDir,
@@ -393,6 +394,10 @@ export class BackupManager {
             }
             throw swapError
           }
+
+          // The in-memory search index is keyed by Drive path and would keep
+          // serving the pre-restore Drive after this directory swap.
+          resetDriveSearchCache()
 
           if (driveExists) {
             await rm(previousDir, { recursive: true, force: true }).catch(
