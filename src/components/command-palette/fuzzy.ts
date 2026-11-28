@@ -13,6 +13,22 @@ const UPPER_RE = /[A-Z]/
 
 const MAX_DP_MATRIX_CELLS = 16_384
 
+/**
+ * Disjoint score floors for each match tier so exact matches always outrank
+ * prefixes (even long ones), prefixes always outrank substrings, and
+ * substrings always outrank scattered or multi-token matches.
+ */
+export const FUZZY_SCORE_TIERS = {
+  EXACT: 5000,
+  PREFIX: 4000,
+  SUBSTRING: 3000,
+  SUBSEQUENCE: 1000,
+} as const
+
+function clamp(value: number, min: number, max: number): number {
+  return Math.max(min, Math.min(max, value))
+}
+
 export function normalizeQuery(query: string): string {
   return query.trim().replace(/\s+/g, ' ')
 }
@@ -243,16 +259,24 @@ function matchSinglePhrase(
   if (qLower.length === 0) return { score: 0, ranges: [] }
   if (qLower.length > tLower.length) return null
 
+  // Exact tier: [5000, 5500]
   if (qLower === tLower) {
     return {
-      score: 1000 + Math.max(0, 40 - target.length),
+      score: FUZZY_SCORE_TIERS.EXACT + clamp(500 - target.length, 0, 500),
       ranges: [[0, target.length]],
     }
   }
 
+  // Prefix tier: [4000, 4900] (strictly below EXACT)
   if (tLower.startsWith(qLower)) {
+    const coverage = Math.round((qLower.length / tLower.length) * 600)
+    const shortnessBonus = clamp(
+      300 - (tLower.length - qLower.length) * 4,
+      0,
+      300,
+    )
     return {
-      score: 520 + qLower.length * 22 + Math.max(0, 40 - target.length),
+      score: FUZZY_SCORE_TIERS.PREFIX + coverage + shortnessBonus,
       ranges: [[0, qLower.length]],
     }
   }
@@ -274,25 +298,36 @@ function matchSinglePhrase(
     searchFrom = found + 1
   }
 
+  // Substring tier: [3000, 3800] (strictly below PREFIX)
   if (bestSubstrIdx !== -1) {
-    const score =
-      260 +
-      qLower.length * 20 +
-      bestSubstrBonus -
-      Math.min(bestSubstrIdx, 20) * 0.5 -
-      target.length * 0.1
+    const boundaryScore = Math.min(250, bestSubstrBonus * 5)
+    const coverage = Math.round((qLower.length / tLower.length) * 400)
+    const offsetScore = clamp(150 - bestSubstrIdx * 4, 0, 150)
     return {
-      score,
+      score:
+        FUZZY_SCORE_TIERS.SUBSTRING + boundaryScore + coverage + offsetScore,
       ranges: [[bestSubstrIdx, bestSubstrIdx + qLower.length]],
     }
   }
 
   if (!isSubsequence(qLower, tLower)) return null
 
-  if (qLower.length * tLower.length <= MAX_DP_MATRIX_CELLS) {
-    return dpSubsequenceMatch(qLower, target, tLower, bonuses)
+  const subseq =
+    qLower.length * tLower.length <= MAX_DP_MATRIX_CELLS
+      ? dpSubsequenceMatch(qLower, target, tLower, bonuses)
+      : greedySubsequenceMatch(qLower, target, tLower, bonuses)
+  if (!subseq) return null
+
+  // Subsequence tier: [1000, 2900] (strictly below SUBSTRING)
+  const normalizedSubseq = clamp(
+    Math.round(950 + (subseq.score / Math.max(1, qLower.length)) * 18),
+    0,
+    1900,
+  )
+  return {
+    score: FUZZY_SCORE_TIERS.SUBSEQUENCE + normalizedSubseq,
+    ranges: subseq.ranges,
   }
-  return greedySubsequenceMatch(qLower, target, tLower, bonuses)
 }
 
 /**
@@ -313,6 +348,10 @@ export function fuzzyMatch(
     return wholeMatch
   }
 
+  if (wholeMatch && wholeMatch.score >= FUZZY_SCORE_TIERS.SUBSTRING) {
+    return wholeMatch
+  }
+
   const tokenMatches: FuzzyMatchResult[] = []
   for (const token of tokens) {
     const match = matchSinglePhrase(token, target)
@@ -320,9 +359,15 @@ export function fuzzyMatch(
     tokenMatches.push(match)
   }
 
-  // Scale down multi-token split score so exact phrase / prefix matches still win.
-  const combinedTokenScore =
-    tokenMatches.reduce((sum, match) => sum + match.score, 0) * 0.58
+  // Bound split multi-token matches below contiguous substring/prefix/exact tiers.
+  const avgTokenScore =
+    tokenMatches.reduce((sum, match) => sum + match.score, 0) /
+    tokenMatches.length
+  const combinedTokenScore = clamp(
+    Math.round((avgTokenScore / 5500) * 2950),
+    0,
+    2950,
+  )
   const combinedRanges = mergeRanges(tokenMatches.flatMap((m) => m.ranges))
 
   if (wholeMatch && wholeMatch.score >= combinedTokenScore) {
@@ -414,7 +459,8 @@ export function scoreCommandItem(
   if (item.alwaysMatch) {
     const labelMatch = fuzzyMatch(normalized, item.label)
     return {
-      matchScore: Math.max(item.score ?? 0, labelMatch ? labelMatch.score : 0),
+      matchScore:
+        item.score !== undefined ? item.score : (labelMatch?.score ?? 0),
       labelRanges: labelMatch?.ranges ?? [],
     }
   }
@@ -443,7 +489,11 @@ export function scoreCommandItem(
     }
 
     if (allTokensMatched) {
-      const crossFieldScore = tokenScoreSum * 0.55
+      const crossFieldScore = clamp(
+        Math.round((tokenScoreSum / tokens.length) * 0.52),
+        0,
+        2900,
+      )
       if (!singleField || crossFieldScore > singleField.weightedScore) {
         return {
           matchScore: crossFieldScore + (item.score ?? 0),

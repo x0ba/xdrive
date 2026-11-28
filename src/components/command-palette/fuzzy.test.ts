@@ -37,6 +37,49 @@ describe('fuzzyMatch', () => {
     expect(boundary!.score).toBeGreaterThan(scattered!.score)
   })
 
+  it('always ranks an exact match above any longer prefix or substring match', () => {
+    const exact = fuzzyMatch(
+      'Collaborative Research Document',
+      'Collaborative Research Document',
+    )
+    const longerPrefix = fuzzyMatch(
+      'Collaborative Research Document',
+      'Collaborative Research Document Notes',
+    )
+    const veryLongPrefix = fuzzyMatch(
+      'Collaborative Research Document',
+      'Collaborative Research Document Notes & Extended Reference Appendix',
+    )
+
+    expect(exact).not.toBeNull()
+    expect(longerPrefix).not.toBeNull()
+    expect(veryLongPrefix).not.toBeNull()
+    expect(exact!.score).toBeGreaterThan(longerPrefix!.score)
+    expect(exact!.score).toBeGreaterThan(veryLongPrefix!.score)
+
+    const ranked = rankCommandItems('Collaborative Research Document', [
+      {
+        item: makeItem({
+          id: 'prefix',
+          label: 'Collaborative Research Document Notes',
+          updatedAt: '2026-11-28T10:00:00.000Z',
+        }),
+        sourceId: 'nav',
+        sourcePriority: 90,
+      },
+      {
+        item: makeItem({
+          id: 'exact',
+          label: 'Collaborative Research Document',
+          updatedAt: '2026-11-01T00:00:00.000Z',
+        }),
+        sourceId: 'nav',
+        sourcePriority: 90,
+      },
+    ])
+    expect(ranked.map((r) => r.item.id)).toEqual(['exact', 'prefix'])
+  })
+
   it('matches camelCase and delimiter boundaries with accurate ranges', () => {
     const match = fuzzyMatch('cp', 'CommandPalette')
     expect(match).not.toBeNull()

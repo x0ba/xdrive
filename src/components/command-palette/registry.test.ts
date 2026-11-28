@@ -126,7 +126,7 @@ describe('executeCommandSources', () => {
         section: 'drive-search',
         sectionLabel: 'Search Results',
         alwaysMatch: true,
-        score: 800,
+        score: 6000,
         onSelect: () => {},
       },
     ])

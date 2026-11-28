@@ -85,6 +85,13 @@ function HighlightedLabel({
   )
 }
 
+const EMPTY_QUERY_STATE: CommandQueryState = {
+  groups: [],
+  items: [],
+  pendingSourceIds: [],
+  errors: [],
+}
+
 export function CommandPalette({
   open,
   onOpenChange,
@@ -99,13 +106,20 @@ export function CommandPalette({
   portalContainer,
 }: CommandPaletteProps) {
   const [query, setQuery] = useState(initialQuery)
-  const [activeIndex, setActiveIndex] = useState(0)
+  const [selection, setSelection] = useState<{
+    query: string
+    itemId: string | null
+  }>({
+    query: initialQuery,
+    itemId: null,
+  })
   const [registryVersion, setRegistryVersion] = useState(0)
-  const [queryState, setQueryState] = useState<CommandQueryState>({
-    groups: [],
-    items: [],
-    pendingSourceIds: [],
-    errors: [],
+  const [resolvedResult, setResolvedResult] = useState<{
+    query: string
+    state: CommandQueryState
+  }>({
+    query: initialQuery,
+    state: EMPTY_QUERY_STATE,
   })
   const [workspacePortalTarget, setWorkspacePortalTarget] =
     useState<HTMLElement | null>(null)
@@ -139,14 +153,10 @@ export function CommandPalette({
     if (justOpened) {
       skipRestoreFocusRef.current = false
       setQuery(initialQuery)
-      setActiveIndex(0)
+      setSelection({ query: initialQuery, itemId: null })
     } else if (!open) {
-      setQueryState({
-        groups: [],
-        items: [],
-        pendingSourceIds: [],
-        errors: [],
-      })
+      setResolvedResult({ query: '', state: EMPTY_QUERY_STATE })
+      setSelection({ query: '', itemId: null })
     }
   }, [open, initialQuery])
 
@@ -184,7 +194,7 @@ export function CommandPalette({
     void executeCommandSources(effectiveSources, query, fullContext, {
       onUpdate: (nextState) => {
         if (!controller.signal.aborted) {
-          setQueryState(nextState)
+          setResolvedResult({ query, state: nextState })
         }
       },
     })
@@ -194,6 +204,7 @@ export function CommandPalette({
     }
   }, [open, query, effectiveSources, stableContext])
 
+  const queryState = resolvedResult.state
   const normalizedQuery = normalizeQuery(query)
   const isEmptyQuery = normalizedQuery.length === 0
   const isLoading = queryState.pendingSourceIds.length > 0
@@ -215,23 +226,37 @@ export function CommandPalette({
     [visibleGroups],
   )
 
-  useEffect(() => {
-    setActiveIndex(findEdgeEnabledIndex(flatItems, 'first'))
-  }, [query, open])
+  const activeIndex = useMemo(() => {
+    if (flatItems.length === 0) return -1
+    if (selection.query === query && selection.itemId !== null) {
+      const preservedIndex = flatItems.findIndex(
+        (entry) => entry.item.id === selection.itemId && !entry.item.disabled,
+      )
+      if (preservedIndex !== -1) return preservedIndex
+    }
+    return findEdgeEnabledIndex(flatItems, 'first')
+  }, [flatItems, selection, query])
 
   useEffect(() => {
-    if (flatItems.length === 0) {
-      if (activeIndex !== -1) setActiveIndex(-1)
-      return
-    }
-    if (
-      activeIndex < 0 ||
-      activeIndex >= flatItems.length ||
-      flatItems[activeIndex]?.item.disabled
-    ) {
-      setActiveIndex(findEdgeEnabledIndex(flatItems, 'first'))
-    }
-  }, [flatItems, activeIndex])
+    if (!open || resolvedResult.query !== query) return
+    setSelection((prev) => {
+      if (
+        prev.query === query &&
+        prev.itemId !== null &&
+        flatItems.some(
+          (entry) => entry.item.id === prev.itemId && !entry.item.disabled,
+        )
+      ) {
+        return prev
+      }
+      const firstIdx = findEdgeEnabledIndex(flatItems, 'first')
+      const nextItemId = firstIdx >= 0 ? flatItems[firstIdx].item.id : null
+      if (prev.query === query && prev.itemId === nextItemId) {
+        return prev
+      }
+      return { query, itemId: nextItemId }
+    })
+  }, [open, query, resolvedResult.query, flatItems])
 
   useEffect(() => {
     if (activeIndex < 0) return
@@ -251,18 +276,34 @@ export function CommandPalette({
     [onOpenChange],
   )
 
+  const selectIndex = useCallback(
+    (nextIndex: number) => {
+      if (nextIndex < 0 || nextIndex >= flatItems.length) {
+        setSelection({ query, itemId: null })
+        return
+      }
+      setSelection({ query, itemId: flatItems[nextIndex].item.id })
+    },
+    [flatItems, query],
+  )
+
+  const handleQueryChange = useCallback((nextQuery: string) => {
+    setQuery(nextQuery)
+    setSelection({ query: nextQuery, itemId: null })
+  }, [])
+
   const handleInputKeyDown = (event: React.KeyboardEvent<HTMLInputElement>) => {
     if (event.key === 'ArrowDown') {
       event.preventDefault()
-      setActiveIndex((prev) => findNextEnabledIndex(flatItems, prev, 1))
+      selectIndex(findNextEnabledIndex(flatItems, activeIndex, 1))
       return
     }
     if (event.key === 'ArrowUp') {
       event.preventDefault()
-      setActiveIndex((prev) =>
+      selectIndex(
         findNextEnabledIndex(
           flatItems,
-          prev <= 0 ? flatItems.length : prev,
+          activeIndex <= 0 ? flatItems.length : activeIndex,
           -1,
         ),
       )
@@ -271,14 +312,14 @@ export function CommandPalette({
     if (event.key === 'Home') {
       if (flatItems.length > 0) {
         event.preventDefault()
-        setActiveIndex(findEdgeEnabledIndex(flatItems, 'first'))
+        selectIndex(findEdgeEnabledIndex(flatItems, 'first'))
       }
       return
     }
     if (event.key === 'End') {
       if (flatItems.length > 0) {
         event.preventDefault()
-        setActiveIndex(findEdgeEnabledIndex(flatItems, 'last'))
+        selectIndex(findEdgeEnabledIndex(flatItems, 'last'))
       }
       return
     }
@@ -358,7 +399,7 @@ export function CommandPalette({
               aria-activedescendant={activeOptionId}
               aria-label="Search commands and workspace items"
               value={query}
-              onChange={(event) => setQuery(event.target.value)}
+              onChange={(event) => handleQueryChange(event.target.value)}
               onKeyDown={handleInputKeyDown}
               placeholder={placeholder}
               spellCheck={false}
@@ -376,7 +417,7 @@ export function CommandPalette({
                 type="button"
                 aria-label="Clear search"
                 onClick={() => {
-                  setQuery('')
+                  handleQueryChange('')
                   inputRef.current?.focus({ preventScroll: true })
                 }}
                 className="inline-flex size-6 shrink-0 items-center justify-center rounded text-[var(--xd-ink-muted)] transition-colors hover:bg-[var(--xd-surface-hover)] hover:text-[var(--xd-ink)]"
@@ -448,7 +489,7 @@ export function CommandPalette({
                   <button
                     type="button"
                     onClick={() => {
-                      setQuery('')
+                      handleQueryChange('')
                       inputRef.current?.focus({ preventScroll: true })
                     }}
                     className="mt-3 inline-flex h-7 items-center rounded border border-[var(--xd-border)] bg-[var(--xd-rail)] px-2.5 text-[11.5px] font-medium text-[var(--xd-ink-secondary)] transition-colors hover:bg-[var(--xd-surface-hover)] hover:text-[var(--xd-ink)]"
@@ -502,7 +543,7 @@ export function CommandPalette({
                           disabled={item.disabled}
                           onMouseMove={() => {
                             if (!item.disabled && activeIndex !== optionIndex) {
-                              setActiveIndex(optionIndex)
+                              selectIndex(optionIndex)
                             }
                           }}
                           onClick={() => runItem(item)}
