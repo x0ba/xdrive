@@ -13,6 +13,7 @@ import { Route as IndexRouteImport } from './routes/index'
 import { Route as WorkspaceRouteImport } from './routes/_workspace'
 import { Route as WorkspaceSplatRouteImport } from './routes/_workspace/$'
 import { Route as WorkspaceDriveRouteImport } from './routes/_workspace/drive'
+import { Route as WorkspaceSearchRouteImport } from './routes/_workspace/search'
 import { Route as WorkspaceSharedRouteImport } from './routes/_workspace/shared'
 import { Route as WorkspaceStarredRouteImport } from './routes/_workspace/starred'
 import { Route as WorkspaceTemplatesRouteImport } from './routes/_workspace/templates'
@@ -22,6 +23,7 @@ import { Route as ApiBackupRouteImport } from './routes/api.backup'
 import { Route as ApiDriveChatRouteImport } from './routes/api.drive-chat'
 import { Route as ApiLatexRouteImport } from './routes/api.latex'
 import { Route as ApiMarbleRouteImport } from './routes/api.marble'
+import { Route as ApiSearchRouteImport } from './routes/api.search'
 import { Route as WorkspaceChatIndexRouteImport } from './routes/_workspace/chat/index'
 import { Route as WorkspaceChatThreadIdRouteImport } from './routes/_workspace/chat/$threadId'
 import { Route as WorkspaceSettingsIndexRouteImport } from './routes/_workspace/settings/index'
@@ -55,6 +57,11 @@ const WorkspaceSplatRoute = WorkspaceSplatRouteImport.update({
 const WorkspaceDriveRoute = WorkspaceDriveRouteImport.update({
   id: '/drive',
   path: '/drive',
+  getParentRoute: () => WorkspaceRoute,
+} as any)
+const WorkspaceSearchRoute = WorkspaceSearchRouteImport.update({
+  id: '/search',
+  path: '/search',
   getParentRoute: () => WorkspaceRoute,
 } as any)
 const WorkspaceSharedRoute = WorkspaceSharedRouteImport.update({
@@ -100,6 +107,11 @@ const ApiLatexRoute = ApiLatexRouteImport.update({
 const ApiMarbleRoute = ApiMarbleRouteImport.update({
   id: '/api/marble',
   path: '/api/marble',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiSearchRoute = ApiSearchRouteImport.update({
+  id: '/api/search',
+  path: '/api/search',
   getParentRoute: () => rootRouteImport,
 } as any)
 const WorkspaceChatIndexRoute = WorkspaceChatIndexRouteImport.update({
@@ -185,6 +197,7 @@ export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/$': typeof WorkspaceSplatRoute
   '/drive': typeof WorkspaceDriveRoute
+  '/search': typeof WorkspaceSearchRoute
   '/shared': typeof WorkspaceSharedRoute
   '/starred': typeof WorkspaceStarredRoute
   '/templates': typeof WorkspaceTemplatesRoute
@@ -194,6 +207,7 @@ export interface FileRoutesByFullPath {
   '/api/drive-chat': typeof ApiDriveChatRouteWithChildren
   '/api/latex': typeof ApiLatexRoute
   '/api/marble': typeof ApiMarbleRoute
+  '/api/search': typeof ApiSearchRoute
   '/chat/$threadId': typeof WorkspaceChatThreadIdRoute
   '/settings/$': typeof WorkspaceSettingsSplatRoute
   '/settings/backup': typeof WorkspaceSettingsBackupRoute
@@ -214,6 +228,7 @@ export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/$': typeof WorkspaceSplatRoute
   '/drive': typeof WorkspaceDriveRoute
+  '/search': typeof WorkspaceSearchRoute
   '/shared': typeof WorkspaceSharedRoute
   '/starred': typeof WorkspaceStarredRoute
   '/templates': typeof WorkspaceTemplatesRoute
@@ -223,6 +238,7 @@ export interface FileRoutesByTo {
   '/api/drive-chat': typeof ApiDriveChatRouteWithChildren
   '/api/latex': typeof ApiLatexRoute
   '/api/marble': typeof ApiMarbleRoute
+  '/api/search': typeof ApiSearchRoute
   '/chat/$threadId': typeof WorkspaceChatThreadIdRoute
   '/settings/$': typeof WorkspaceSettingsSplatRoute
   '/settings/backup': typeof WorkspaceSettingsBackupRoute
@@ -245,6 +261,7 @@ export interface FileRoutesById {
   '/_workspace': typeof WorkspaceRouteWithChildren
   '/_workspace/$': typeof WorkspaceSplatRoute
   '/_workspace/drive': typeof WorkspaceDriveRoute
+  '/_workspace/search': typeof WorkspaceSearchRoute
   '/_workspace/shared': typeof WorkspaceSharedRoute
   '/_workspace/starred': typeof WorkspaceStarredRoute
   '/_workspace/templates': typeof WorkspaceTemplatesRoute
@@ -254,6 +271,7 @@ export interface FileRoutesById {
   '/api/drive-chat': typeof ApiDriveChatRouteWithChildren
   '/api/latex': typeof ApiLatexRoute
   '/api/marble': typeof ApiMarbleRoute
+  '/api/search': typeof ApiSearchRoute
   '/_workspace/chat/$threadId': typeof WorkspaceChatThreadIdRoute
   '/_workspace/settings/$': typeof WorkspaceSettingsSplatRoute
   '/_workspace/settings/backup': typeof WorkspaceSettingsBackupRoute
@@ -276,6 +294,7 @@ export interface FileRouteTypes {
     | '/'
     | '/$'
     | '/drive'
+    | '/search'
     | '/shared'
     | '/starred'
     | '/templates'
@@ -285,6 +304,7 @@ export interface FileRouteTypes {
     | '/api/drive-chat'
     | '/api/latex'
     | '/api/marble'
+    | '/api/search'
     | '/chat/$threadId'
     | '/settings/$'
     | '/settings/backup'
@@ -305,6 +325,7 @@ export interface FileRouteTypes {
     | '/'
     | '/$'
     | '/drive'
+    | '/search'
     | '/shared'
     | '/starred'
     | '/templates'
@@ -314,6 +335,7 @@ export interface FileRouteTypes {
     | '/api/drive-chat'
     | '/api/latex'
     | '/api/marble'
+    | '/api/search'
     | '/chat/$threadId'
     | '/settings/$'
     | '/settings/backup'
@@ -335,6 +357,7 @@ export interface FileRouteTypes {
     | '/_workspace'
     | '/_workspace/$'
     | '/_workspace/drive'
+    | '/_workspace/search'
     | '/_workspace/shared'
     | '/_workspace/starred'
     | '/_workspace/templates'
@@ -344,6 +367,7 @@ export interface FileRouteTypes {
     | '/api/drive-chat'
     | '/api/latex'
     | '/api/marble'
+    | '/api/search'
     | '/_workspace/chat/$threadId'
     | '/_workspace/settings/$'
     | '/_workspace/settings/backup'
@@ -369,6 +393,7 @@ export interface RootRouteChildren {
   ApiDriveChatRoute: typeof ApiDriveChatRouteWithChildren
   ApiLatexRoute: typeof ApiLatexRoute
   ApiMarbleRoute: typeof ApiMarbleRoute
+  ApiSearchRoute: typeof ApiSearchRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -399,6 +424,13 @@ declare module '@tanstack/react-router' {
       path: '/drive'
       fullPath: '/drive'
       preLoaderRoute: typeof WorkspaceDriveRouteImport
+      parentRoute: typeof WorkspaceRoute
+    }
+    '/_workspace/search': {
+      id: '/_workspace/search'
+      path: '/search'
+      fullPath: '/search'
+      preLoaderRoute: typeof WorkspaceSearchRouteImport
       parentRoute: typeof WorkspaceRoute
     }
     '/_workspace/shared': {
@@ -462,6 +494,13 @@ declare module '@tanstack/react-router' {
       path: '/api/marble'
       fullPath: '/api/marble'
       preLoaderRoute: typeof ApiMarbleRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/search': {
+      id: '/api/search'
+      path: '/api/search'
+      fullPath: '/api/search'
+      preLoaderRoute: typeof ApiSearchRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/_workspace/chat/': {
@@ -575,6 +614,7 @@ declare module '@tanstack/react-router' {
 interface WorkspaceRouteChildren {
   WorkspaceSplatRoute: typeof WorkspaceSplatRoute
   WorkspaceDriveRoute: typeof WorkspaceDriveRoute
+  WorkspaceSearchRoute: typeof WorkspaceSearchRoute
   WorkspaceSharedRoute: typeof WorkspaceSharedRoute
   WorkspaceStarredRoute: typeof WorkspaceStarredRoute
   WorkspaceTemplatesRoute: typeof WorkspaceTemplatesRoute
@@ -595,6 +635,7 @@ interface WorkspaceRouteChildren {
 const WorkspaceRouteChildren: WorkspaceRouteChildren = {
   WorkspaceSplatRoute: WorkspaceSplatRoute,
   WorkspaceDriveRoute: WorkspaceDriveRoute,
+  WorkspaceSearchRoute: WorkspaceSearchRoute,
   WorkspaceSharedRoute: WorkspaceSharedRoute,
   WorkspaceStarredRoute: WorkspaceStarredRoute,
   WorkspaceTemplatesRoute: WorkspaceTemplatesRoute,
@@ -670,6 +711,7 @@ const rootRouteChildren: RootRouteChildren = {
   ApiDriveChatRoute: ApiDriveChatRouteWithChildren,
   ApiLatexRoute: ApiLatexRoute,
   ApiMarbleRoute: ApiMarbleRoute,
+  ApiSearchRoute: ApiSearchRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

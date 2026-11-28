@@ -13,6 +13,8 @@ import type {
   SortOption,
 } from '#/components/design-system/FilterAndMetrics'
 import type { NewAppMode } from '#/components/design-system/NewAppCreator'
+import { normalizeSearchType } from '#/lib/search/types'
+import type { SearchFilterType, SearchItemType } from '#/lib/search/types'
 
 /* ============================================================================
    Constants & Validated Search Schemas (Zod v4)
@@ -122,6 +124,23 @@ export const chatSearchSchema = workspaceSearchSchema.extend({
 
 export type ChatSearch = z.infer<typeof chatSearchSchema>
 
+const optionalSearchType = z
+  .string()
+  .optional()
+  .transform((value) => normalizeSearchType(value))
+  .catch(undefined)
+
+/**
+ * Search params for `/search` (`?q=...&type=...&trash=1`).
+ */
+export const searchPageSchema = workspaceSearchSchema.extend({
+  q: optionalTrimmedString,
+  type: optionalSearchType,
+  trash: z.enum(['1']).optional().catch(undefined),
+})
+
+export type SearchPageSearch = z.infer<typeof searchPageSchema>
+
 /**
  * Combined loose search shape read by `XDriveWorkspace` from the active route.
  */
@@ -137,6 +156,8 @@ export interface CombinedWorkspaceSearch {
   role?: SharePermissionLevel
   history?: '0'
   scope?: string
+  type?: SearchItemType
+  trash?: '1'
 }
 
 /* ============================================================================
@@ -183,6 +204,8 @@ export function navHref(nav: PrimaryNavId): string {
       return '/trash'
     case 'templates':
       return '/templates'
+    case 'search':
+      return '/search'
     case 'subscriptions':
       return '/settings/models'
     case 'backup':
@@ -228,6 +251,19 @@ export function docIdHref(
 export function chatThreadHref(threadId?: string | null): string {
   if (!threadId) return '/chat'
   return `/chat/${encodeURIComponent(threadId)}`
+}
+
+export function searchHref(params?: {
+  q?: string
+  type?: SearchFilterType
+  includeTrash?: boolean
+}): string {
+  if (!params) return '/search'
+  return appendQueryParams('/search', {
+    q: params.q?.trim() || undefined,
+    type: params.type && params.type !== 'all' ? params.type : undefined,
+    trash: params.includeTrash ? '1' : undefined,
+  })
 }
 
 export function settingsProviderHref(providerId?: AIProviderId): string {
@@ -301,6 +337,7 @@ export type WorkspaceRouteMatch =
   | { kind: 'shared' }
   | { kind: 'trash' }
   | { kind: 'templates' }
+  | { kind: 'search' }
   | { kind: 'chat'; threadId?: string }
   | { kind: 'settings'; providerId: AIProviderId; isExplicitProvider: boolean }
   | { kind: 'settings-backup' }
