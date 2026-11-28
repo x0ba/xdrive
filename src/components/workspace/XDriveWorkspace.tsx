@@ -93,6 +93,13 @@ import {
 import { canMarkPersistedSourceSaved } from '#/components/apps/whiteboard/save-gate'
 import { isWhiteboardMarbleSource } from '#/lib/marble/whiteboard-document'
 import { DriveChatView } from '#/components/chat'
+import { DriveSearchView } from '#/components/search'
+import {
+  DriveSearchError,
+  buildClientSearchIndex,
+  fetchDriveSearch,
+} from '#/lib/search'
+import type { SearchDriveOptions, SearchFilterType } from '#/lib/search'
 import {
   buildDriveChatModels,
   buildDriveSnapshot,
@@ -1026,6 +1033,9 @@ export function XDriveWorkspace({
     string[] | undefined
   >(undefined)
   const [localSearchQuery, setLocalSearchQuery] = useState('')
+  const [localSearchTypeFilter, setLocalSearchTypeFilter] =
+    useState<SearchFilterType>('all')
+  const [localSearchIncludeTrash, setLocalSearchIncludeTrash] = useState(false)
   const [localShareId, setLocalShareId] = useState<string | null>(null)
   const [namer, setNamer] = useState<NamerState | null>(null)
   const [paletteOpen, setPaletteOpen] = useState(false)
@@ -1063,6 +1073,8 @@ export function XDriveWorkspace({
         return 'trash'
       case 'templates':
         return 'templates'
+      case 'search':
+        return 'search'
       case 'chat':
         return 'chat'
       case 'settings':
@@ -1098,6 +1110,12 @@ export function XDriveWorkspace({
   const searchQuery: string = isRouted
     ? (routeSearch.q ?? '')
     : localSearchQuery
+  const searchTypeFilter: SearchFilterType = isRouted
+    ? (routeSearch.type ?? 'all')
+    : localSearchTypeFilter
+  const searchIncludeTrash: boolean = isRouted
+    ? routeSearch.trash === '1'
+    : localSearchIncludeTrash
   const activeSettingsProviderId: AIProviderId =
     isRouted && routeMatch?.kind === 'settings'
       ? routeMatch.providerId
@@ -1908,6 +1926,55 @@ export function XDriveWorkspace({
     )
   }
 
+  function setSearchTypeFilter(next: SearchFilterType) {
+    setLocalSearchTypeFilter(next)
+    if (!isRouted) return
+    updateRouteSearch(
+      (prev) => ({
+        ...prev,
+        type: next === 'all' ? undefined : next,
+      }),
+      { replace: true },
+    )
+  }
+
+  function setSearchIncludeTrash(next: boolean) {
+    setLocalSearchIncludeTrash(next)
+    if (!isRouted) return
+    updateRouteSearch(
+      (prev) => ({
+        ...prev,
+        trash: next ? '1' : undefined,
+      }),
+      { replace: true },
+    )
+  }
+
+  async function runWorkspaceSearch(
+    options: SearchDriveOptions,
+    signal?: AbortSignal,
+  ) {
+    if (!syncWithServer) {
+      return buildClientSearchIndex({
+        docs: allDocsRef.current,
+        folders: foldersRef.current,
+        chatThreads: chatThreadsRef.current,
+      }).search(options)
+    }
+    try {
+      return await fetchDriveSearch(options, { signal })
+    } catch (error) {
+      if (error instanceof DriveSearchError && error.code === 'UNAVAILABLE') {
+        return buildClientSearchIndex({
+          docs: allDocsRef.current,
+          folders: foldersRef.current,
+          chatThreads: chatThreadsRef.current,
+        }).search(options)
+      }
+      throw error
+    }
+  }
+
   // Canonicalize folder & document slugs, track open tabs, and keep document.title fresh
   useEffect(() => {
     if (!isRouted || !routeMatch) return
@@ -1976,6 +2043,14 @@ export function XDriveWorkspace({
         if (typeof document !== 'undefined') {
           document.title = 'Drive Chat · xDrive'
         }
+      }
+      return
+    }
+    if (routeMatch.kind === 'search') {
+      if (typeof document !== 'undefined') {
+        document.title = routeSearch.q
+          ? `${routeSearch.q} · Search · xDrive`
+          : 'Search · xDrive'
       }
     }
   }, [
@@ -7407,6 +7482,39 @@ export function XDriveWorkspace({
                     </div>
                   )}
                 </div>
+              )}
+
+              {nav === 'search' && (
+                <DriveSearchView
+                  query={searchQuery}
+                  typeFilter={searchTypeFilter}
+                  includeTrash={searchIncludeTrash}
+                  onQueryChange={setSearchQuery}
+                  onTypeFilterChange={setSearchTypeFilter}
+                  onIncludeTrashChange={setSearchIncludeTrash}
+                  searchFn={runWorkspaceSearch}
+                  initialIndexedCount={docs.length + folders.length}
+                  onOpenResult={(item) => {
+                    if (item.type === 'folder') {
+                      navigateToFolder(item.id)
+                      return
+                    }
+                    if (item.type === 'chat') {
+                      handleSelectChatThread(item.id)
+                      if (!isRouted) visit('home', 'chat')
+                      return
+                    }
+                    if (item.trashed) {
+                      if (isRouted) {
+                        navigateWithGlobalSearch(item.href)
+                      } else {
+                        visit('home', 'trash')
+                      }
+                      return
+                    }
+                    openDocument(item.id)
+                  }}
+                />
               )}
 
               {nav === 'trash' && (
