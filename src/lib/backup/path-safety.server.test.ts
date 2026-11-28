@@ -4,6 +4,14 @@ import path from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
 import {
+  assertSafeBackupConfigDir,
+  defaultBackupRuntimeState,
+  readBackupConfig,
+  readBackupRuntimeState,
+  writeBackupConfig,
+  writeBackupRuntimeState,
+} from './config-storage.server'
+import {
   assertSafeBackupDestination,
   assertSafeGitBranch,
   assertSafeGitRemoteUrl,
@@ -137,5 +145,41 @@ describe('backup path safety guards', () => {
       ),
     ).toThrow(/Do not embed credentials/i)
     expect(() => assertSafeGitRemoteUrl('--config=evil')).toThrow(BackupError)
+  })
+
+  it('rejects backup config directories inside marble-drive (directly or via symlink)', async () => {
+    const insideConfig = path.join(driveDir, '.xdrive', 'backup')
+    await expect(
+      assertSafeBackupConfigDir(insideConfig, driveDir),
+    ).rejects.toThrow(/configuration directory cannot be inside/i)
+
+    const insideTarget = path.join(driveDir, 'nested-cfg')
+    await mkdir(insideTarget, { recursive: true })
+    const linkConfig = path.join(tempRoot, 'cfg-link')
+    await symlink(insideTarget, linkConfig)
+
+    await expect(
+      assertSafeBackupConfigDir(linkConfig, driveDir),
+    ).rejects.toThrow(/configuration directory cannot be inside/i)
+
+    await expect(readBackupConfig(insideConfig, driveDir)).rejects.toThrow(
+      BackupError,
+    )
+    await expect(readBackupRuntimeState(linkConfig, driveDir)).rejects.toThrow(
+      BackupError,
+    )
+    await expect(
+      writeBackupRuntimeState(
+        defaultBackupRuntimeState(),
+        insideConfig,
+        driveDir,
+      ),
+    ).rejects.toThrow(BackupError)
+
+    const safeConfigDir = path.join(tempRoot, 'safe-config')
+    const cfg = await readBackupConfig(safeConfigDir, driveDir)
+    await expect(
+      writeBackupConfig(cfg, insideConfig, driveDir),
+    ).rejects.toThrow(BackupError)
   })
 })

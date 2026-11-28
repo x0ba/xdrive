@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto'
-import { mkdir, readdir, readFile, stat, writeFile } from 'node:fs/promises'
+import { createWriteStream } from 'node:fs'
+import { mkdir, readdir, readFile, rm, stat } from 'node:fs/promises'
 import path from 'node:path'
 
 import JSZip from 'jszip'
@@ -8,12 +9,16 @@ import { resolveSafeArchiveEntryPath } from './path-safety.server'
 import { BackupError } from './types'
 import type {
   BackupArchiveFileEntry,
+  BackupArchiveLimits,
   BackupArchiveManifest,
   BackupTrigger,
 } from './types'
 
-const DEFAULT_MAX_FILES = 50_000
-const DEFAULT_MAX_TOTAL_BYTES = 2 * 1024 * 1024 * 1024 // 2 GiB
+export const DEFAULT_MAX_BACKUP_FILES = 50_000
+export const DEFAULT_MAX_BACKUP_BYTES = 2 * 1024 * 1024 * 1024 // 2 GiB
+export const DEFAULT_MAX_MANIFEST_BYTES = 16 * 1024 * 1024 // 16 MiB
+export const MAX_GIT_ARCHIVE_OUTPUT_BYTES = 256 * 1024 * 1024 // 256 MiB
+
 const SYMLINK_TYPE_MASK = 0o170000
 const SYMLINK_TYPE_VALUE = 0o120000
 
@@ -118,12 +123,40 @@ export async function buildDriveSnapshotEntries(options: {
   id: string
   createdAt: string
   trigger: BackupTrigger
+  driveKey?: string
   label?: string
+  limits?: BackupArchiveLimits
 }): Promise<{
   manifest: BackupArchiveManifest
   files: Array<ScannedDriveFile & { content: Buffer; sha256: string }>
 }> {
+  const maxFiles = options.limits?.maxFiles ?? DEFAULT_MAX_BACKUP_FILES
+  const maxTotalBytes =
+    options.limits?.maxTotalBytes ?? DEFAULT_MAX_BACKUP_BYTES
+  const maxManifestBytes =
+    options.limits?.maxManifestBytes ?? DEFAULT_MAX_MANIFEST_BYTES
+
   const scan = await scanDriveForBackup(options.driveDir)
+  if (scan.files.length > maxFiles) {
+    throw new BackupError(
+      400,
+      `Drive contains ${scan.files.length} files, exceeding the ${maxFiles} file restore limit`,
+      'BACKUP_LIMIT_EXCEEDED',
+    )
+  }
+
+  let scannedBytes = 0
+  for (const file of scan.files) {
+    scannedBytes += file.size
+    if (scannedBytes > maxTotalBytes) {
+      throw new BackupError(
+        400,
+        `Drive total size exceeds the ${maxTotalBytes} byte restore limit`,
+        'BACKUP_LIMIT_EXCEEDED',
+      )
+    }
+  }
+
   const materializedFiles: Array<
     ScannedDriveFile & { content: Buffer; sha256: string }
   > = []
@@ -132,8 +165,15 @@ export async function buildDriveSnapshotEntries(options: {
 
   for (const file of scan.files) {
     const content = await readFile(file.fullPath)
-    const digest = sha256Hex(content)
     totalUncompressedBytes += content.byteLength
+    if (totalUncompressedBytes > maxTotalBytes) {
+      throw new BackupError(
+        400,
+        `Drive total size exceeds the ${maxTotalBytes} byte restore limit`,
+        'BACKUP_LIMIT_EXCEEDED',
+      )
+    }
+    const digest = sha256Hex(content)
     materializedFiles.push({
       ...file,
       size: content.byteLength,
@@ -153,11 +193,24 @@ export async function buildDriveSnapshotEntries(options: {
     id: options.id,
     createdAt: options.createdAt,
     trigger: options.trigger,
+    ...(options.driveKey ? { driveKey: options.driveKey } : {}),
     ...(options.label ? { label: options.label } : {}),
     fileCount: manifestFiles.length,
     totalUncompressedBytes,
     directories: scan.directories,
     files: manifestFiles,
+  }
+
+  const manifestByteLength = Buffer.byteLength(
+    JSON.stringify(manifest, null, 2),
+    'utf8',
+  )
+  if (manifestByteLength > maxManifestBytes) {
+    throw new BackupError(
+      400,
+      `Backup manifest exceeds the ${maxManifestBytes} byte limit`,
+      'BACKUP_LIMIT_EXCEEDED',
+    )
   }
 
   return { manifest, files: materializedFiles }
@@ -168,7 +221,9 @@ export async function createDriveArchiveBuffer(options: {
   id: string
   createdAt: string
   trigger: BackupTrigger
+  driveKey?: string
   label?: string
+  limits?: BackupArchiveLimits
 }): Promise<{ buffer: Buffer; manifest: BackupArchiveManifest }> {
   const { manifest, files } = await buildDriveSnapshotEntries(options)
   const zip = new JSZip()
@@ -189,7 +244,191 @@ export async function createDriveArchiveBuffer(options: {
     compressionOptions: { level: 6 },
   })
 
+  if (
+    options.limits?.maxArchiveBytes !== undefined &&
+    buffer.byteLength > options.limits.maxArchiveBytes
+  ) {
+    throw new BackupError(
+      400,
+      `Backup archive size (${buffer.byteLength} bytes) exceeds limit (${options.limits.maxArchiveBytes} bytes)`,
+      'BACKUP_LIMIT_EXCEEDED',
+    )
+  }
+
   return { buffer, manifest }
+}
+
+function destroyStreamSafely(stream: NodeJS.ReadableStream): void {
+  stream.pause()
+  const destroyable = stream as NodeJS.ReadableStream & {
+    destroy?: () => void
+  }
+  destroyable.destroy?.()
+}
+
+async function readZipEntryBounded(
+  entry: JSZip.JSZipObject,
+  maxBytes: number,
+  errorMessage: string,
+): Promise<Buffer> {
+  return await new Promise<Buffer>((resolve, reject) => {
+    const stream = entry.nodeStream('nodebuffer')
+    const chunks: Buffer[] = []
+    let bytesRead = 0
+    let settled = false
+
+    stream.on('data', (chunk: Buffer | Uint8Array | string) => {
+      if (settled) return
+      const buf = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)
+      bytesRead += buf.byteLength
+      if (bytesRead > maxBytes) {
+        settled = true
+        destroyStreamSafely(stream)
+        reject(new BackupError(400, errorMessage, 'ARCHIVE_TOO_LARGE'))
+        return
+      }
+      chunks.push(buf)
+    })
+
+    stream.on('end', () => {
+      if (settled) return
+      settled = true
+      resolve(Buffer.concat(chunks, bytesRead))
+    })
+
+    stream.on('error', (error: unknown) => {
+      if (settled) return
+      settled = true
+      reject(error instanceof Error ? error : new Error(String(error)))
+    })
+  })
+}
+
+async function streamZipEntryToFileBounded(
+  entry: JSZip.JSZipObject,
+  fullPath: string,
+  remainingBudget: number,
+): Promise<{ size: number; sha256: string }> {
+  await mkdir(path.dirname(fullPath), { recursive: true })
+  return await new Promise<{ size: number; sha256: string }>(
+    (resolve, reject) => {
+      const readStream = entry.nodeStream('nodebuffer')
+      const writeStream = createWriteStream(fullPath)
+      const hash = createHash('sha256')
+      let bytesWritten = 0
+      let writeEnded = false
+      let settled = false
+
+      const fail = (error: unknown) => {
+        if (settled) return
+        settled = true
+        destroyStreamSafely(readStream)
+        writeStream.destroy()
+        void rm(fullPath, { force: true })
+          .catch(() => {})
+          .finally(() => {
+            reject(error instanceof Error ? error : new Error(String(error)))
+          })
+      }
+
+      readStream.on('data', (chunk: Buffer | Uint8Array | string) => {
+        if (settled) return
+        const buf = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)
+        bytesWritten += buf.byteLength
+        if (bytesWritten > remainingBudget) {
+          fail(
+            new BackupError(
+              400,
+              'Backup archive exceeds maximum uncompressed size limit',
+              'ARCHIVE_TOO_LARGE',
+            ),
+          )
+          return
+        }
+        hash.update(buf)
+        if (!writeStream.write(buf)) {
+          readStream.pause()
+        }
+      })
+
+      writeStream.on('drain', () => {
+        if (!settled) {
+          readStream.resume()
+        }
+      })
+
+      readStream.on('end', () => {
+        if (!settled) {
+          writeEnded = true
+          writeStream.end()
+        }
+      })
+
+      writeStream.on('close', () => {
+        if (settled) return
+        if (!writeEnded) {
+          fail(new Error('Archive write stream closed prematurely'))
+          return
+        }
+        settled = true
+        resolve({
+          size: bytesWritten,
+          sha256: hash.digest('hex'),
+        })
+      })
+
+      readStream.on('error', fail)
+      writeStream.on('error', fail)
+    },
+  )
+}
+
+async function verifyZipEntryBounded(
+  entry: JSZip.JSZipObject,
+  remainingBudget: number,
+): Promise<{ size: number; sha256: string }> {
+  return await new Promise<{ size: number; sha256: string }>(
+    (resolve, reject) => {
+      const stream = entry.nodeStream('nodebuffer')
+      const hash = createHash('sha256')
+      let bytesRead = 0
+      let settled = false
+
+      stream.on('data', (chunk: Buffer | Uint8Array | string) => {
+        if (settled) return
+        const buf = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)
+        bytesRead += buf.byteLength
+        if (bytesRead > remainingBudget) {
+          settled = true
+          destroyStreamSafely(stream)
+          reject(
+            new BackupError(
+              400,
+              'Backup archive exceeds maximum uncompressed size limit',
+              'ARCHIVE_TOO_LARGE',
+            ),
+          )
+          return
+        }
+        hash.update(buf)
+      })
+
+      stream.on('end', () => {
+        if (settled) return
+        settled = true
+        resolve({
+          size: bytesRead,
+          sha256: hash.digest('hex'),
+        })
+      })
+
+      stream.on('error', (error: unknown) => {
+        if (settled) return
+        settled = true
+        reject(error instanceof Error ? error : new Error(String(error)))
+      })
+    },
+  )
 }
 
 function parseManifest(rawText: string): BackupArchiveManifest {
@@ -294,6 +533,9 @@ function parseManifest(rawText: string): BackupArchiveManifest {
     id: rec.id,
     createdAt: rec.createdAt,
     trigger,
+    ...(typeof rec.driveKey === 'string' && rec.driveKey.trim()
+      ? { driveKey: rec.driveKey.trim() }
+      : {}),
     ...(typeof rec.label === 'string' ? { label: rec.label } : {}),
     fileCount: files.length,
     totalUncompressedBytes,
@@ -304,7 +546,10 @@ function parseManifest(rawText: string): BackupArchiveManifest {
 
 export async function readArchiveManifest(
   buffer: Buffer,
+  limits?: BackupArchiveLimits,
 ): Promise<BackupArchiveManifest> {
+  const maxManifestBytes =
+    limits?.maxManifestBytes ?? DEFAULT_MAX_MANIFEST_BYTES
   let zip: JSZip
   try {
     zip = await JSZip.loadAsync(buffer)
@@ -323,17 +568,29 @@ export async function readArchiveManifest(
       'INVALID_MANIFEST',
     )
   }
-  const text = await manifestFile.async('string')
-  return parseManifest(text)
+  const manifestBuffer = await readZipEntryBounded(
+    manifestFile,
+    maxManifestBytes,
+    `Backup archive manifest.json exceeds ${maxManifestBytes} byte size limit`,
+  )
+  return parseManifest(manifestBuffer.toString('utf8'))
 }
 
-export async function extractBackupArchiveToDir(
+export interface ExtractBackupOptions extends BackupArchiveLimits {
+  ignoreEntriesOutsideDrive?: boolean
+}
+
+async function processArchiveEntries(
   buffer: Buffer,
-  stagingDir: string,
-  limits?: { maxFiles?: number; maxTotalBytes?: number },
+  targetDir: string | null,
+  options?: ExtractBackupOptions,
 ): Promise<BackupArchiveManifest> {
-  const maxFiles = limits?.maxFiles ?? DEFAULT_MAX_FILES
-  const maxTotalBytes = limits?.maxTotalBytes ?? DEFAULT_MAX_TOTAL_BYTES
+  const maxFiles = options?.maxFiles ?? DEFAULT_MAX_BACKUP_FILES
+  const maxTotalBytes = options?.maxTotalBytes ?? DEFAULT_MAX_BACKUP_BYTES
+  const maxManifestBytes =
+    options?.maxManifestBytes ?? DEFAULT_MAX_MANIFEST_BYTES
+  const ignoreEntriesOutsideDrive = options?.ignoreEntriesOutsideDrive ?? false
+  const validationRoot = targetDir ?? '/xdrive-verify-root'
 
   let zip: JSZip
   try {
@@ -354,9 +611,24 @@ export async function extractBackupArchiveToDir(
       'INVALID_MANIFEST',
     )
   }
-  const manifest = parseManifest(await manifestEntry.async('string'))
+  const manifestBuffer = await readZipEntryBounded(
+    manifestEntry,
+    maxManifestBytes,
+    `Backup archive manifest.json exceeds ${maxManifestBytes} byte size limit`,
+  )
+  const manifest = parseManifest(manifestBuffer.toString('utf8'))
 
-  await mkdir(stagingDir, { recursive: true })
+  if (manifest.files.length > maxFiles) {
+    throw new BackupError(
+      400,
+      `Backup archive manifest exceeds file limit (${maxFiles})`,
+      'ARCHIVE_TOO_LARGE',
+    )
+  }
+
+  if (targetDir !== null) {
+    await mkdir(targetDir, { recursive: true })
+  }
 
   let extractedFiles = 0
   let totalBytes = 0
@@ -372,6 +644,9 @@ export async function extractBackupArchiveToDir(
       continue
     }
     if (!entry.name.startsWith('drive/')) {
+      if (ignoreEntriesOutsideDrive) {
+        continue
+      }
       throw new BackupError(
         400,
         `Unexpected archive entry outside drive/: ${entry.name}`,
@@ -391,10 +666,12 @@ export async function extractBackupArchiveToDir(
     }
 
     const innerPath = entry.name.slice('drive/'.length)
-    const safeTarget = resolveSafeArchiveEntryPath(stagingDir, innerPath)
+    const safeTarget = resolveSafeArchiveEntryPath(validationRoot, innerPath)
 
     if (entry.dir) {
-      await mkdir(safeTarget.fullPath, { recursive: true })
+      if (targetDir !== null) {
+        await mkdir(safeTarget.fullPath, { recursive: true })
+      }
       continue
     }
 
@@ -407,25 +684,26 @@ export async function extractBackupArchiveToDir(
       )
     }
 
-    const content = await entry.async('nodebuffer')
-    totalBytes += content.byteLength
-    if (totalBytes > maxTotalBytes) {
-      throw new BackupError(
-        400,
-        'Backup archive exceeds maximum uncompressed size limit',
-        'ARCHIVE_TOO_LARGE',
-      )
-    }
+    const remainingBudget = maxTotalBytes - totalBytes
+    const result =
+      targetDir !== null
+        ? await streamZipEntryToFileBounded(
+            entry,
+            safeTarget.fullPath,
+            remainingBudget,
+          )
+        : await verifyZipEntryBounded(entry, remainingBudget)
 
-    await mkdir(path.dirname(safeTarget.fullPath), { recursive: true })
-    await writeFile(safeTarget.fullPath, content)
-    extractedHashes.set(safeTarget.relativePosix, sha256Hex(content))
-    extractedSizes.set(safeTarget.relativePosix, content.byteLength)
+    totalBytes += result.size
+    extractedHashes.set(safeTarget.relativePosix, result.sha256)
+    extractedSizes.set(safeTarget.relativePosix, result.size)
   }
 
   for (const dirPath of manifest.directories) {
-    const safeDir = resolveSafeArchiveEntryPath(stagingDir, dirPath)
-    await mkdir(safeDir.fullPath, { recursive: true })
+    const safeDir = resolveSafeArchiveEntryPath(validationRoot, dirPath)
+    if (targetDir !== null) {
+      await mkdir(safeDir.fullPath, { recursive: true })
+    }
   }
 
   if (extractedHashes.size !== manifest.files.length) {
@@ -437,7 +715,10 @@ export async function extractBackupArchiveToDir(
   }
 
   for (const expected of manifest.files) {
-    const safeExpected = resolveSafeArchiveEntryPath(stagingDir, expected.path)
+    const safeExpected = resolveSafeArchiveEntryPath(
+      validationRoot,
+      expected.path,
+    )
     const actualHash = extractedHashes.get(safeExpected.relativePosix)
     const actualSize = extractedSizes.get(safeExpected.relativePosix)
     if (
@@ -455,4 +736,19 @@ export async function extractBackupArchiveToDir(
   }
 
   return manifest
+}
+
+export async function extractBackupArchiveToDir(
+  buffer: Buffer,
+  stagingDir: string,
+  options?: ExtractBackupOptions,
+): Promise<BackupArchiveManifest> {
+  return await processArchiveEntries(buffer, stagingDir, options)
+}
+
+export async function verifyBackupArchiveBuffer(
+  buffer: Buffer,
+  options?: ExtractBackupOptions,
+): Promise<BackupArchiveManifest> {
+  return await processArchiveEntries(buffer, null, options)
 }

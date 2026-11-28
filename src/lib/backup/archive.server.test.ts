@@ -15,6 +15,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import {
   createDriveArchiveBuffer,
   extractBackupArchiveToDir,
+  readArchiveManifest,
   scanDriveForBackup,
   sha256Hex,
 } from './archive.server'
@@ -232,5 +233,108 @@ describe('drive backup archive and extraction', () => {
         maxTotalBytes: 5,
       }),
     ).rejects.toThrow(/exceeds maximum/i)
+  })
+
+  it('rejects backups exceeding restore limits at creation time and bounds manifest/file streaming decompression', async () => {
+    await writeFile(path.join(driveDir, 'one.mrbl'), '123456', 'utf8')
+    await writeFile(path.join(driveDir, 'two.mrbl'), '789012', 'utf8')
+
+    await expect(
+      createDriveArchiveBuffer({
+        driveDir,
+        id: 'too-many-files',
+        createdAt: '2026-11-28T09:00:00.000Z',
+        trigger: 'manual',
+        limits: { maxFiles: 1 },
+      }),
+    ).rejects.toMatchObject({ code: 'BACKUP_LIMIT_EXCEEDED' })
+
+    await expect(
+      createDriveArchiveBuffer({
+        driveDir,
+        id: 'too-many-bytes',
+        createdAt: '2026-11-28T09:00:00.000Z',
+        trigger: 'manual',
+        limits: { maxTotalBytes: 8 },
+      }),
+    ).rejects.toMatchObject({ code: 'BACKUP_LIMIT_EXCEEDED' })
+
+    await expect(
+      createDriveArchiveBuffer({
+        driveDir,
+        id: 'manifest-too-big',
+        createdAt: '2026-11-28T09:00:00.000Z',
+        trigger: 'manual',
+        limits: { maxManifestBytes: 50 },
+      }),
+    ).rejects.toMatchObject({ code: 'BACKUP_LIMIT_EXCEEDED' })
+
+    // Highly compressible zip bomb for both manifest.json and file entries
+    const hugeManifestText = JSON.stringify({
+      format: 'xdrive-backup',
+      version: 1,
+      id: 'bomb',
+      createdAt: '2026-11-28T09:00:00.000Z',
+      trigger: 'manual',
+      padding: 'a'.repeat(128 * 1024),
+      directories: [],
+      files: [],
+    })
+    const manifestBombZip = new JSZip()
+    manifestBombZip.file('manifest.json', hugeManifestText)
+    const manifestBombBuffer = await manifestBombZip.generateAsync({
+      type: 'nodebuffer',
+      compression: 'DEFLATE',
+      compressionOptions: { level: 9 },
+    })
+
+    await expect(
+      readArchiveManifest(manifestBombBuffer, { maxManifestBytes: 1024 }),
+    ).rejects.toMatchObject({ code: 'ARCHIVE_TOO_LARGE' })
+
+    await expect(
+      extractBackupArchiveToDir(
+        manifestBombBuffer,
+        path.join(tempRoot, 'out-mbomb'),
+        { maxManifestBytes: 1024 },
+      ),
+    ).rejects.toMatchObject({ code: 'ARCHIVE_TOO_LARGE' })
+
+    const zeroPayload = Buffer.alloc(2 * 1024 * 1024, 0)
+    const fileBombZip = new JSZip()
+    fileBombZip.file(
+      'manifest.json',
+      JSON.stringify({
+        format: 'xdrive-backup',
+        version: 1,
+        id: 'file-bomb',
+        createdAt: '2026-11-28T09:00:00.000Z',
+        trigger: 'manual',
+        fileCount: 1,
+        totalUncompressedBytes: zeroPayload.byteLength,
+        directories: [],
+        files: [
+          {
+            path: 'bomb.bin',
+            size: zeroPayload.byteLength,
+            sha256: sha256Hex(zeroPayload),
+          },
+        ],
+      }),
+    )
+    fileBombZip.file('drive/bomb.bin', zeroPayload)
+    const fileBombBuffer = await fileBombZip.generateAsync({
+      type: 'nodebuffer',
+      compression: 'DEFLATE',
+      compressionOptions: { level: 9 },
+    })
+
+    const outBombDir = path.join(tempRoot, 'out-fbomb')
+    await expect(
+      extractBackupArchiveToDir(fileBombBuffer, outBombDir, {
+        maxTotalBytes: 64 * 1024,
+      }),
+    ).rejects.toMatchObject({ code: 'ARCHIVE_TOO_LARGE' })
+    await expect(stat(path.join(outBombDir, 'bomb.bin'))).rejects.toThrow()
   })
 })

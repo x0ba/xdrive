@@ -4,6 +4,7 @@ import os from 'node:os'
 import path from 'node:path'
 
 import { getDriveDir } from '#/lib/marble/drive-storage.server'
+import { isSameOrSubpath, resolveCanonicalPath } from './path-safety.server'
 import {
   BACKUP_PROVIDER_IDS,
   BackupError,
@@ -34,27 +35,73 @@ function isEnoent(error: unknown): boolean {
   )
 }
 
-export function getDefaultLocalBackupDir(): string {
+export function computeDriveKey(driveDir: string = getDriveDir()): string {
+  return createHash('sha256')
+    .update(path.resolve(driveDir))
+    .digest('hex')
+    .slice(0, 16)
+}
+
+export async function computeCanonicalDriveKey(
+  driveDir: string = getDriveDir(),
+): Promise<string> {
+  const canonical = await resolveCanonicalPath(driveDir)
+  return createHash('sha256').update(canonical).digest('hex').slice(0, 16)
+}
+
+export async function assertSafeBackupConfigDir(
+  configDir: string,
+  driveDir: string = getDriveDir(),
+): Promise<string> {
+  const resolvedConfig = path.resolve(configDir)
+  const canonicalConfig = await resolveCanonicalPath(resolvedConfig)
+  const canonicalDrive = await resolveCanonicalPath(path.resolve(driveDir))
+
+  if (canonicalConfig === path.parse(canonicalConfig).root) {
+    throw new BackupError(
+      400,
+      'Backup configuration directory cannot be the filesystem root',
+      'UNSAFE_CONFIG_DIR',
+    )
+  }
+
+  if (isSameOrSubpath(canonicalConfig, canonicalDrive)) {
+    throw new BackupError(
+      400,
+      'Backup configuration directory cannot be inside the Drive directory',
+      'UNSAFE_CONFIG_DIR',
+    )
+  }
+
+  return resolvedConfig
+}
+
+export function getDefaultLocalBackupDir(
+  driveDir: string = getDriveDir(),
+): string {
   const configured = process.env.XDRIVE_BACKUP_DIR?.trim()
   if (configured) {
     return path.resolve(configured)
   }
-  return path.join(os.homedir(), '.xdrive', 'backups')
+  return path.join(
+    os.homedir(),
+    '.xdrive',
+    'backups',
+    computeDriveKey(driveDir),
+  )
 }
 
-export function getBackupConfigDir(driveDir = getDriveDir()): string {
+export function getBackupConfigDir(driveDir: string = getDriveDir()): string {
   const configured = process.env.XDRIVE_BACKUP_CONFIG_DIR?.trim()
   if (configured) {
     return path.resolve(configured)
   }
-  const driveKey = createHash('sha256')
-    .update(path.resolve(driveDir))
-    .digest('hex')
-    .slice(0, 16)
-  return path.join(os.homedir(), '.xdrive', 'backup', driveKey)
+  return path.join(os.homedir(), '.xdrive', 'backup', computeDriveKey(driveDir))
 }
 
-export function defaultBackupConfig(): BackupConfig {
+export function defaultBackupConfig(
+  driveDir: string = getDriveDir(),
+): BackupConfig {
   return {
     version: 1,
     activeProvider: 'local-directory',
@@ -64,7 +111,7 @@ export function defaultBackupConfig(): BackupConfig {
     },
     targets: {
       'local-directory': {
-        directory: getDefaultLocalBackupDir(),
+        directory: getDefaultLocalBackupDir(driveDir),
         retentionCount: DEFAULT_RETENTION_COUNT,
       },
       'git-repository': {
@@ -313,38 +360,58 @@ async function writeAtomicJson(fullPath: string, data: unknown): Promise<void> {
 }
 
 export async function readBackupConfig(
-  configDir: string = getBackupConfigDir(),
+  configDir?: string,
+  driveDir: string = getDriveDir(),
 ): Promise<BackupConfig> {
+  const targetDir = await assertSafeBackupConfigDir(
+    configDir ?? getBackupConfigDir(driveDir),
+    driveDir,
+  )
+  const fallback = defaultBackupConfig(driveDir)
   try {
-    const raw = await readFile(path.join(configDir, CONFIG_FILE_NAME), 'utf8')
+    const raw = await readFile(path.join(targetDir, CONFIG_FILE_NAME), 'utf8')
     const parsed: unknown = JSON.parse(raw)
-    return sanitizeBackupConfig(parsed, defaultBackupConfig(), {
+    return sanitizeBackupConfig(parsed, fallback, {
       strict: false,
     })
   } catch (error) {
     if (isEnoent(error)) {
-      return defaultBackupConfig()
+      return fallback
     }
-    return defaultBackupConfig()
+    return fallback
   }
 }
 
 export async function writeBackupConfig(
   config: BackupConfig,
-  configDir: string = getBackupConfigDir(),
+  configDir?: string,
+  driveDir: string = getDriveDir(),
 ): Promise<BackupConfig> {
-  const sanitized = sanitizeBackupConfig(config, defaultBackupConfig(), {
-    strict: true,
-  })
-  await writeAtomicJson(path.join(configDir, CONFIG_FILE_NAME), sanitized)
+  const targetDir = await assertSafeBackupConfigDir(
+    configDir ?? getBackupConfigDir(driveDir),
+    driveDir,
+  )
+  const sanitized = sanitizeBackupConfig(
+    config,
+    defaultBackupConfig(driveDir),
+    {
+      strict: true,
+    },
+  )
+  await writeAtomicJson(path.join(targetDir, CONFIG_FILE_NAME), sanitized)
   return sanitized
 }
 
 export async function readBackupRuntimeState(
-  configDir: string = getBackupConfigDir(),
+  configDir?: string,
+  driveDir: string = getDriveDir(),
 ): Promise<BackupRuntimeState> {
+  const targetDir = await assertSafeBackupConfigDir(
+    configDir ?? getBackupConfigDir(driveDir),
+    driveDir,
+  )
   try {
-    const raw = await readFile(path.join(configDir, STATE_FILE_NAME), 'utf8')
+    const raw = await readFile(path.join(targetDir, STATE_FILE_NAME), 'utf8')
     const parsed: unknown = JSON.parse(raw)
     return sanitizeRuntimeState(parsed)
   } catch (error) {
@@ -357,9 +424,14 @@ export async function readBackupRuntimeState(
 
 export async function writeBackupRuntimeState(
   state: BackupRuntimeState,
-  configDir: string = getBackupConfigDir(),
+  configDir?: string,
+  driveDir: string = getDriveDir(),
 ): Promise<BackupRuntimeState> {
+  const targetDir = await assertSafeBackupConfigDir(
+    configDir ?? getBackupConfigDir(driveDir),
+    driveDir,
+  )
   const sanitized = sanitizeRuntimeState(state)
-  await writeAtomicJson(path.join(configDir, STATE_FILE_NAME), sanitized)
+  await writeAtomicJson(path.join(targetDir, STATE_FILE_NAME), sanitized)
   return sanitized
 }

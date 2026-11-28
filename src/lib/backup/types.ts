@@ -70,6 +70,7 @@ export interface BackupSnapshot {
   sizeBytes: number
   fileCount: number
   locationSummary: string
+  driveKey?: string
   label?: string
   commitSha?: string
 }
@@ -132,6 +133,13 @@ export interface BackupRestoreResponse {
   status: BackupStatusResponse
 }
 
+export interface BackupArchiveLimits {
+  maxFiles?: number
+  maxTotalBytes?: number
+  maxManifestBytes?: number
+  maxArchiveBytes?: number
+}
+
 export interface BackupArchiveFileEntry {
   path: string
   size: number
@@ -144,6 +152,7 @@ export interface BackupArchiveManifest {
   id: string
   createdAt: string
   trigger: BackupTrigger
+  driveKey?: string
   label?: string
   fileCount: number
   totalUncompressedBytes: number

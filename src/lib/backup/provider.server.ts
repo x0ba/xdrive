@@ -2,6 +2,7 @@ import { gitRepositoryBackupTarget } from './targets/git-repository.server'
 import { localDirectoryBackupTarget } from './targets/local-directory.server'
 import { BackupError } from './types'
 import type {
+  BackupArchiveLimits,
   BackupProviderDescriptor,
   BackupProviderId,
   BackupSnapshot,
@@ -22,6 +23,7 @@ export interface WriteSnapshotOptions {
   label?: string
   skipPrune?: boolean
   now?: Date
+  limits?: BackupArchiveLimits
 }
 
 export interface WriteSnapshotResult {

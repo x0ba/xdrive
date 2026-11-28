@@ -17,6 +17,7 @@ import {
   extractBackupArchiveToDir,
   readArchiveManifest,
 } from '../archive.server'
+import { computeCanonicalDriveKey } from '../config-storage.server'
 import {
   assertSafeBackupDestination,
   assertSafeSnapshotId,
@@ -236,7 +237,7 @@ export const localDirectoryBackupTarget: BackupTarget<LocalDirectoryTargetConfig
       const now = options.now ?? new Date()
       const ctx: BackupContext = { driveDir: options.driveDir, now: () => now }
       const resolvedDir = await validateLocalTarget(config, options.driveDir)
-      await mkdir(resolvedDir, { recursive: true })
+      const driveKey = await computeCanonicalDriveKey(options.driveDir)
 
       const id = formatSnapshotId(now)
       const createdAt = now.toISOString()
@@ -246,14 +247,18 @@ export const localDirectoryBackupTarget: BackupTarget<LocalDirectoryTargetConfig
         throw new BackupError(400, 'Invalid snapshot archive path')
       }
 
+      // Build and validate against restore limits BEFORE writing or pruning older backups.
       const { buffer, manifest } = await createDriveArchiveBuffer({
         driveDir: options.driveDir,
         id,
         createdAt,
         trigger: options.trigger,
+        driveKey,
         label: options.label,
+        limits: options.limits,
       })
 
+      await mkdir(resolvedDir, { recursive: true })
       await writeAtomicBuffer(zipPath, buffer)
 
       const snapshot: BackupSnapshot = {
@@ -264,6 +269,7 @@ export const localDirectoryBackupTarget: BackupTarget<LocalDirectoryTargetConfig
         sizeBytes: buffer.byteLength,
         fileCount: manifest.fileCount,
         locationSummary: zipPath,
+        driveKey,
         ...(options.label ? { label: options.label } : {}),
       }
 
@@ -271,10 +277,13 @@ export const localDirectoryBackupTarget: BackupTarget<LocalDirectoryTargetConfig
       index.snapshots[id] = snapshot
 
       const allSnapshots = await this.listSnapshots(config, ctx)
+      const ownedSnapshots = allSnapshots.filter(
+        (item) => item.driveKey === undefined || item.driveKey === driveKey,
+      )
       let prunedCount = 0
 
-      if (!options.skipPrune && allSnapshots.length > config.retentionCount) {
-        const toDelete = allSnapshots
+      if (!options.skipPrune && ownedSnapshots.length > config.retentionCount) {
+        const toDelete = ownedSnapshots
           .slice(config.retentionCount)
           .filter((item) => item.id !== id)
 
@@ -331,16 +340,19 @@ export const localDirectoryBackupTarget: BackupTarget<LocalDirectoryTargetConfig
 
         const cached = index.snapshots[safeId]
         const fullPath = path.resolve(resolvedDir, name)
-        if (cached && cached.locationSummary === fullPath) {
-          nextSnapshots[safeId] = cached
-          continue
-        }
-
         try {
-          const [buffer, info] = await Promise.all([
-            readFile(fullPath),
-            stat(fullPath),
-          ])
+          const info = await stat(fullPath)
+          if (
+            cached &&
+            cached.locationSummary === fullPath &&
+            cached.sizeBytes === info.size &&
+            cached.driveKey !== undefined
+          ) {
+            nextSnapshots[safeId] = cached
+            continue
+          }
+
+          const buffer = await readFile(fullPath)
           const manifest = await readArchiveManifest(buffer)
           nextSnapshots[safeId] = {
             id: safeId,
@@ -350,6 +362,7 @@ export const localDirectoryBackupTarget: BackupTarget<LocalDirectoryTargetConfig
             sizeBytes: info.size,
             fileCount: manifest.fileCount,
             locationSummary: fullPath,
+            ...(manifest.driveKey ? { driveKey: manifest.driveKey } : {}),
             ...(manifest.label ? { label: manifest.label } : {}),
           }
           dirty = true
@@ -416,6 +429,7 @@ export const localDirectoryBackupTarget: BackupTarget<LocalDirectoryTargetConfig
         sizeBytes: info.size,
         fileCount: manifest.fileCount,
         locationSummary: zipPath,
+        ...(manifest.driveKey ? { driveKey: manifest.driveKey } : {}),
         ...(manifest.label ? { label: manifest.label } : {}),
       }
     },
