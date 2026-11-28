@@ -197,4 +197,69 @@ describe('backup scheduler', () => {
     await advanceAndWait(30_000)
     expect(calls).toBe(1)
   })
+
+  it('reschedules after a failed manual backup and recomputes deadline on wake without immediate retry', async () => {
+    await manager.updateConfig({
+      activeProvider: 'local-directory',
+      schedule: { enabled: true, intervalMinutes: 10 },
+      targets: {
+        'local-directory': { directory: backupDir, retentionCount: 10 },
+      },
+    })
+
+    // Last run was 9m 50s ago -> scheduled deadline is 10s in the future (12:00:10)
+    await writeBackupRuntimeState(
+      {
+        version: 1,
+        lastRun: {
+          id: 'prev-run',
+          providerId: 'local-directory',
+          trigger: 'scheduled',
+          status: 'success',
+          startedAt: '2026-11-28T11:50:09.000Z',
+          finishedAt: '2026-11-28T11:50:10.000Z',
+          durationMs: 1000,
+          sizeBytes: 100,
+          fileCount: 1,
+          locationSummary: backupDir,
+        },
+        lastSuccess: null,
+        lastError: null,
+        scheduleAnchorAt: null,
+      },
+      configDir,
+    )
+
+    scheduler.start()
+    await scheduler.reschedule()
+
+    // 7s later (12:00:07), a manual backup fails right before the 12:00:10 deadline
+    await advanceAndWait(7_000)
+    await manager
+      .runBackup({
+        trigger: 'manual',
+        limits: { maxTotalBytes: 1 },
+      })
+      .catch(() => {})
+    await scheduler.waitForIdle()
+
+    const scheduledSpy = vi.spyOn(manager, 'runBackup')
+
+    scheduledSpy.mockClear()
+
+    // Advance past the old 12:00:10 deadline and another minute: must NOT fire early
+    await advanceAndWait(60_000)
+    expect(scheduledSpy).not.toHaveBeenCalled()
+
+    // Even if handleWake() is invoked on a stale timer, fresh state pushes deadline out
+    const firedEarly = await scheduler.handleWake()
+    expect(firedEarly).toBe(false)
+    expect(scheduledSpy).not.toHaveBeenCalled()
+
+    // After the full 10m interval elapses, scheduled backup fires once
+    for (let i = 0; i < 10; i += 1) {
+      await advanceAndWait(60_000)
+    }
+    expect(scheduledSpy).toHaveBeenCalledTimes(1)
+  })
 })

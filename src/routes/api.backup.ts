@@ -22,6 +22,118 @@ function errorResponse(error: unknown) {
   return json({ ok: false, error: message }, status)
 }
 
+function collectAllowedOrigins(request: Request): Set<string> {
+  const allowed = new Set<string>()
+  const reqUrl = new URL(request.url)
+  allowed.add(reqUrl.origin)
+
+  const host = request.headers.get('host')?.trim()
+  if (host) {
+    try {
+      allowed.add(new URL(`${reqUrl.protocol}//${host}`).origin)
+    } catch {
+      // Ignore malformed Host header.
+    }
+  }
+
+  const forwardedHost = request.headers
+    .get('x-forwarded-host')
+    ?.split(',')[0]
+    ?.trim()
+  if (forwardedHost) {
+    const forwardedProto = request.headers
+      .get('x-forwarded-proto')
+      ?.split(',')[0]
+      ?.trim()
+    const proto = forwardedProto
+      ? forwardedProto.endsWith(':')
+        ? forwardedProto
+        : `${forwardedProto}:`
+      : reqUrl.protocol
+    try {
+      allowed.add(new URL(`${proto}//${forwardedHost}`).origin)
+    } catch {
+      // Ignore malformed forwarded headers.
+    }
+  }
+
+  return allowed
+}
+
+export function assertSameOriginJsonPost(request: Request): void {
+  const rawContentType = request.headers.get('content-type') ?? ''
+  const mediaType = rawContentType.split(';', 1)[0].trim().toLowerCase()
+  if (mediaType !== 'application/json') {
+    throw new BackupError(
+      415,
+      'Content-Type must be application/json',
+      'UNSUPPORTED_MEDIA_TYPE',
+    )
+  }
+
+  const secFetchMode = request.headers
+    .get('sec-fetch-mode')
+    ?.trim()
+    .toLowerCase()
+  if (secFetchMode === 'no-cors') {
+    throw new BackupError(
+      403,
+      'Cross-origin requests are not allowed',
+      'CSRF_REJECTED',
+    )
+  }
+
+  const secFetchSite = request.headers
+    .get('sec-fetch-site')
+    ?.trim()
+    .toLowerCase()
+  if (
+    secFetchSite &&
+    secFetchSite !== 'same-origin' &&
+    secFetchSite !== 'none'
+  ) {
+    throw new BackupError(
+      403,
+      'Cross-origin requests are not allowed',
+      'CSRF_REJECTED',
+    )
+  }
+
+  const allowedOrigins = collectAllowedOrigins(request)
+  const originHeader = request.headers.get('origin')?.trim()
+  if (originHeader) {
+    if (originHeader === 'null' || !allowedOrigins.has(originHeader)) {
+      throw new BackupError(
+        403,
+        'Cross-origin requests are not allowed',
+        'CSRF_REJECTED',
+      )
+    }
+    return
+  }
+
+  const refererHeader = request.headers.get('referer')?.trim()
+  if (refererHeader) {
+    let refererOrigin: string
+    try {
+      refererOrigin = new URL(refererHeader).origin
+    } catch {
+      throw new BackupError(
+        403,
+        'Cross-origin requests are not allowed',
+        'CSRF_REJECTED',
+      )
+    }
+    if (!allowedOrigins.has(refererOrigin)) {
+      throw new BackupError(
+        403,
+        'Cross-origin requests are not allowed',
+        'CSRF_REJECTED',
+      )
+    }
+  }
+}
+
 export async function GET() {
   try {
     const scheduler = !process.env.VITEST
@@ -40,6 +152,12 @@ export async function GET() {
 }
 
 export async function POST({ request }: { request: Request }) {
+  try {
+    assertSameOriginJsonPost(request)
+  } catch (error) {
+    return errorResponse(error)
+  }
+
   let body: Record<string, unknown>
   try {
     const parsed: unknown = await request.json()
@@ -81,9 +199,13 @@ export async function POST({ request }: { request: Request }) {
         typeof body.label === 'string' && body.label.trim()
           ? body.label.trim()
           : undefined
-      const run = await manager.runBackup({ trigger: 'manual', label })
-      if (!process.env.VITEST) {
-        await syncBackupScheduler()
+      let run
+      try {
+        run = await manager.runBackup({ trigger: 'manual', label })
+      } finally {
+        if (!process.env.VITEST) {
+          await syncBackupScheduler().catch(() => {})
+        }
       }
       const status = await manager.getStatus(scheduler.getNextRunAt())
       return json({ ok: true, run, status })

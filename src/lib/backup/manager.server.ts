@@ -2,6 +2,7 @@ import { randomBytes } from 'node:crypto'
 import { mkdir, rename, rm, stat } from 'node:fs/promises'
 import path from 'node:path'
 
+import { withChatLock } from '#/lib/ai/chat-storage.server'
 import { getDriveDir, withDriveLock } from '#/lib/marble/drive-storage.server'
 import { scanDriveForBackup } from './archive.server'
 import {
@@ -16,6 +17,7 @@ import { createDefaultBackupTargetRegistry } from './provider.server'
 import type { BackupTargetRegistry } from './provider.server'
 import { BackupError } from './types'
 import type {
+  BackupArchiveLimits,
   BackupConfig,
   BackupRunRecord,
   BackupRuntimeState,
@@ -44,6 +46,10 @@ async function pathExists(targetPath: string): Promise<boolean> {
   } catch {
     return false
   }
+}
+
+async function withExclusiveDriveLocks<T>(fn: () => Promise<T>): Promise<T> {
+  return await withDriveLock(() => withChatLock(fn))
 }
 
 export class BackupManager {
@@ -87,8 +93,8 @@ export class BackupManager {
   }> {
     const { driveDir, configDir } = this.getPaths()
     const [config, state] = await Promise.all([
-      readBackupConfig(configDir),
-      readBackupRuntimeState(configDir),
+      readBackupConfig(configDir, driveDir),
+      readBackupRuntimeState(configDir, driveDir),
     ])
     return { driveDir, configDir, config, state }
   }
@@ -137,7 +143,7 @@ export class BackupManager {
       )
     }
 
-    await writeBackupConfig(nextConfig, configDir)
+    await writeBackupConfig(nextConfig, configDir, driveDir)
 
     if (!current.schedule.enabled && nextConfig.schedule.enabled) {
       await writeBackupRuntimeState(
@@ -146,6 +152,7 @@ export class BackupManager {
           scheduleAnchorAt: this.now().toISOString(),
         },
         configDir,
+        driveDir,
       )
     }
 
@@ -157,6 +164,7 @@ export class BackupManager {
     trigger?: BackupTrigger
     label?: string
     skipPrune?: boolean
+    limits?: BackupArchiveLimits
   }): Promise<BackupRunRecord> {
     if (this.activeOperation !== null) {
       throw new BackupError(
@@ -192,13 +200,14 @@ export class BackupManager {
           )
         }
 
-        const result = await withDriveLock(async () =>
+        const result = await withExclusiveDriveLocks(async () =>
           target.writeSnapshot(targetConfig, {
             driveDir,
             trigger,
             label: options?.label,
             skipPrune: options?.skipPrune,
             now: startedDate,
+            limits: options?.limits,
           }),
         )
 
@@ -231,6 +240,7 @@ export class BackupManager {
             lastError: null,
           },
           configDir,
+          driveDir,
         )
 
         return record
@@ -268,9 +278,14 @@ export class BackupManager {
             },
           },
           configDir,
+          driveDir,
         ).catch(() => {})
 
         throw error
+      } finally {
+        if (trigger !== 'scheduled') {
+          this.onConfigChanged?.()
+        }
       }
     } finally {
       this.activeOperation = null
@@ -287,113 +302,141 @@ export class BackupManager {
     }
 
     this.activeOperation = 'restore'
-    const { driveDir, configDir, config, state } =
-      await this.getConfigAndState()
-    const providerId = config.activeProvider
-    const target = this.registry.get(providerId)
-    const targetConfig = config.targets[providerId]
-
-    const parentDir = path.dirname(driveDir)
-    const baseName = path.basename(driveDir)
-    const token = randomBytes(6).toString('hex')
-    const stagingDir = path.join(
-      parentDir,
-      `.${baseName}.restore-staging-${token}`,
-    )
-    const previousDir = path.join(
-      parentDir,
-      `.${baseName}.restore-prev-${token}`,
-    )
+    let stagingDirToClean: string | null = null
 
     try {
-      const validation = await target.validate(targetConfig, {
-        driveDir,
-        now: this.now,
-      })
-      if (!validation.ok) {
-        throw new BackupError(
-          400,
-          validation.error ?? 'Backup target configuration is invalid',
-          'INVALID_TARGET',
-        )
-      }
+      const { driveDir, configDir, config, state } =
+        await this.getConfigAndState()
+      const providerId = config.activeProvider
+      const target = this.registry.get(providerId)
+      const targetConfig = config.targets[providerId]
 
-      return await withDriveLock(async () => {
-        await mkdir(parentDir, { recursive: true })
+      const parentDir = path.dirname(driveDir)
+      const baseName = path.basename(driveDir)
+      const token = randomBytes(6).toString('hex')
+      const stagingDir = path.join(
+        parentDir,
+        `.${baseName}.restore-staging-${token}`,
+      )
+      const previousDir = path.join(
+        parentDir,
+        `.${baseName}.restore-prev-${token}`,
+      )
+      stagingDirToClean = stagingDir
 
-        const restoredSnapshot = await target.restoreSnapshotToDir(
-          targetConfig,
-          snapshotId,
-          stagingDir,
-          { driveDir, now: this.now },
-        )
-
-        let safetySnapshot: BackupSnapshot | null = null
-        const driveExists = await pathExists(driveDir)
-        if (driveExists) {
-          const currentScan = await scanDriveForBackup(driveDir)
-          if (
-            currentScan.files.length > 0 ||
-            currentScan.directories.length > 0
-          ) {
-            const safetyResult = await target.writeSnapshot(targetConfig, {
-              driveDir,
-              trigger: 'pre-restore',
-              label: `Safety snapshot before restoring ${snapshotId}`,
-              skipPrune: true,
-              now: this.now(),
-            })
-            safetySnapshot = safetyResult.snapshot
-          }
-        }
-
-        if (driveExists) {
-          await rename(driveDir, previousDir)
-        }
-        try {
-          await rename(stagingDir, driveDir)
-        } catch (swapError) {
-          if (driveExists) {
-            await rename(previousDir, driveDir).catch(() => {})
-          }
-          throw swapError
-        }
-
-        if (driveExists) {
-          await rm(previousDir, { recursive: true, force: true }).catch(
-            () => {},
+      try {
+        const validation = await target.validate(targetConfig, {
+          driveDir,
+          now: this.now,
+        })
+        if (!validation.ok) {
+          throw new BackupError(
+            400,
+            validation.error ?? 'Backup target configuration is invalid',
+            'INVALID_TARGET',
           )
         }
 
+        return await withExclusiveDriveLocks(async () => {
+          await mkdir(parentDir, { recursive: true })
+
+          const restoredSnapshot = await target.restoreSnapshotToDir(
+            targetConfig,
+            snapshotId,
+            stagingDir,
+            { driveDir, now: this.now },
+          )
+
+          let safetySnapshot: BackupSnapshot | null = null
+          const driveExists = await pathExists(driveDir)
+          if (driveExists) {
+            const currentScan = await scanDriveForBackup(driveDir)
+            if (
+              currentScan.files.length > 0 ||
+              currentScan.directories.length > 0
+            ) {
+              const safetyResult = await target.writeSnapshot(targetConfig, {
+                driveDir,
+                trigger: 'pre-restore',
+                label: `Safety snapshot before restoring ${snapshotId}`,
+                skipPrune: true,
+                now: this.now(),
+              })
+              safetySnapshot = safetyResult.snapshot
+            }
+          }
+
+          if (driveExists) {
+            await rename(driveDir, previousDir)
+          }
+          try {
+            await rename(stagingDir, driveDir)
+          } catch (swapError) {
+            if (driveExists) {
+              try {
+                await rename(previousDir, driveDir)
+              } catch (rollbackError) {
+                const swapMsg =
+                  swapError instanceof Error
+                    ? swapError.message
+                    : String(swapError)
+                const rollbackMsg =
+                  rollbackError instanceof Error
+                    ? rollbackError.message
+                    : String(rollbackError)
+                throw new BackupError(
+                  500,
+                  `Restore swap failed (${swapMsg}) and rollback failed (${rollbackMsg}); original Drive remains preserved at ${previousDir}`,
+                  'RESTORE_ROLLBACK_FAILED',
+                )
+              }
+            }
+            throw swapError
+          }
+
+          if (driveExists) {
+            await rm(previousDir, { recursive: true, force: true }).catch(
+              () => {},
+            )
+          }
+
+          await writeBackupRuntimeState(
+            {
+              ...state,
+              lastError: null,
+            },
+            configDir,
+            driveDir,
+          ).catch(() => {})
+
+          return {
+            restoredSnapshot,
+            safetySnapshot,
+          }
+        })
+      } catch (error) {
+        const message =
+          error instanceof Error ? error.message : 'Restore failed'
         await writeBackupRuntimeState(
           {
             ...state,
-            lastError: null,
+            lastError: {
+              message: `Restore failed: ${message}`,
+              at: this.now().toISOString(),
+              providerId,
+            },
           },
           configDir,
+          driveDir,
         ).catch(() => {})
-
-        return {
-          restoredSnapshot,
-          safetySnapshot,
-        }
-      })
-    } catch (error) {
-      const message = error instanceof Error ? error.message : 'Restore failed'
-      await writeBackupRuntimeState(
-        {
-          ...state,
-          lastError: {
-            message: `Restore failed: ${message}`,
-            at: this.now().toISOString(),
-            providerId,
-          },
-        },
-        configDir,
-      ).catch(() => {})
-      throw error
+        throw error
+      }
     } finally {
-      await rm(stagingDir, { recursive: true, force: true }).catch(() => {})
+      if (stagingDirToClean) {
+        await rm(stagingDirToClean, { recursive: true, force: true }).catch(
+          () => {},
+        )
+      }
       this.activeOperation = null
     }
   }

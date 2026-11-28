@@ -70,7 +70,7 @@ export function getDocChatsDir(): string {
 
 let chatLock: Promise<void> = Promise.resolve()
 
-async function withChatLock<T>(fn: () => Promise<T>): Promise<T> {
+export async function withChatLock<T>(fn: () => Promise<T>): Promise<T> {
   let release!: () => void
   const gate = new Promise<void>((resolve) => {
     release = resolve

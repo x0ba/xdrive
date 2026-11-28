@@ -12,6 +12,8 @@ import path from 'node:path'
 import JSZip from 'jszip'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
+import { readChatThread, saveChatThread } from '#/lib/ai/chat-storage.server'
+import { getDefaultLocalBackupDir } from './config-storage.server'
 import { BackupManager } from './manager.server'
 import { BackupTargetRegistry } from './provider.server'
 import { localDirectoryBackupTarget } from './targets/local-directory.server'
@@ -212,5 +214,161 @@ describe('local-directory backup target and safe restore', () => {
 
     releaseFirst()
     await expect(firstRun).resolves.toMatchObject({ status: 'success' })
+  })
+
+  it('isolates default backup dirs per Drive, never prunes another Drive snapshots, and checks creation limits before pruning', async () => {
+    const prevBackupDir = process.env.XDRIVE_BACKUP_DIR
+    delete process.env.XDRIVE_BACKUP_DIR
+    try {
+      const driveA = path.join(tempRoot, 'drive-a')
+      const driveB = path.join(tempRoot, 'drive-b')
+      expect(getDefaultLocalBackupDir(driveA)).not.toBe(
+        getDefaultLocalBackupDir(driveB),
+      )
+    } finally {
+      if (prevBackupDir !== undefined) {
+        process.env.XDRIVE_BACKUP_DIR = prevBackupDir
+      }
+    }
+
+    const driveA = path.join(tempRoot, 'drive-a')
+    const driveB = path.join(tempRoot, 'drive-b')
+    const cfgA = path.join(tempRoot, 'cfg-a')
+    const cfgB = path.join(tempRoot, 'cfg-b')
+    await mkdir(driveA, { recursive: true })
+    await mkdir(driveB, { recursive: true })
+    await writeFile(path.join(driveA, 'a.mrbl'), '<h1>Drive A</h1>', 'utf8')
+    await writeFile(path.join(driveB, 'b.mrbl'), '<h1>Drive B</h1>', 'utf8')
+
+    const managerA = new BackupManager({
+      getDriveDir: () => driveA,
+      getConfigDir: () => cfgA,
+      now: () => {
+        clockMs += 1_000
+        return new Date(clockMs)
+      },
+    })
+    const managerB = new BackupManager({
+      getDriveDir: () => driveB,
+      getConfigDir: () => cfgB,
+      now: () => {
+        clockMs += 1_000
+        return new Date(clockMs)
+      },
+    })
+
+    await managerA.updateConfig({
+      activeProvider: 'local-directory',
+      targets: {
+        'local-directory': { directory: backupDir, retentionCount: 1 },
+      },
+    })
+    await managerB.updateConfig({
+      activeProvider: 'local-directory',
+      targets: {
+        'local-directory': { directory: backupDir, retentionCount: 1 },
+      },
+    })
+
+    const runA = await managerA.runBackup({ trigger: 'manual' })
+    const runB1 = await managerB.runBackup({ trigger: 'manual' })
+    const runB2 = await managerB.runBackup({ trigger: 'manual' })
+
+    const remainingIds = (await managerA.getStatus()).snapshots.map((s) => s.id)
+    expect(remainingIds).toContain(runA.snapshotId)
+    expect(remainingIds).toContain(runB2.snapshotId)
+    expect(remainingIds).not.toContain(runB1.snapshotId)
+
+    // Oversized backup fails before pruning existing Drive A snapshot
+    await writeFile(path.join(driveA, 'a2.mrbl'), '<h1>Extra</h1>', 'utf8')
+    await expect(
+      managerA.runBackup({ trigger: 'manual', limits: { maxFiles: 1 } }),
+    ).rejects.toMatchObject({ code: 'BACKUP_LIMIT_EXCEEDED' })
+
+    const afterFailedIds = (await managerA.getStatus()).snapshots.map(
+      (s) => s.id,
+    )
+    expect(afterFailedIds).toContain(runA.snapshotId)
+  })
+
+  it('coordinates restore swap with chat-storage lock so concurrent chat writes cannot break swap or strand Drive', async () => {
+    const prevDriveDir = process.env.XDRIVE_DRIVE_DIR
+    process.env.XDRIVE_DRIVE_DIR = driveDir
+
+    try {
+      await writeFile(path.join(driveDir, 'doc.mrbl'), '<h1>v1</h1>', 'utf8')
+      await manager.updateConfig({
+        activeProvider: 'local-directory',
+        targets: {
+          'local-directory': { directory: backupDir, retentionCount: 5 },
+        },
+      })
+      const run1 = await manager.runBackup({ trigger: 'manual' })
+
+      let releaseRestore!: () => void
+      const restoreGate = new Promise<void>((resolve) => {
+        releaseRestore = resolve
+      })
+      let restoreHoldingLocks!: () => void
+      const holdingLocksPromise = new Promise<void>((resolve) => {
+        restoreHoldingLocks = resolve
+      })
+
+      const gatedRegistry = new BackupTargetRegistry()
+      gatedRegistry.register({
+        ...localDirectoryBackupTarget,
+        async restoreSnapshotToDir(cfg, id, stagingDir, ctx) {
+          restoreHoldingLocks()
+          await restoreGate
+          return await localDirectoryBackupTarget.restoreSnapshotToDir(
+            cfg,
+            id,
+            stagingDir,
+            ctx,
+          )
+        },
+      })
+
+      const lockedManager = new BackupManager({
+        getDriveDir: () => driveDir,
+        getConfigDir: () => configDir,
+        registry: gatedRegistry,
+        now: () => {
+          clockMs += 1_000
+          return new Date(clockMs)
+        },
+      })
+
+      const restorePromise = lockedManager.restoreSnapshot(run1.snapshotId!)
+      await holdingLocksPromise
+
+      let chatSavedWhileRestoreActive = false
+      const concurrentChatPromise = saveChatThread('chat-race-1', {
+        id: 'chat-race-1',
+        title: 'Concurrent chat',
+        messages: [],
+      }).then((thread) => {
+        chatSavedWhileRestoreActive = true
+        return thread
+      })
+
+      await Promise.resolve()
+      await new Promise((resolve) => setTimeout(resolve, 25))
+      expect(chatSavedWhileRestoreActive).toBe(false)
+
+      releaseRestore()
+      await restorePromise
+      await concurrentChatPromise
+
+      expect(chatSavedWhileRestoreActive).toBe(true)
+      expect(await readFile(path.join(driveDir, 'doc.mrbl'), 'utf8')).toBe(
+        '<h1>v1</h1>',
+      )
+      const persistedChat = await readChatThread('chat-race-1')
+      expect(persistedChat?.title).toBe('Concurrent chat')
+    } finally {
+      if (prevDriveDir === undefined) delete process.env.XDRIVE_DRIVE_DIR
+      else process.env.XDRIVE_DRIVE_DIR = prevDriveDir
+    }
   })
 })

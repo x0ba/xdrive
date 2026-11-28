@@ -173,4 +173,108 @@ describe('/api/backup route handlers', () => {
       ),
     ).toBe(false)
   })
+
+  it('rejects cross-origin and non-JSON POST requests while allowing same-origin and matching forwarded hosts', async () => {
+    const nonJsonRes = await POST({
+      request: new Request('http://localhost/api/backup', {
+        method: 'POST',
+        headers: { 'content-type': 'text/plain' },
+        body: JSON.stringify({ action: 'backup_now' }),
+      }),
+    })
+    expect(nonJsonRes.status).toBe(415)
+
+    const crossOriginRes = await POST({
+      request: new Request('http://localhost/api/backup', {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          origin: 'https://evil.example',
+        },
+        body: JSON.stringify({ action: 'backup_now' }),
+      }),
+    })
+    expect(crossOriginRes.status).toBe(403)
+
+    const nullOriginRes = await POST({
+      request: new Request('http://localhost/api/backup', {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          origin: 'null',
+        },
+        body: JSON.stringify({ action: 'backup_now' }),
+      }),
+    })
+    expect(nullOriginRes.status).toBe(403)
+
+    const crossSiteFetchRes = await POST({
+      request: new Request('http://localhost/api/backup', {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          'sec-fetch-site': 'cross-site',
+        },
+        body: JSON.stringify({ action: 'backup_now' }),
+      }),
+    })
+    expect(crossSiteFetchRes.status).toBe(403)
+
+    const noCorsRes = await POST({
+      request: new Request('http://localhost/api/backup', {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          'sec-fetch-mode': 'no-cors',
+        },
+        body: JSON.stringify({ action: 'backup_now' }),
+      }),
+    })
+    expect(noCorsRes.status).toBe(403)
+
+    const crossRefererRes = await POST({
+      request: new Request('http://localhost/api/backup', {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          referer: 'https://evil.example/page',
+        },
+        body: JSON.stringify({ action: 'backup_now' }),
+      }),
+    })
+    expect(crossRefererRes.status).toBe(403)
+
+    const sameOriginRes = await POST({
+      request: new Request('http://localhost/api/backup', {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          origin: 'http://localhost',
+          'sec-fetch-site': 'same-origin',
+        },
+        body: JSON.stringify({
+          action: 'validate',
+          config: { activeProvider: 'local-directory' },
+        }),
+      }),
+    })
+    expect(sameOriginRes.status).toBe(200)
+
+    const forwardedOriginRes = await POST({
+      request: new Request('http://127.0.0.1:3000/api/backup', {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          'x-forwarded-proto': 'https',
+          'x-forwarded-host': 'drive.example.com',
+          origin: 'https://drive.example.com',
+        },
+        body: JSON.stringify({
+          action: 'validate',
+          config: { activeProvider: 'local-directory' },
+        }),
+      }),
+    })
+    expect(forwardedOriginRes.status).toBe(200)
+  })
 })

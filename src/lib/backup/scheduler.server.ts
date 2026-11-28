@@ -183,7 +183,7 @@ export class BackupScheduler {
       return false
     }
 
-    const { config } = await this.manager.getConfigAndState()
+    const { config, state } = await this.manager.getConfigAndState()
     if (!config.schedule.enabled) {
       this.nextRunAtMs = null
       return false
@@ -198,6 +198,23 @@ export class BackupScheduler {
     if (currentMs < this.nextRunAtMs) {
       this.armTimer(this.nextRunAtMs)
       return false
+    }
+
+    // Recompute against current persisted state so a recent manual run (success or failure)
+    // pushes the deadline out by a full interval instead of firing on a stale timer.
+    const intervalMs = Math.max(1, config.schedule.intervalMinutes) * 60_000
+    const anchorIso =
+      state.lastRun?.finishedAt ??
+      state.lastSuccess?.finishedAt ??
+      state.scheduleAnchorAt
+    const anchorMs = anchorIso ? Date.parse(anchorIso) : Number.NaN
+    if (Number.isFinite(anchorMs)) {
+      const freshDueAtMs = anchorMs + intervalMs
+      if (freshDueAtMs > currentMs) {
+        this.nextRunAtMs = freshDueAtMs
+        this.armTimer(freshDueAtMs)
+        return false
+      }
     }
 
     if (this.manager.isBusy()) {
