@@ -78,6 +78,7 @@ import {
   DEFAULT_ROLE_ASSIGNMENTS,
   SubscriptionModal,
 } from '#/components/collaborator/SubscriptionModal'
+import { BackupSettingsSection } from '#/components/backup'
 import { ShareModal } from '#/components/collaborator/ShareModal'
 import {
   nodeToElement,
@@ -1060,6 +1061,8 @@ export function XDriveWorkspace({
         return 'chat'
       case 'settings':
         return 'subscriptions'
+      case 'settings-backup':
+        return 'backup'
       case 'doc':
       case 'not-found':
         return localNav
@@ -1617,6 +1620,39 @@ export function XDriveWorkspace({
     void reloadWorkspaceFromServer()
   }, [syncWithServer])
 
+  async function handleDriveRestored() {
+    const restoredDocs = await reloadWorkspaceFromServer()
+    if (restoredDocs) {
+      const activeIds = new Set(
+        restoredDocs.filter((doc) => !doc.trashedAt).map((doc) => doc.id),
+      )
+      setOpenTabIds((prev) => prev.filter((id) => activeIds.has(id)))
+      setLocalCurrentFolderId((prev) =>
+        prev && !foldersRef.current.some((folder) => folder.id === prev)
+          ? null
+          : prev,
+      )
+    }
+    const [serverThreads, serverDocHistories] = await Promise.all([
+      fetchDriveChatThreads(),
+      fetchDocChatHistories(),
+    ])
+    if (serverThreads) {
+      persistedChatIdsRef.current = new Set(serverThreads.map((t) => t.id))
+      const draft = createBlankChatThread(
+        modelId,
+        chatReasoningEffort,
+        chatMode,
+      )
+      const nextThreads = [draft, ...serverThreads]
+      updateChatThreads(() => nextThreads)
+      setLocalActiveChatThreadId(serverThreads[0]?.id ?? draft.id)
+    }
+    if (serverDocHistories) {
+      updateDocThreads(() => serverDocHistories)
+    }
+  }
+
   const findDoc = (id: string | null | undefined) =>
     library.find((doc) => doc.id === id) ?? null
   const findDocByIdOrSlug = (key: string | null | undefined) => {
@@ -1969,6 +2005,12 @@ export function XDriveWorkspace({
         if (typeof document !== 'undefined') {
           document.title = 'Drive Chat · xDrive'
         }
+      }
+      return
+    }
+    if (routeMatch.kind === 'settings-backup') {
+      if (typeof document !== 'undefined') {
+        document.title = 'Backup · Settings · xDrive'
       }
     }
   }, [
@@ -7690,6 +7732,15 @@ export function XDriveWorkspace({
                     grokBuildBusy={grokBuildBusy}
                     grokBuildError={grokBuildError}
                     onRefreshGrokBuild={() => void refreshGrokBuild(true)}
+                  />
+                </div>
+              )}
+
+              {nav === 'backup' && (
+                <div className="mx-auto w-full max-w-4xl px-6 py-6">
+                  <BackupSettingsSection
+                    syncWithServer={syncWithServer}
+                    onDriveRestored={handleDriveRestored}
                   />
                 </div>
               )}

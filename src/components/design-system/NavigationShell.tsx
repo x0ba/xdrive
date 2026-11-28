@@ -1,5 +1,6 @@
 import React, { useState } from 'react'
 import {
+  Archive,
   ChevronDown,
   ChevronLeft,
   ChevronRight,
@@ -452,6 +453,7 @@ export type PrimaryNavId =
   | 'starred'
   | 'trash'
   | 'subscriptions'
+  | 'backup'
 
 export interface SidebarRailProps {
   activeNav: PrimaryNavId
@@ -865,6 +867,11 @@ export function SidebarRail({
       id: 'subscriptions',
       label: 'Models',
       icon: <KeyRound className="h-3.5 w-3.5" />,
+    },
+    {
+      id: 'backup',
+      label: 'Backup',
+      icon: <Archive className="h-3.5 w-3.5" />,
     },
   ]
 

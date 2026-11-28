@@ -185,6 +185,8 @@ export function navHref(nav: PrimaryNavId): string {
       return '/templates'
     case 'subscriptions':
       return '/settings/models'
+    case 'backup':
+      return '/settings/backup'
   }
 }
 
@@ -231,6 +233,10 @@ export function chatThreadHref(threadId?: string | null): string {
 export function settingsProviderHref(providerId?: AIProviderId): string {
   if (!providerId) return '/settings/models'
   return `/settings/models/${encodeURIComponent(providerId)}`
+}
+
+export function settingsBackupHref(): string {
+  return '/settings/backup'
 }
 
 export function modalToNewAppMode(
@@ -297,6 +303,7 @@ export type WorkspaceRouteMatch =
   | { kind: 'templates' }
   | { kind: 'chat'; threadId?: string }
   | { kind: 'settings'; providerId: AIProviderId; isExplicitProvider: boolean }
+  | { kind: 'settings-backup' }
   | { kind: 'not-found'; section?: 'settings' | 'workspace'; path: string }
 
 export interface WorkspaceRouteContextValue {

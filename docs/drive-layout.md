@@ -210,6 +210,7 @@ Soft-deleted documents live in `.trash/` until restored, manually deleted, or au
 ## What Does _Not_ Live in the Drive Folder
 
 - **Machine-local runtime caches & ephemeral temp dirs**: downloaded platform-specific ACP binaries (`~/.xdrive/acp/antigravity-acp`) and temporary LaTeX / ACP scratch workspaces (`xdrive-antigravity-acp-workspace`, `xdrive-opencode-acp-workspace`) in `os.tmpdir()`.
+- **Backup configuration, state & archives**: Drive backup settings/history (`~/.xdrive/backup/<driveHash>/` or `XDRIVE_BACKUP_CONFIG_DIR`) and backup archives/git repos (`~/.xdrive/backups` or `XDRIVE_BACKUP_DIR`) live outside `marble-drive` so archives never recursively include backups and restores preserve current backup configuration.
 - **Secrets & credentials**: OpenCode credentials stay in OpenCode CLI's own auth store (`opencode auth login`), and optional fallback/server env vars (`OPENCODE_API_KEY`, `CLERK_SECRET_KEY`, etc.) remain in `.env.local` / environment variables and are never written into the Drive folder.
 
 ## Backward Compatibility (Migrate on Read)

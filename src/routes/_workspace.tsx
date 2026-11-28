@@ -105,6 +105,9 @@ function resolveWorkspaceMatch(
       path: pathname,
     }
   }
+  if (routeId === '/_workspace/settings/backup') {
+    return { kind: 'settings-backup' }
+  }
   if (routeId === '/_workspace/settings/$') {
     return {
       kind: 'not-found',
