@@ -213,7 +213,10 @@ import type {
   SketchStroke,
 } from '#/lib/types'
 import { cn } from '#/lib/utils'
-import { WorkspaceCommandPalette } from '#/components/command-palette'
+import {
+  WorkspaceCommandPalette,
+  createBlankDocumentFile,
+} from '#/components/command-palette'
 import type { WorkspaceCommandSourceDeps } from '#/components/command-palette'
 
 // Legacy localStorage key read once on first load to migrate existing Drive Chat threads to disk.
@@ -1026,6 +1029,7 @@ export function XDriveWorkspace({
   const [localShareId, setLocalShareId] = useState<string | null>(null)
   const [namer, setNamer] = useState<NamerState | null>(null)
   const [paletteOpen, setPaletteOpen] = useState(false)
+  const pendingChatDraftNonceRef = useRef(0)
   const [pendingChatDraft, setPendingChatDraft] = useState<{
     nonce: number
     text: string
@@ -6106,17 +6110,26 @@ export function XDriveWorkspace({
       }
     },
     createBlankDocument: () => {
-      const docTemplate =
-        templates.find((item) => item.category === 'document') ??
-        PREDEFINED_MARBLE_TEMPLATES.find(
-          (item) => item.category === 'document',
-        ) ??
-        PREDEFINED_MARBLE_TEMPLATES[0]
-      createAppFromTemplate({
-        template: docTemplate,
+      const targetFolder = defaultCreateFolderId
+        ? foldersRef.current.find((item) => item.id === defaultCreateFolderId)
+        : null
+      const blank = createBlankDocumentFile({
         title: 'Untitled document',
-        folderId: defaultCreateFolderId,
+        folderId: targetFolder ? targetFolder.id : null,
+        folderName: targetFolder ? targetFolder.name : 'My Drive',
+        authorName: YOU.name,
       })
+      const adopted = adoptDocument(blank, allDocsRef.current)
+      const placed = placePendingFirstSave({
+        ...adopted,
+        folderId: targetFolder ? targetFolder.id : null,
+        folder: targetFolder ? targetFolder.name : 'My Drive',
+      })
+      allDocsRef.current = [placed, ...allDocsRef.current]
+      setDocs((prev) => [placed, ...prev])
+      openDocument(placed.id, { doc: placed })
+      persist(placed.id, placed.slug, placed.source, [], placed.source, placed)
+      setAgentStatus(`Created ${placed.fileName}`)
     },
     createFromTemplate: (template: MarbleDocumentFile) => {
       createAppFromTemplate({
@@ -6145,10 +6158,11 @@ export function XDriveWorkspace({
     startAiPrompt: (prompt?: string) => {
       handleNewChatThread()
       if (!isRouted) visit('home', 'chat')
-      setPendingChatDraft((prev) => ({
-        nonce: (prev?.nonce ?? 0) + 1,
+      pendingChatDraftNonceRef.current += 1
+      setPendingChatDraft({
+        nonce: pendingChatDraftNonceRef.current,
         text: (prompt ?? '').trim(),
-      }))
+      })
     },
     toggleTheme: () =>
       setTheme((current) => (current === 'dark' ? 'light' : 'dark')),
@@ -6980,6 +6994,11 @@ export function XDriveWorkspace({
                     : undefined
                 }
                 prefillDraft={pendingChatDraft}
+                onConsumePrefillDraft={(nonce) =>
+                  setPendingChatDraft((current) =>
+                    current?.nonce === nonce ? null : current,
+                  )
+                }
               />
             </div>
           ) : (

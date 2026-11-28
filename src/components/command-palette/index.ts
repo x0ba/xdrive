@@ -1,6 +1,9 @@
 export { CommandPalette } from './CommandPalette'
 export type { CommandPaletteProps } from './CommandPalette'
 
+export { createBlankDocumentFile } from './blank-document'
+export type { CreateBlankDocumentOptions } from './blank-document'
+
 export { WorkspaceCommandPalette } from './WorkspaceCommandPalette'
 export type { WorkspaceCommandPaletteProps } from './WorkspaceCommandPalette'
 
@@ -14,6 +17,7 @@ export {
 export type { CommandQueryState, CommandSourceError } from './registry'
 
 export {
+  FUZZY_SCORE_TIERS,
   fuzzyMatch,
   groupRankedItems,
   mergeRanges,

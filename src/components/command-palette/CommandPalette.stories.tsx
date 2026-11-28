@@ -384,11 +384,24 @@ export const NoResults: Story = {
   },
 }
 
-function AsyncSourceDemoHarness() {
+const onAsyncSelectionLog = fn()
+
+function AsyncSourceDemoHarness({
+  onSelectItem,
+}: {
+  onSelectItem?: (id: string) => void
+}) {
   const [open, setOpen] = useState(true)
   const [portalEl, setPortalEl] = useState<HTMLDivElement | null>(null)
 
-  const sources = useMemo(() => makeDemoSources(), [])
+  const sources = useMemo(
+    () =>
+      makeDemoSources({
+        onOpenChatThread: (threadId) => onSelectItem?.(`chat:${threadId}`),
+        onOpenDocument: (docId) => onSelectItem?.(`doc:${docId}`),
+      }),
+    [onSelectItem],
+  )
   const registry = useMemo(() => {
     const reg = new CommandSourceRegistry()
     const asyncSearchSource: CommandSource = {
@@ -408,9 +421,9 @@ function AsyncSourceDemoHarness() {
                 sectionLabel: 'Search Results',
                 icon: <FileSearch className="h-3.5 w-3.5" />,
                 alwaysMatch: true,
-                score: 920,
+                score: 6000,
                 badge: 'Content',
-                onSelect: () => {},
+                onSelect: () => onSelectItem?.('search:content-hit-1'),
               },
             ])
           }, 550)
@@ -426,7 +439,7 @@ function AsyncSourceDemoHarness() {
     }
     reg.register(asyncSearchSource)
     return reg
-  }, [])
+  }, [onSelectItem])
 
   return (
     <div
@@ -464,14 +477,16 @@ function AsyncSourceDemoHarness() {
 
 /**
  * Combines instant built-in sources with a pending async external `CommandSource`,
- * displaying the loading indicator until the async source resolves.
+ * displaying the loading indicator until the async source resolves and keeping the
+ * active selection locked by item ID when higher-ranked async results insert above it.
  *
- * @summary Progressive loading with async external CommandSource
+ * @summary Progressive loading with stable selection across async updates
  */
 export const LoadingAsyncSource: Story = {
   args: { ...Empty.args },
-  render: () => <AsyncSourceDemoHarness />,
+  render: () => <AsyncSourceDemoHarness onSelectItem={onAsyncSelectionLog} />,
   play: async () => {
+    onAsyncSelectionLog.mockClear()
     const body = within(document.body)
     const dialog = await body.findByRole('dialog', { name: 'Command palette' })
     const scope = within(dialog)
@@ -479,21 +494,34 @@ export const LoadingAsyncSource: Story = {
     await expect(
       await scope.findByTestId('command-palette-async-pending'),
     ).toBeVisible()
-    await expect(
-      scope.getByRole('option', { name: /Compare decoder thresholds/i }),
-    ).toBeVisible()
+    const syncOption = scope.getByRole('option', {
+      name: /Compare decoder thresholds/i,
+    })
+    await expect(syncOption).toBeVisible()
+    await expect(syncOption).toHaveAttribute('aria-selected', 'true')
 
     await waitFor(
       () => {
         expect(scope.queryByTestId('command-palette-async-pending')).toBeNull()
+        const asyncHit = scope.getByRole('option', {
+          name: /Decoder Freeze Notes \(body match\)/i,
+        })
+        expect(asyncHit).toBeVisible()
+        expect(asyncHit).toHaveAttribute('aria-selected', 'false')
         expect(
-          scope.getByRole('option', {
-            name: /Decoder Freeze Notes \(body match\)/i,
-          }),
-        ).toBeVisible()
+          scope.getByRole('option', { name: /Compare decoder thresholds/i }),
+        ).toHaveAttribute('aria-selected', 'true')
       },
       { timeout: 3000 },
     )
+
+    await userEvent.keyboard('{Enter}')
+    await waitFor(() => {
+      expect(onAsyncSelectionLog).toHaveBeenCalledTimes(1)
+      expect(onAsyncSelectionLog).toHaveBeenCalledWith(
+        'chat:chat-decoder-ablation',
+      )
+    })
   },
 }
 
@@ -621,7 +649,28 @@ export const WorkspaceIntegration: Story = {
       expect(workspace!.classList.contains('dark')).toBe(false)
     })
 
-    // 3. Start AI prompt prefilled from palette query
+    // 3. Create a truly blank document (not copied from a populated template)
+    await userEvent.keyboard('{Control>}k{/Control}')
+    const dialogBlank = await body.findByRole('dialog', {
+      name: 'Command palette',
+    })
+    await userEvent.type(
+      within(dialogBlank).getByRole('combobox'),
+      'New blank document',
+    )
+    const blankOption = await within(dialogBlank).findByRole('option', {
+      name: /^New blank document,/i,
+    })
+    await userEvent.click(blankOption)
+
+    const blankDocBody = await within(workspace!).findByRole('textbox', {
+      name: 'Document body',
+    })
+    await waitFor(() => {
+      expect(blankDocBody.textContent.trim()).toBe('')
+    })
+
+    // 4. Start AI prompt prefilled from palette query
     await userEvent.keyboard('{Control>}k{/Control}')
     const dialog3 = await body.findByRole('dialog', { name: 'Command palette' })
     await userEvent.type(
@@ -640,7 +689,11 @@ export const WorkspaceIntegration: Story = {
       expect(chatComposer.value).toBe('summarize recent ablations')
     })
 
-    // 4. Open NotesApp and confirm Cmd/Ctrl-K inserts a link instead of opening palette
+    // Clear the prefilled draft so returning to chat later must keep it cleared
+    await userEvent.clear(chatComposer)
+    await expect(chatComposer.value).toBe('')
+
+    // 5. Open NotesApp and confirm Cmd/Ctrl-K inserts a link instead of opening palette
     await userEvent.keyboard('{Control>}k{/Control}')
     const dialog4 = await body.findByRole('dialog', { name: 'Command palette' })
     await userEvent.type(within(dialog4).getByRole('combobox'), 'week 12 head')
@@ -660,5 +713,16 @@ export const WorkspaceIntegration: Story = {
       expect(notesEditor.value).toContain('[link text](https://)')
       expect(body.queryByRole('dialog', { name: 'Command palette' })).toBeNull()
     })
+
+    // 6. Remount Drive Chat and verify the consumed prefill prompt does not return
+    const sidebarNav = within(workspace!).getByRole('navigation', {
+      name: 'Primary Workspace Navigation',
+    })
+    const chatLink = within(sidebarNav).getByRole('link', { name: 'Chat' })
+    await userEvent.click(chatLink)
+    const remountedComposer = await within(
+      workspace!,
+    ).findByLabelText<HTMLTextAreaElement>('Message xDrive Assistant')
+    await expect(remountedComposer.value).toBe('')
   },
 }

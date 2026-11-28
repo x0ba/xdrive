@@ -70,6 +70,7 @@ export interface DriveChatViewProps {
   initialScopeFolderId?: string | null
   onScopeFolderChange?: (folderId: string | null) => void
   prefillDraft?: { nonce: number; text: string } | null
+  onConsumePrefillDraft?: (nonce: number) => void
   className?: string
 }
 
@@ -129,6 +130,7 @@ export function DriveChatView({
   initialScopeFolderId,
   onScopeFolderChange,
   prefillDraft,
+  onConsumePrefillDraft,
   className,
 }: DriveChatViewProps) {
   const [internalHistoryOpen, setInternalHistoryOpen] =
@@ -151,13 +153,18 @@ export function DriveChatView({
     onThreadSearchChange?.(value)
   }
   const [draft, setDraft] = useState('')
+  const [composerFocusNonce, setComposerFocusNonce] = useState<
+    number | undefined
+  >(undefined)
   const lastPrefillNonceRef = useRef<number | null>(null)
   useEffect(() => {
     if (!prefillDraft) return
     if (lastPrefillNonceRef.current === prefillDraft.nonce) return
     lastPrefillNonceRef.current = prefillDraft.nonce
     setDraft(prefillDraft.text)
-  }, [prefillDraft])
+    setComposerFocusNonce(prefillDraft.nonce)
+    onConsumePrefillDraft?.(prefillDraft.nonce)
+  }, [prefillDraft, onConsumePrefillDraft])
   const [contextRefs, setContextRefs] = useState<DriveContextRef[]>(() => {
     if (!initialScopeFolderId) return []
     const folder = folders.find((item) => item.id === initialScopeFolderId)
@@ -724,7 +731,7 @@ export function DriveChatView({
                 onAddContextRef={handleAddContextRef}
                 onRemoveContextRef={handleRemoveContextRef}
                 onOpenProviders={onOpenProviders}
-                focusNonce={prefillDraft?.nonce}
+                focusNonce={composerFocusNonce}
               />
             </div>
           ) : (
@@ -788,7 +795,7 @@ export function DriveChatView({
               onAddContextRef={handleAddContextRef}
               onRemoveContextRef={handleRemoveContextRef}
               onOpenProviders={onOpenProviders}
-              focusNonce={prefillDraft?.nonce}
+              focusNonce={composerFocusNonce}
             />
           </div>
         )}
