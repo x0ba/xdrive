@@ -1,12 +1,15 @@
-import { execFile } from 'node:child_process'
+import { execFile, spawn } from 'node:child_process'
 import { randomBytes } from 'node:crypto'
-import { mkdir, rm, stat, writeFile } from 'node:fs/promises'
+import { mkdir, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 
 import {
+  MAX_GIT_ARCHIVE_OUTPUT_BYTES,
   buildDriveSnapshotEntries,
   extractBackupArchiveToDir,
+  verifyBackupArchiveBuffer,
 } from '../archive.server'
+import { computeCanonicalDriveKey } from '../config-storage.server'
 import {
   assertSafeBackupDestination,
   assertSafeGitBranch,
@@ -27,7 +30,24 @@ import type {
 } from '../provider.server'
 
 const GIT_SHA_PATTERN = /^[0-9a-f]{7,40}$/i
-const MAX_GIT_OUTPUT_BYTES = 256 * 1024 * 1024
+const ATTRIBUTES_MARKER = '# xdrive-backup-preserve-bytes'
+const ATTRIBUTES_BLOCK = `${ATTRIBUTES_MARKER}
+drive/** -text -crlf -eol -ident -filter -export-subst -export-ignore
+manifest.json -text -crlf -eol -ident -filter -export-subst -export-ignore
+`
+
+const RAW_GIT_CONFIG_ARGS = [
+  '-c',
+  'core.autocrlf=false',
+  '-c',
+  'core.safecrlf=false',
+  '-c',
+  'core.eol=lf',
+  '-c',
+  'core.attributesFile=',
+  '-c',
+  'core.excludesFile=',
+]
 
 interface GitCommitMetaTrailer {
   id?: string
@@ -35,6 +55,7 @@ interface GitCommitMetaTrailer {
   fileCount?: number
   sizeBytes?: number
   createdAt?: string
+  driveKey?: string
   label?: string
 }
 
@@ -74,34 +95,80 @@ function runGitText(args: string[], cwd: string): Promise<string> {
   })
 }
 
-function runGitBuffer(args: string[], cwd: string): Promise<Buffer> {
+function runGitBuffer(
+  args: string[],
+  cwd: string,
+  maxBytes: number = MAX_GIT_ARCHIVE_OUTPUT_BYTES,
+): Promise<Buffer> {
   return new Promise((resolve, reject) => {
-    execFile(
-      'git',
-      args,
-      {
-        cwd,
-        encoding: 'buffer',
-        env: {
-          ...process.env,
-          GIT_TERMINAL_PROMPT: '0',
-        },
-        maxBuffer: MAX_GIT_OUTPUT_BYTES,
+    const child = spawn('git', args, {
+      cwd,
+      env: {
+        ...process.env,
+        GIT_TERMINAL_PROMPT: '0',
       },
-      (error, stdout, stderr) => {
-        if (error) {
-          const detail =
-            Buffer.isBuffer(stderr) && stderr.byteLength > 0
-              ? stderr.toString('utf8').trim()
-              : error.message
-          reject(
-            new BackupError(500, `Git archive failed: ${detail}`, 'GIT_ERROR'),
-          )
-          return
-        }
-        resolve(Buffer.isBuffer(stdout) ? stdout : Buffer.from(stdout))
-      },
-    )
+      stdio: ['ignore', 'pipe', 'pipe'],
+    })
+
+    const stdoutChunks: Buffer[] = []
+    let stdoutBytes = 0
+    const stderrChunks: Buffer[] = []
+    let stderrBytes = 0
+    let settled = false
+
+    const failWith = (error: BackupError) => {
+      if (settled) return
+      settled = true
+      reject(error)
+    }
+
+    child.stdout.on('data', (chunk: Buffer) => {
+      if (settled) return
+      stdoutBytes += chunk.byteLength
+      if (stdoutBytes > maxBytes) {
+        child.kill('SIGKILL')
+        failWith(
+          new BackupError(
+            400,
+            `Git backup archive exceeds the ${maxBytes} byte restore limit`,
+            'BACKUP_LIMIT_EXCEEDED',
+          ),
+        )
+        return
+      }
+      stdoutChunks.push(chunk)
+    })
+
+    child.stderr.on('data', (chunk: Buffer) => {
+      if (stderrBytes >= 64 * 1024) return
+      stderrChunks.push(chunk)
+      stderrBytes += chunk.byteLength
+    })
+
+    child.on('error', (error) => {
+      failWith(
+        new BackupError(
+          500,
+          `Git archive failed: ${error.message}`,
+          'GIT_ERROR',
+        ),
+      )
+    })
+
+    child.on('close', (code, signal) => {
+      if (settled) return
+      if (code !== 0) {
+        const detail =
+          Buffer.concat(stderrChunks).toString('utf8').trim() ||
+          `exit code ${code ?? 'null'}${signal ? ` (${signal})` : ''}`
+        failWith(
+          new BackupError(500, `Git archive failed: ${detail}`, 'GIT_ERROR'),
+        )
+        return
+      }
+      settled = true
+      resolve(Buffer.concat(stdoutChunks, stdoutBytes))
+    })
   })
 }
 
@@ -158,6 +225,31 @@ async function validateGitTarget(
   return { repoDir, branch, remoteUrl, warning }
 }
 
+async function ensureRawByteGitAttributes(repoDir: string): Promise<void> {
+  const relAttrPath = (
+    await runGitText(['rev-parse', '--git-path', 'info/attributes'], repoDir)
+  ).trim()
+  const attrPath = path.resolve(repoDir, relAttrPath)
+  await mkdir(path.dirname(attrPath), { recursive: true })
+
+  let existing = ''
+  try {
+    existing = await readFile(attrPath, 'utf8')
+  } catch (error) {
+    if (!isEnoent(error)) {
+      throw error
+    }
+  }
+
+  if (existing.includes(ATTRIBUTES_MARKER)) {
+    return
+  }
+
+  const prefix =
+    existing.length > 0 && !existing.endsWith('\n') ? `${existing}\n` : existing
+  await writeFile(attrPath, `${prefix}${ATTRIBUTES_BLOCK}`, 'utf8')
+}
+
 async function ensureGitRepoInitialized(
   repoDir: string,
   branch: string,
@@ -183,6 +275,8 @@ async function ensureGitRepoInitialized(
       await runGitText(['checkout', '-B', branch], repoDir)
     }
   }
+
+  await ensureRawByteGitAttributes(repoDir)
 
   const userName = await runGitText(['config', 'user.name'], repoDir).catch(
     () => '',
@@ -243,6 +337,9 @@ function parseMetaTrailer(body: string): GitCommitMetaTrailer | null {
           ...(typeof rec.createdAt === 'string'
             ? { createdAt: rec.createdAt }
             : {}),
+          ...(typeof rec.driveKey === 'string'
+            ? { driveKey: rec.driveKey }
+            : {}),
           ...(typeof rec.label === 'string' ? { label: rec.label } : {}),
         }
       }
@@ -257,6 +354,55 @@ function locationLabel(repoDir: string, branch: string, remoteUrl: string) {
   return remoteUrl
     ? `${repoDir} (${branch} -> origin)`
     : `${repoDir} (${branch})`
+}
+
+async function verifyCommittedTreeMatchesManifest(
+  repoDir: string,
+  commitSha: string,
+  expectedPaths: ReadonlyArray<string>,
+): Promise<void> {
+  if (expectedPaths.length === 0) {
+    return
+  }
+
+  const rawTree = await runGitText(
+    [
+      ...RAW_GIT_CONFIG_ARGS,
+      'ls-tree',
+      '-r',
+      '-z',
+      '--name-only',
+      commitSha,
+      '--',
+      'drive',
+    ],
+    repoDir,
+  )
+
+  const committed = rawTree
+    .split('\0')
+    .filter((entry) => entry.length > 0)
+    .map((entry) => (entry.startsWith('drive/') ? entry.slice(6) : entry))
+    .sort()
+
+  const expected = expectedPaths.slice().sort()
+  if (committed.length !== expected.length) {
+    throw new BackupError(
+      500,
+      `Git commit file count (${committed.length}) does not match Drive manifest (${expected.length})`,
+      'GIT_VERIFY_FAILED',
+    )
+  }
+
+  for (let i = 0; i < expected.length; i += 1) {
+    if (committed[i] !== expected[i]) {
+      throw new BackupError(
+        500,
+        `Git commit omitted or altered file path: ${expected[i]}`,
+        'GIT_VERIFY_FAILED',
+      )
+    }
+  }
 }
 
 export const gitRepositoryBackupTarget: BackupTarget<GitRepositoryTargetConfig> =
@@ -318,6 +464,21 @@ export const gitRepositoryBackupTarget: BackupTarget<GitRepositoryTargetConfig> 
       )
       await ensureGitRepoInitialized(repoDir, branch, remoteUrl)
 
+      const snapshotId = `${now.toISOString().replace(/[:.]/g, '-')}-${randomBytes(3).toString('hex')}`
+      const createdAt = now.toISOString()
+      const driveKey = await computeCanonicalDriveKey(options.driveDir)
+
+      // Check file count, uncompressed size, and manifest limits BEFORE mutating repo state.
+      const { manifest, files } = await buildDriveSnapshotEntries({
+        driveDir: options.driveDir,
+        id: snapshotId,
+        createdAt,
+        trigger: options.trigger,
+        driveKey,
+        label: options.label,
+        limits: options.limits,
+      })
+
       const branchExists = await runGitText(
         ['rev-parse', '--verify', `refs/heads/${branch}`],
         repoDir,
@@ -329,19 +490,28 @@ export const gitRepositoryBackupTarget: BackupTarget<GitRepositoryTargetConfig> 
         repoDir,
       )
 
-      const snapshotId = `${now.toISOString().replace(/[:.]/g, '-')}-${randomBytes(3).toString('hex')}`
-      const createdAt = now.toISOString()
-
-      const { manifest, files } = await buildDriveSnapshotEntries({
-        driveDir: options.driveDir,
-        id: snapshotId,
-        createdAt,
-        trigger: options.trigger,
-        label: options.label,
-      })
+      const prevHead = await runGitText(
+        ['rev-parse', '--verify', 'HEAD'],
+        repoDir,
+      )
+        .then((sha) => sha.trim())
+        .catch(() => null)
 
       const repoDriveDir = path.join(repoDir, 'drive')
       await rm(repoDriveDir, { recursive: true, force: true })
+      await runGitText(
+        [
+          ...RAW_GIT_CONFIG_ARGS,
+          'rm',
+          '--cached',
+          '-r',
+          '-f',
+          '--ignore-unmatch',
+          '--',
+          'drive',
+        ],
+        repoDir,
+      )
       await mkdir(repoDriveDir, { recursive: true })
 
       for (const dir of manifest.directories) {
@@ -362,7 +532,16 @@ export const gitRepositoryBackupTarget: BackupTarget<GitRepositoryTargetConfig> 
         'utf8',
       )
 
-      await runGitText(['add', '-A'], repoDir)
+      await runGitText(
+        [...RAW_GIT_CONFIG_ARGS, 'add', '-f', '--', 'manifest.json'],
+        repoDir,
+      )
+      if (files.length > 0) {
+        await runGitText(
+          [...RAW_GIT_CONFIG_ARGS, 'add', '-f', '--', 'drive'],
+          repoDir,
+        )
+      }
 
       const metaPayload: GitCommitMetaTrailer = {
         id: snapshotId,
@@ -370,11 +549,13 @@ export const gitRepositoryBackupTarget: BackupTarget<GitRepositoryTargetConfig> 
         fileCount: manifest.fileCount,
         sizeBytes: manifest.totalUncompressedBytes,
         createdAt,
+        driveKey,
         ...(options.label ? { label: options.label } : {}),
       }
 
       await runGitText(
         [
+          ...RAW_GIT_CONFIG_ARGS,
           '-c',
           'commit.gpgsign=false',
           'commit',
@@ -391,6 +572,71 @@ export const gitRepositoryBackupTarget: BackupTarget<GitRepositoryTargetConfig> 
         await runGitText(['rev-parse', 'HEAD'], repoDir)
       ).trim()
 
+      try {
+        await verifyCommittedTreeMatchesManifest(
+          repoDir,
+          commitSha,
+          manifest.files.map((item) => item.path),
+        )
+
+        const hasDriveTree = await runGitText(
+          ['cat-file', '-e', `${commitSha}:drive`],
+          repoDir,
+        )
+          .then(() => true)
+          .catch(() => false)
+
+        const archiveArgs = hasDriveTree
+          ? [
+              'archive',
+              '--format=zip',
+              commitSha,
+              '--',
+              'manifest.json',
+              'drive',
+            ]
+          : ['archive', '--format=zip', commitSha, '--', 'manifest.json']
+
+        const maxArchiveBytes =
+          options.limits?.maxArchiveBytes ?? MAX_GIT_ARCHIVE_OUTPUT_BYTES
+        const zipBuffer = await runGitBuffer(
+          [...RAW_GIT_CONFIG_ARGS, ...archiveArgs],
+          repoDir,
+          maxArchiveBytes,
+        )
+
+        await verifyBackupArchiveBuffer(zipBuffer, {
+          ...options.limits,
+          ignoreEntriesOutsideDrive: true,
+        })
+      } catch (verifyError) {
+        if (prevHead) {
+          await runGitText(['reset', '--hard', prevHead], repoDir).catch(
+            () => {},
+          )
+        } else {
+          await runGitText(
+            ['update-ref', '-d', `refs/heads/${branch}`],
+            repoDir,
+          ).catch(() => {})
+          await runGitText(
+            [
+              ...RAW_GIT_CONFIG_ARGS,
+              'rm',
+              '--cached',
+              '-r',
+              '-f',
+              '--ignore-unmatch',
+              '--',
+              'manifest.json',
+              'drive',
+            ],
+            repoDir,
+          ).catch(() => {})
+        }
+        throw verifyError
+      }
+
       if (config.autoPush && remoteUrl) {
         await runGitText(['push', '-u', 'origin', branch], repoDir)
       }
@@ -404,6 +650,7 @@ export const gitRepositoryBackupTarget: BackupTarget<GitRepositoryTargetConfig> 
           sizeBytes: manifest.totalUncompressedBytes,
           fileCount: manifest.fileCount,
           locationSummary: locationLabel(repoDir, branch, remoteUrl),
+          driveKey,
           ...(options.label ? { label: options.label } : {}),
           commitSha,
         },
@@ -480,6 +727,7 @@ export const gitRepositoryBackupTarget: BackupTarget<GitRepositoryTargetConfig> 
               ? meta.fileCount
               : 0,
           locationSummary: summary,
+          ...(meta?.driveKey ? { driveKey: meta.driveKey } : {}),
           label: meta?.label ?? subject.trim(),
           commitSha: cleanSha,
         })
@@ -518,12 +766,33 @@ export const gitRepositoryBackupTarget: BackupTarget<GitRepositoryTargetConfig> 
         )
       })
 
-      const zipBuffer = await runGitBuffer(
-        ['archive', '--format=zip', trimmedSha],
+      const hasDriveTree = await runGitText(
+        ['cat-file', '-e', `${trimmedSha}:drive`],
         repoDir,
       )
+        .then(() => true)
+        .catch(() => false)
 
-      const manifest = await extractBackupArchiveToDir(zipBuffer, stagingDir)
+      const archiveArgs = hasDriveTree
+        ? [
+            'archive',
+            '--format=zip',
+            trimmedSha,
+            '--',
+            'manifest.json',
+            'drive',
+          ]
+        : ['archive', '--format=zip', trimmedSha, '--', 'manifest.json']
+
+      const zipBuffer = await runGitBuffer(
+        [...RAW_GIT_CONFIG_ARGS, ...archiveArgs],
+        repoDir,
+        MAX_GIT_ARCHIVE_OUTPUT_BYTES,
+      )
+
+      const manifest = await extractBackupArchiveToDir(zipBuffer, stagingDir, {
+        ignoreEntriesOutsideDrive: true,
+      })
       return {
         id: trimmedSha,
         providerId: 'git-repository',
@@ -532,6 +801,7 @@ export const gitRepositoryBackupTarget: BackupTarget<GitRepositoryTargetConfig> 
         sizeBytes: manifest.totalUncompressedBytes,
         fileCount: manifest.fileCount,
         locationSummary: locationLabel(repoDir, branch, remoteUrl),
+        ...(manifest.driveKey ? { driveKey: manifest.driveKey } : {}),
         ...(manifest.label ? { label: manifest.label } : {}),
         commitSha: trimmedSha,
       }

@@ -117,4 +117,135 @@ describe('git-repository backup target', () => {
       }),
     ).rejects.toThrow(/Do not embed credentials/i)
   })
+
+  it('supports pre-existing repos with README.md, bypasses gitignore/excludes, preserves raw CRLF/clean-filter bytes, and enforces archive limits', async () => {
+    await mkdir(repoDir, { recursive: true })
+    await execFileAsync('git', ['init', '-b', 'backups'], { cwd: repoDir })
+    await execFileAsync('git', ['config', 'user.name', 'Test'], {
+      cwd: repoDir,
+    })
+    await execFileAsync('git', ['config', 'user.email', 'test@local'], {
+      cwd: repoDir,
+    })
+
+    // Existing tracked file outside drive/
+    await writeFile(
+      path.join(repoDir, 'README.md'),
+      '# Existing Repo\n',
+      'utf8',
+    )
+    await execFileAsync('git', ['add', 'README.md'], { cwd: repoDir })
+    await execFileAsync(
+      'git',
+      ['-c', 'commit.gpgsign=false', 'commit', '-m', 'Initial README'],
+      { cwd: repoDir },
+    )
+
+    // Hostile git settings: repo exclude, global excludesFile, autocrlf=true, clean filter
+    const globalExcludes = path.join(tempRoot, 'global-excludes')
+    await writeFile(globalExcludes, '*.json\n', 'utf8')
+    await writeFile(
+      path.join(repoDir, '.git', 'info', 'exclude'),
+      '*.mrbl\n',
+      'utf8',
+    )
+    await mkdir(path.join(repoDir, '.git', 'info'), { recursive: true })
+    await writeFile(
+      path.join(repoDir, '.git', 'info', 'attributes'),
+      '* filter=shout\n',
+      'utf8',
+    )
+    await execFileAsync(
+      'git',
+      ['config', '--local', 'core.excludesFile', globalExcludes],
+      { cwd: repoDir },
+    )
+    await execFileAsync('git', ['config', '--local', 'core.autocrlf', 'true'], {
+      cwd: repoDir,
+    })
+    await execFileAsync(
+      'git',
+      ['config', '--local', 'filter.shout.clean', 'tr a-z A-Z'],
+      { cwd: repoDir },
+    )
+
+    await manager.updateConfig({
+      activeProvider: 'git-repository',
+      targets: {
+        'git-repository': {
+          directory: repoDir,
+          branch: 'backups',
+          remoteUrl: bareRemoteDir,
+          autoPush: true,
+        },
+      },
+    })
+
+    await mkdir(path.join(driveDir, '.xdrive'), { recursive: true })
+    const crlfSource = 'line one\r\nlowercase content\r\n'
+    await writeFile(path.join(driveDir, 'crlf.mrbl'), crlfSource, 'utf8')
+    await writeFile(
+      path.join(driveDir, '.xdrive', 'metadata.json'),
+      '{"version":2}',
+      'utf8',
+    )
+
+    const run1 = await manager.runBackup({ trigger: 'manual' })
+    expect(run1.status).toBe('success')
+    expect(run1.fileCount).toBe(2)
+
+    // Pre-existing README.md remains intact in repoDir
+    expect(await readFile(path.join(repoDir, 'README.md'), 'utf8')).toBe(
+      '# Existing Repo\n',
+    )
+
+    // Delete live files and restore from git commit
+    await rm(path.join(driveDir, 'crlf.mrbl'))
+    await rm(path.join(driveDir, '.xdrive', 'metadata.json'))
+    await manager.restoreSnapshot(run1.snapshotId!)
+
+    expect(await readFile(path.join(driveDir, 'crlf.mrbl'), 'utf8')).toBe(
+      crlfSource,
+    )
+    expect(
+      await readFile(path.join(driveDir, '.xdrive', 'metadata.json'), 'utf8'),
+    ).toBe('{"version":2}')
+
+    // Exceeding maxArchiveBytes rolls back commit and does not push to bare remote
+    const { stdout: headBeforeFail } = await execFileAsync(
+      'git',
+      ['rev-parse', 'HEAD'],
+      { cwd: repoDir },
+    )
+    const { stdout: remoteBeforeFail } = await execFileAsync(
+      'git',
+      ['rev-parse', 'refs/heads/backups'],
+      { cwd: bareRemoteDir },
+    )
+
+    await writeFile(
+      path.join(driveDir, 'large.mrbl'),
+      'a'.repeat(10_000),
+      'utf8',
+    )
+    await expect(
+      manager.runBackup({
+        trigger: 'manual',
+        limits: { maxArchiveBytes: 200 },
+      }),
+    ).rejects.toMatchObject({ code: 'BACKUP_LIMIT_EXCEEDED' })
+
+    const { stdout: headAfterFail } = await execFileAsync(
+      'git',
+      ['rev-parse', 'HEAD'],
+      { cwd: repoDir },
+    )
+    const { stdout: remoteAfterFail } = await execFileAsync(
+      'git',
+      ['rev-parse', 'refs/heads/backups'],
+      { cwd: bareRemoteDir },
+    )
+    expect(headAfterFail.trim()).toBe(headBeforeFail.trim())
+    expect(remoteAfterFail.trim()).toBe(remoteBeforeFail.trim())
+  })
 })
