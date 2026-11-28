@@ -47,3 +47,53 @@ export type {
   EvergreenDesignContext,
   MarbleActionKind,
 } from './ai-collaborator'
+
+export {
+  DRIVE_HIDDEN_DIRS,
+  DRIVE_HIDDEN_DIR_NAMES,
+  HISTORY_DIR_NAME,
+  TRASH_DIR_NAME,
+  XDRIVE_META_DIR_NAME,
+  isHiddenDriveEntry,
+} from './drive-hidden'
+
+export {
+  AUTO_SNAPSHOT_INTERVAL_MS,
+  DEFAULT_VERSION_RETENTION_POLICY,
+  MAX_AUTO_VERSIONS_PER_DOC,
+  RETENTION_DAILY_MS,
+  RETENTION_HOURLY_MS,
+  RETENTION_KEEP_ALL_MS,
+} from './version-history-types'
+export type {
+  CreateVersionResult,
+  DocumentVersionDetail,
+  DocumentVersionKind,
+  DocumentVersionSummary,
+  DocumentVersionTrigger,
+  RestoreVersionResult,
+  VersionRetentionPolicy,
+} from './version-history-types'
+
+export {
+  computeLineDiff,
+  diffMarbleDocuments,
+  diffWhiteboardSnapshots,
+  extractStructuredMarbleText,
+} from './version-diff'
+export type {
+  DiffHunk,
+  DiffLine,
+  DiffLineKind,
+  MarbleDocumentDiffResult,
+  MarbleNodeChange,
+  TextDiffResult,
+  WhiteboardDiffSummary,
+} from './version-diff'
+
+export {
+  createVersion,
+  getVersion,
+  listVersions,
+  restoreVersion,
+} from './version-history-client'

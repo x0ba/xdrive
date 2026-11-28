@@ -32,14 +32,31 @@ import type {
 } from '../types'
 import { updateMarbleSourceTitle } from './engine-client'
 import {
+  DRIVE_HIDDEN_DIRS,
+  DRIVE_HIDDEN_DIR_NAMES,
+  HISTORY_DIR_NAME,
+  isHiddenDriveEntry,
+} from './drive-hidden'
+import {
   DOCUMENT_DESIGN_SYSTEM_SLUG,
   DOCUMENT_DONTS_SYSTEM_SLUG,
   PREDEFINED_MARBLE_TEMPLATES,
   TEMPLATES_FOLDER_ID,
   TEMPLATES_FOLDER_NAME,
 } from './templates'
+import {
+  deleteDocumentVersionHistoryUnlocked,
+  recordAutoVersionUnlocked,
+} from './version-history.server'
 
-export { TEMPLATES_FOLDER_ID, TEMPLATES_FOLDER_NAME }
+export {
+  DRIVE_HIDDEN_DIRS,
+  DRIVE_HIDDEN_DIR_NAMES,
+  HISTORY_DIR_NAME,
+  TEMPLATES_FOLDER_ID,
+  TEMPLATES_FOLDER_NAME,
+  isHiddenDriveEntry,
+}
 
 export const DEFAULT_TRASH_RETENTION_DAYS = 30
 const DAY_MS = 24 * 60 * 60 * 1000
@@ -408,7 +425,7 @@ export function trashMetaFilePath(slug: string): string {
   return full
 }
 
-function deterministicId(prefix: string, key: string): string {
+export function deterministicId(prefix: string, key: string): string {
   const digest = createHash('sha256').update(key).digest('hex').slice(0, 12)
   return `${prefix}-${digest}`
 }
@@ -934,12 +951,12 @@ async function readMetadataWithMigration(): Promise<{
   }
 }
 
-async function readMetadata(): Promise<DriveMetadataFile> {
+export async function readMetadata(): Promise<DriveMetadataFile> {
   const { meta } = await readMetadataWithMigration()
   return meta
 }
 
-async function writeMetadata(meta: DriveMetadataFile): Promise<void> {
+export async function writeMetadata(meta: DriveMetadataFile): Promise<void> {
   const metaDir = getMetaDir()
   const target = getMetaFilePath()
   await mkdir(metaDir, { recursive: true })
@@ -997,6 +1014,7 @@ async function writeDocumentHistory(
 
 async function deleteDocumentHistory(docId: string | undefined): Promise<void> {
   if (!docId) return
+  await deleteDocumentVersionHistoryUnlocked(docId)
   try {
     await rm(historyFilePath(docId), { force: true })
   } catch {
@@ -1021,7 +1039,10 @@ async function slugIsInTrash(slug: string): Promise<boolean> {
   return pathExists(trashFilePath(slug))
 }
 
-async function failIfSlugInTrash(slug: string, verb: string): Promise<void> {
+export async function failIfSlugInTrash(
+  slug: string,
+  verb: string,
+): Promise<void> {
   if (await slugIsInTrash(slug)) {
     fail(409, `Cannot ${verb} "${slug}" while it is in Trash`)
   }
@@ -1175,7 +1196,7 @@ async function scanDriveTree(baseDir?: string): Promise<ScannedEntry> {
     }
     entries.sort((a, b) => a.name.localeCompare(b.name))
     for (const entry of entries) {
-      if (entry.name.startsWith('.')) continue
+      if (isHiddenDriveEntry(entry.name)) continue
       const entryFull = path.resolve(currentFull, entry.name)
       if (!entryFull.startsWith(`${driveDir}${path.sep}`)) continue
       const entryRel = currentRel ? `${currentRel}/${entry.name}` : entry.name
@@ -1219,7 +1240,48 @@ export async function findDocumentBySlug(
   return files.find((item) => item.slug === validSlug) ?? null
 }
 
-async function writeAtomicText(
+export async function findDocumentByDocIdUnlocked(
+  docId: string,
+  preferredSlug?: string,
+  preferredFolderPath?: string | null,
+): Promise<DriveDocumentLocation | null> {
+  const metadata = await readMetadata()
+  for (const [relPath, entry] of Object.entries(metadata.documents)) {
+    if (entry?.id !== docId) continue
+    if (!relPath.endsWith('.mrbl')) continue
+    const slashIdx = relPath.lastIndexOf('/')
+    const folderPath = slashIdx >= 0 ? relPath.slice(0, slashIdx) : ''
+    const fileName = slashIdx >= 0 ? relPath.slice(slashIdx + 1) : relPath
+    const slug = fileName.slice(0, -'.mrbl'.length)
+    if (!SLUG_PATTERN.test(slug) || slug.includes('..')) continue
+    const candidate = resolveDocumentLocation(slug, folderPath)
+    if (await pathExists(candidate.fullPath)) return candidate
+  }
+
+  const { files } = await scanDriveTree()
+  for (const file of files) {
+    const storedId = metadata.documents[file.relPath]?.id
+    if (storedId === docId) return file
+    if (!storedId && deterministicId('doc', file.relPath) === docId) {
+      return file
+    }
+  }
+
+  if (preferredSlug) {
+    const fallback = await findDocumentBySlug(
+      preferredSlug,
+      preferredFolderPath,
+    )
+    if (fallback) {
+      const storedId = metadata.documents[fallback.relPath]?.id
+      if (!storedId || storedId === docId) return fallback
+    }
+  }
+
+  return null
+}
+
+export async function writeAtomicText(
   fullPath: string,
   content: string,
 ): Promise<void> {
@@ -1256,6 +1318,9 @@ export async function saveDocumentToDisk(input: {
   meta?: unknown
   checkpoints?: unknown
   intentHistory?: unknown
+  nowMs?: number
+  skipAutoSnapshot?: boolean
+  minAutoIntervalMs?: number
 }): Promise<DriveDocumentLocation> {
   return await withDriveLock(async () => {
     const validSlug = assertSlug(input.slug)
@@ -1267,24 +1332,44 @@ export async function saveDocumentToDisk(input: {
       const existing = await findDocumentBySlug(validSlug)
       target = existing ?? resolveDocumentLocation(validSlug, '')
     }
+
+    let priorSource: string | null = null
+    let priorMtimeMs: number | undefined
+    if (!input.skipAutoSnapshot) {
+      try {
+        const [prevText, prevStat] = await Promise.all([
+          readFile(target.fullPath, 'utf8'),
+          stat(target.fullPath),
+        ])
+        priorSource = prevText
+        priorMtimeMs = prevStat.mtimeMs
+      } catch (error) {
+        if (!isEnoent(error)) throw error
+      }
+    }
+
     await writeAtomicText(target.fullPath, input.source)
 
     const metadata = await readMetadata()
     const patch = sanitizeMetaPatch(input.meta)
     const previous = metadata.documents[target.relPath] ?? {}
-    const now = new Date().toISOString()
+    const nowMs = input.nowMs ?? Date.now()
+    const now = new Date(nowMs).toISOString()
     const docId =
       patch?.id ?? previous.id ?? deterministicId('doc', target.relPath)
+    const resolvedTitle =
+      patch?.title ?? previous.title ?? titleOf(input.source, validSlug)
+    const resolvedCategory =
+      patch?.category ??
+      previous.category ??
+      inferCategory(input.source, validSlug)
     metadata.documents[target.relPath] = {
       ...previous,
       ...patch,
       id: docId,
       slug: validSlug,
-      title: patch?.title ?? previous.title ?? titleOf(input.source, validSlug),
-      category:
-        patch?.category ??
-        previous.category ??
-        inferCategory(input.source, validSlug),
+      title: resolvedTitle,
+      category: resolvedCategory,
       createdAt: patch?.createdAt ?? previous.createdAt ?? now,
       updatedAt: patch?.updatedAt ?? now,
     }
@@ -1296,6 +1381,21 @@ export async function saveDocumentToDisk(input: {
       await writeDocumentHistory(docId, validSlug, {
         checkpoints,
         intentHistory,
+      })
+    }
+
+    if (!input.skipAutoSnapshot) {
+      await recordAutoVersionUnlocked({
+        docId,
+        slug: validSlug,
+        title: resolvedTitle,
+        category: resolvedCategory,
+        source: input.source,
+        priorSource,
+        priorMtimeMs,
+        author: metadata.documents[target.relPath]?.lastEditedBy?.name ?? 'You',
+        nowMs,
+        minAutoIntervalMs: input.minAutoIntervalMs,
       })
     }
 
@@ -1397,7 +1497,10 @@ export async function moveDocumentOnDisk(input: {
     metadata.documents[toLoc.relPath] = {
       ...prevMeta,
       ...patch,
-      id: patch?.id ?? prevMeta.id ?? deterministicId('doc', toLoc.relPath),
+      id:
+        patch?.id ??
+        prevMeta.id ??
+        deterministicId('doc', fromExists ? fromLoc.relPath : toLoc.relPath),
       slug: validSlug,
       updatedAt: patch?.updatedAt ?? new Date().toISOString(),
     }
@@ -1663,12 +1766,14 @@ export async function deleteFolderOnDisk(input: {
         }
         await rename(file.fullPath, candidate.fullPath)
         const docMeta = metadata.documents[file.relPath]
+        const preservedId = docMeta?.id ?? deterministicId('doc', file.relPath)
         if (docMeta) {
           delete metadata.documents[file.relPath]
-          metadata.documents[candidate.relPath] = {
-            ...docMeta,
-            slug: nextSlug,
-          }
+        }
+        metadata.documents[candidate.relPath] = {
+          ...docMeta,
+          id: preservedId,
+          slug: nextSlug,
         }
         movedFiles.push({
           from: file.relPath,
@@ -1782,7 +1887,7 @@ async function purgeExpiredTrashUnlocked(options?: {
   const purgedDocIds: string[] = []
 
   for (const fileName of names) {
-    if (!fileName.endsWith('.mrbl')) continue
+    if (isHiddenDriveEntry(fileName) || !fileName.endsWith('.mrbl')) continue
     const slug = fileName.slice(0, -'.mrbl'.length)
     if (!SLUG_PATTERN.test(slug) || slug.includes('..')) continue
     const full = trashFilePath(slug)
@@ -2025,8 +2130,11 @@ export async function deleteDocumentPermanentlyOnDisk(input: {
     const docIdsToDelete = new Set<string>()
     if (trashMeta?.docId) docIdsToDelete.add(trashMeta.docId)
     if (trashMeta?.meta?.id) docIdsToDelete.add(trashMeta.meta.id)
-    if (located && metadata.documents[located.relPath]?.id) {
-      docIdsToDelete.add(metadata.documents[located.relPath]!.id!)
+    if (located) {
+      docIdsToDelete.add(
+        metadata.documents[located.relPath]?.id ??
+          deterministicId('doc', located.relPath),
+      )
     }
 
     const targets = [
@@ -2094,7 +2202,7 @@ export async function emptyTrashOnDisk(ids: readonly string[]): Promise<{
     const docIdsToDelete = new Set<string>()
     const purgedSlugs: string[] = []
     for (const name of names) {
-      if (!name.endsWith('.mrbl')) continue
+      if (isHiddenDriveEntry(name) || !name.endsWith('.mrbl')) continue
       const slug = name.slice(0, -'.mrbl'.length)
       if (!SLUG_PATTERN.test(slug) || slug.includes('..')) continue
       const meta = await readTrashMeta(slug)
@@ -2147,7 +2255,7 @@ async function collectUsedSlugs(
   try {
     const trashNames = await readdir(getTrashDir())
     for (const fileName of trashNames) {
-      if (!fileName.endsWith('.mrbl')) continue
+      if (isHiddenDriveEntry(fileName) || !fileName.endsWith('.mrbl')) continue
       const slug = fileName.slice(0, -'.mrbl'.length)
       if (SLUG_PATTERN.test(slug) && !slug.includes('..')) {
         used.add(slug)
@@ -2236,7 +2344,7 @@ async function collectExistingDocIds(
   try {
     const trashNames = await readdir(getTrashDir())
     for (const fileName of trashNames) {
-      if (!fileName.endsWith('.mrbl')) continue
+      if (isHiddenDriveEntry(fileName) || !fileName.endsWith('.mrbl')) continue
       const slug = fileName.slice(0, -'.mrbl'.length)
       if (!SLUG_PATTERN.test(slug) || slug.includes('..')) continue
       const trashMeta = await readTrashMeta(slug)
@@ -2720,7 +2828,7 @@ export async function loadDriveWorkspace(
   try {
     const trashNames = await readdir(getTrashDir())
     for (const fileName of trashNames) {
-      if (!fileName.endsWith('.mrbl')) continue
+      if (isHiddenDriveEntry(fileName) || !fileName.endsWith('.mrbl')) continue
       const slug = fileName.slice(0, -'.mrbl'.length)
       if (!SLUG_PATTERN.test(slug) || slug.includes('..')) continue
       const full = trashFilePath(slug)
