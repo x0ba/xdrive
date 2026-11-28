@@ -9,6 +9,7 @@ import {
   FolderOpen,
   FolderPlus,
   HardDrive,
+  History,
   MessageSquare,
   Pencil,
   PinOff,
@@ -1184,6 +1185,8 @@ export interface DocumentBreadcrumbHeaderProps {
   onDuplicate?: () => void
   shareHref?: string
   onOpenShare?: () => void
+  historyOpen?: boolean
+  onOpenHistory?: () => void
   onMoveToTrash?: () => void
   sharePermission: SharePermissionLevel
   isPublicLinkEnabled?: boolean
@@ -1204,6 +1207,8 @@ export function DocumentBreadcrumbHeader({
   onDuplicate,
   shareHref,
   onOpenShare,
+  historyOpen = false,
+  onOpenHistory,
   onMoveToTrash,
   isPublicLinkEnabled = true,
 }: DocumentBreadcrumbHeaderProps) {
@@ -1380,6 +1385,23 @@ export function DocumentBreadcrumbHeader({
               <Lock className="h-3 w-3 text-[var(--xd-ink-muted)]" />
             )}
             <span>Share</span>
+          </button>
+        )}
+
+        {onOpenHistory && (
+          <button
+            type="button"
+            onClick={onOpenHistory}
+            aria-pressed={historyOpen}
+            title="Version history"
+            className={`inline-flex h-7 items-center gap-1 rounded border px-2 text-[11.5px] font-medium transition-colors ${
+              historyOpen
+                ? 'border-[var(--xd-accent-border)] bg-[var(--xd-accent-soft)] text-[var(--xd-accent)]'
+                : 'border-[var(--xd-border)] text-[var(--xd-ink-secondary)] hover:bg-[var(--xd-surface-hover)] hover:text-[var(--xd-ink)]'
+            }`}
+          >
+            <History className="h-3 w-3" />
+            <span>History</span>
           </button>
         )}
 

@@ -10,6 +10,7 @@ import * as marbleGuard from '@bdhmin/marble/guard'
 import * as marblePatcher from '@bdhmin/marble/patcher'
 import { createFileRoute } from '@tanstack/react-router'
 
+import { isHiddenDriveEntry } from '#/lib/marble/drive-hidden'
 import {
   DEFAULT_TRASH_RETENTION_DAYS,
   DriveStorageError,
@@ -204,7 +205,7 @@ async function listTrash(retentionDaysParam?: number) {
   const documents = (
     await Promise.all(
       names
-        .filter((name) => name.endsWith('.mrbl'))
+        .filter((name) => !isHiddenDriveEntry(name) && name.endsWith('.mrbl'))
         .map(async (fileName) => {
           const slug = fileName.slice(0, -'.mrbl'.length)
           if (!SLUG_PATTERN.test(slug) || slug.includes('..')) return null

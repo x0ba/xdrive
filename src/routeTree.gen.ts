@@ -23,6 +23,7 @@ import { Route as ApiDriveChatRouteImport } from './routes/api.drive-chat'
 import { Route as ApiLatexRouteImport } from './routes/api.latex'
 import { Route as ApiMarbleRouteImport } from './routes/api.marble'
 import { Route as ApiSearchRouteImport } from './routes/api.search'
+import { Route as ApiVersionsRouteImport } from './routes/api.versions'
 import { Route as WorkspaceChatIndexRouteImport } from './routes/_workspace/chat/index'
 import { Route as WorkspaceChatThreadIdRouteImport } from './routes/_workspace/chat/$threadId'
 import { Route as WorkspaceSettingsIndexRouteImport } from './routes/_workspace/settings/index'
@@ -105,6 +106,11 @@ const ApiMarbleRoute = ApiMarbleRouteImport.update({
 const ApiSearchRoute = ApiSearchRouteImport.update({
   id: '/api/search',
   path: '/api/search',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiVersionsRoute = ApiVersionsRouteImport.update({
+  id: '/api/versions',
+  path: '/api/versions',
   getParentRoute: () => rootRouteImport,
 } as any)
 const WorkspaceChatIndexRoute = WorkspaceChatIndexRouteImport.update({
@@ -195,6 +201,7 @@ export interface FileRoutesByFullPath {
   '/api/latex': typeof ApiLatexRoute
   '/api/marble': typeof ApiMarbleRoute
   '/api/search': typeof ApiSearchRoute
+  '/api/versions': typeof ApiVersionsRoute
   '/chat/$threadId': typeof WorkspaceChatThreadIdRoute
   '/settings/$': typeof WorkspaceSettingsSplatRoute
   '/api/ai/history': typeof ApiAiHistoryRouteWithChildren
@@ -224,6 +231,7 @@ export interface FileRoutesByTo {
   '/api/latex': typeof ApiLatexRoute
   '/api/marble': typeof ApiMarbleRoute
   '/api/search': typeof ApiSearchRoute
+  '/api/versions': typeof ApiVersionsRoute
   '/chat/$threadId': typeof WorkspaceChatThreadIdRoute
   '/settings/$': typeof WorkspaceSettingsSplatRoute
   '/api/ai/history': typeof ApiAiHistoryRouteWithChildren
@@ -255,6 +263,7 @@ export interface FileRoutesById {
   '/api/latex': typeof ApiLatexRoute
   '/api/marble': typeof ApiMarbleRoute
   '/api/search': typeof ApiSearchRoute
+  '/api/versions': typeof ApiVersionsRoute
   '/_workspace/chat/$threadId': typeof WorkspaceChatThreadIdRoute
   '/_workspace/settings/$': typeof WorkspaceSettingsSplatRoute
   '/api/ai/history': typeof ApiAiHistoryRouteWithChildren
@@ -286,6 +295,7 @@ export interface FileRouteTypes {
     | '/api/latex'
     | '/api/marble'
     | '/api/search'
+    | '/api/versions'
     | '/chat/$threadId'
     | '/settings/$'
     | '/api/ai/history'
@@ -315,6 +325,7 @@ export interface FileRouteTypes {
     | '/api/latex'
     | '/api/marble'
     | '/api/search'
+    | '/api/versions'
     | '/chat/$threadId'
     | '/settings/$'
     | '/api/ai/history'
@@ -345,6 +356,7 @@ export interface FileRouteTypes {
     | '/api/latex'
     | '/api/marble'
     | '/api/search'
+    | '/api/versions'
     | '/_workspace/chat/$threadId'
     | '/_workspace/settings/$'
     | '/api/ai/history'
@@ -369,6 +381,7 @@ export interface RootRouteChildren {
   ApiLatexRoute: typeof ApiLatexRoute
   ApiMarbleRoute: typeof ApiMarbleRoute
   ApiSearchRoute: typeof ApiSearchRoute
+  ApiVersionsRoute: typeof ApiVersionsRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -469,6 +482,13 @@ declare module '@tanstack/react-router' {
       path: '/api/search'
       fullPath: '/api/search'
       preLoaderRoute: typeof ApiSearchRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/versions': {
+      id: '/api/versions'
+      path: '/api/versions'
+      fullPath: '/api/versions'
+      preLoaderRoute: typeof ApiVersionsRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/_workspace/chat/': {
@@ -670,6 +690,7 @@ const rootRouteChildren: RootRouteChildren = {
   ApiLatexRoute: ApiLatexRoute,
   ApiMarbleRoute: ApiMarbleRoute,
   ApiSearchRoute: ApiSearchRoute,
+  ApiVersionsRoute: ApiVersionsRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

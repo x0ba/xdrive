@@ -79,6 +79,7 @@ import {
   SubscriptionModal,
 } from '#/components/collaborator/SubscriptionModal'
 import { ShareModal } from '#/components/collaborator/ShareModal'
+import { VersionHistoryPanel } from '#/components/version-history'
 import {
   nodeToElement,
   MarbleSourceInspector,
@@ -137,13 +138,18 @@ import {
   buildInteractiveMarbleIframeDoc,
   byteSizeOf,
   countMarbleNodes,
+  createVersion as createDocumentVersionApi,
   duplicateMarbleTemplate,
   generateMarbleCollaboration,
+  getVersion as getDocumentVersionApi,
   inspectMarbleNodes,
   isTemplatesRootFolder,
+  listVersions as listDocumentVersionsApi,
   resolveEvergreenDesignContext,
+  restoreVersion as restoreDocumentVersionApi,
   updateMarbleSourceTitle,
 } from '#/lib/marble'
+import type { DocumentVersionSummary, MarbleActionKind } from '#/lib/marble'
 import {
   applyServerRenameDocumentReply,
   applyServerRestoreDocumentReply,
@@ -169,7 +175,6 @@ import type {
   DocLifecyclePendingSets,
   HeldDocEdit,
 } from '#/components/workspace/template-workspace-helpers'
-import type { MarbleActionKind } from '#/lib/marble'
 import {
   applyAntigravityStatusToSubscriptions,
   authenticateAntigravity,
@@ -1037,6 +1042,13 @@ export function XDriveWorkspace({
     useState<SearchFilterType>('all')
   const [localSearchIncludeTrash, setLocalSearchIncludeTrash] = useState(false)
   const [localShareId, setLocalShareId] = useState<string | null>(null)
+  const [historyOpenDocId, setHistoryOpenDocId] = useState<string | null>(null)
+  const [versionsByDocId, setVersionsByDocId] = useState<
+    Record<string, DocumentVersionSummary[]>
+  >({})
+  const [historyLoadingDocId, setHistoryLoadingDocId] = useState<string | null>(
+    null,
+  )
   const [namer, setNamer] = useState<NamerState | null>(null)
   const [paletteOpen, setPaletteOpen] = useState(false)
   const pendingChatDraftNonceRef = useRef(0)
@@ -3054,6 +3066,11 @@ export function XDriveWorkspace({
   }, [])
 
   const activeDocId = activeDoc?.id ?? null
+  useEffect(() => {
+    setHistoryOpenDocId((current) =>
+      current && current === activeDocId ? current : null,
+    )
+  }, [activeDocId])
   useEffect(() => {
     if (!activeDocId) return
     const doc = libraryRef.current.find((item) => item.id === activeDocId)
@@ -6317,11 +6334,121 @@ export function XDriveWorkspace({
   const frameTitle = activeDoc ? `${activeDoc.title} .mrbl app` : 'Marble app'
   const richAppKind = activeDoc ? richEditorKind(activeDoc) : null
 
+  const historyOpenForActiveDoc = Boolean(
+    activeDoc && historyOpenDocId === activeDoc.id,
+  )
   const appDisplaySource = activeDoc ? (previewSource ?? activeDoc.source) : ''
   const appReadOnly =
     permission === 'view_only' || permission === 'comment_annotate'
   const whiteboardReadOnly =
-    appReadOnly || (activeDoc ? lifecycleLockedDocIds.has(activeDoc.id) : false)
+    appReadOnly ||
+    historyOpenForActiveDoc ||
+    (activeDoc ? lifecycleLockedDocIds.has(activeDoc.id) : false)
+
+  function handleToggleVersionHistory(doc: MarbleDocumentFile) {
+    if (historyOpenDocId === doc.id) {
+      setHistoryOpenDocId(null)
+      return
+    }
+    setHistoryOpenDocId(doc.id)
+    if (!syncWithServer) return
+    setHistoryLoadingDocId(doc.id)
+    void enqueueDriveMutation(() => listDocumentVersionsApi(doc.id))
+      .then((versions) => {
+        setVersionsByDocId((prev) => ({ ...prev, [doc.id]: versions }))
+      })
+      .catch((error) => {
+        setAgentStatus(
+          error instanceof Error
+            ? error.message
+            : 'Could not load version history',
+        )
+      })
+      .finally(() => {
+        setHistoryLoadingDocId((current) =>
+          current === doc.id ? null : current,
+        )
+      })
+  }
+
+  async function handleCreateNamedVersion(
+    doc: MarbleDocumentFile,
+    label: string,
+  ): Promise<DocumentVersionSummary[] | void> {
+    if (!syncWithServer) return undefined
+    const result = await enqueueDriveMutation(async () => {
+      const live = allDocsRef.current.find((item) => item.id === doc.id) ?? doc
+      const folderPath = folderDiskPath(foldersRef.current, live.folderId)
+      const currentSource = sourceRef.current.get(live.id) ?? live.source
+      return createDocumentVersionApi({
+        docId: live.id,
+        slug: live.slug,
+        folderPath,
+        source: currentSource,
+        label,
+        author: YOU.name,
+        title: live.title,
+      })
+    })
+    setVersionsByDocId((prev) => ({ ...prev, [doc.id]: result.versions }))
+    setAgentStatus(`Saved named version "${label}"`)
+    return result.versions
+  }
+
+  async function handleRestoreDocumentVersion(
+    doc: MarbleDocumentFile,
+    version: DocumentVersionSummary,
+  ): Promise<void> {
+    if (refuseDocLifecycle(doc.id, 'edit', 'restoring a previous version')) {
+      throw new Error('Wait for the current file action to finish first.')
+    }
+    if (!syncWithServer) {
+      setHistoryOpenDocId(null)
+      return
+    }
+    const result = await enqueueDriveMutation(async () => {
+      const live = allDocsRef.current.find((item) => item.id === doc.id) ?? doc
+      const folderPath = folderDiskPath(foldersRef.current, live.folderId)
+      return restoreDocumentVersionApi({
+        docId: live.id,
+        versionId: version.id,
+        slug: live.slug,
+        folderPath,
+        author: YOU.name,
+      })
+    })
+    sourceRef.current.set(doc.id, result.source)
+    if (activeTabRef.current === doc.id) {
+      shownSourceRef.current = result.source
+      if (!richEditorKind(doc)) {
+        setFrameDoc(
+          buildInteractiveMarbleIframeDoc(result.source, {
+            appSlug: result.slug,
+            mode,
+            permission,
+            theme,
+            selectedIds: mode === 'source' ? selectedIds : [],
+            proposedIds: [],
+          }),
+        )
+      }
+    }
+    patchFile(doc.id, (curr) => ({
+      ...curr,
+      source: result.source,
+      nodeCount: countMarbleNodes(result.source),
+      byteSize: byteSizeOf(result.source),
+      version: curr.version + 1,
+      updatedAt: new Date().toISOString(),
+      syncState: 'saved',
+      lastEditedBy: YOU,
+    }))
+    setVersionsByDocId((prev) => ({ ...prev, [doc.id]: result.versions }))
+    setHistoryOpenDocId(null)
+    setAgentStatus(
+      `Restored "${version.label || 'snapshot'}" (previous state saved to Version history)`,
+    )
+  }
 
   function handleRichAppSourceChange(nextSource: string, label: string) {
     if (!activeDoc) return
@@ -6783,6 +6910,8 @@ export function XDriveWorkspace({
                 }
                 shareHref={activeDocShareHref}
                 onOpenShare={() => setShareId(activeDoc.id)}
+                historyOpen={historyOpenForActiveDoc}
+                onOpenHistory={() => handleToggleVersionHistory(activeDoc)}
                 onMoveToTrash={() => moveDocumentToTrash(activeDoc.id)}
                 sharePermission={
                   simulatedRole === 'owner'
@@ -6819,7 +6948,7 @@ export function XDriveWorkspace({
                     )}
                 </div>
               )}
-              <div className="min-h-0 flex-1">
+              <div className="relative min-h-0 flex-1">
                 {mode === 'source' ? (
                   <div className="flex h-full min-h-0">
                     <div className="min-w-0 flex-1">{frame}</div>
@@ -6936,6 +7065,39 @@ export function XDriveWorkspace({
                   >
                     {frame}
                   </SelectionSketchOverlay>
+                )}
+                {historyOpenForActiveDoc && (
+                  <div className="absolute inset-0 z-30 flex min-h-0 flex-col bg-[var(--xd-canvas)]">
+                    <VersionHistoryPanel
+                      key={activeDoc.id}
+                      docId={activeDoc.id}
+                      fileName={activeDoc.fileName}
+                      title={activeDoc.title}
+                      currentSource={activeDoc.source}
+                      readOnly={appReadOnly}
+                      versions={versionsByDocId[activeDoc.id] ?? []}
+                      loadingList={historyLoadingDocId === activeDoc.id}
+                      onLoadVersion={
+                        syncWithServer ? getDocumentVersionApi : undefined
+                      }
+                      onCreateNamedVersion={
+                        syncWithServer
+                          ? (label) =>
+                              handleCreateNamedVersion(activeDoc, label)
+                          : undefined
+                      }
+                      onRestoreVersion={(version) =>
+                        handleRestoreDocumentVersion(activeDoc, version)
+                      }
+                      onVersionsChange={(nextVersions) =>
+                        setVersionsByDocId((prev) => ({
+                          ...prev,
+                          [activeDoc.id]: nextVersions,
+                        }))
+                      }
+                      onClose={() => setHistoryOpenDocId(null)}
+                    />
+                  </div>
                 )}
               </div>
             </div>
