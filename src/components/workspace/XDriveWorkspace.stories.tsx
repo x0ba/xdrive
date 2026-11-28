@@ -3998,3 +3998,54 @@ export const TemplateSaveErrorSettlesRecoveredSource: Story = {
     expect(recoveredTextarea.value).not.toContain('Local Body')
   },
 }
+
+const LOCAL_NAMED_VERSION_DOC: MarbleDocumentFile = {
+  ...LIFECYCLE_GATE_DOC,
+  id: 'doc-local-history',
+  slug: 'local-history',
+  fileName: 'local-history.mrbl',
+  title: 'Local History',
+  source: LIFECYCLE_GATE_SOURCE,
+}
+
+/**
+ * Naming a version while the workspace is offline stores it in the local timeline.
+ *
+ * @summary Local mode can name the current version
+ */
+export const LocalNamedVersion: Story = {
+  name: 'Drive · Local Named Version',
+  args: {
+    initialTheme: 'dark',
+    initialNav: 'drive',
+    initialActiveTabId: 'doc-local-history',
+    initialDocs: [LOCAL_NAMED_VERSION_DOC],
+    initialOpenDocIds: ['doc-local-history'],
+    initialMode: 'source',
+    initialAiSidebarOpen: false,
+    syncWithServer: false,
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    await userEvent.click(
+      await canvas.findByRole('button', { name: 'History' }),
+    )
+    const history = await canvas.findByRole('region', {
+      name: 'Version history for Local History',
+    })
+    const panel = within(history)
+    const nameButtons = panel.getAllByRole('button', {
+      name: 'Name current version',
+    })
+    await userEvent.click(nameButtons[0])
+    await userEvent.type(
+      panel.getByLabelText('Version label'),
+      'Local checkpoint',
+    )
+    await userEvent.click(panel.getByRole('button', { name: 'Save' }))
+    await panel.findByText('Named (1)')
+    const labels = panel.getAllByText('Local checkpoint')
+    expect(labels.length).toBeGreaterThanOrEqual(1)
+    expect(labels[0]).toBeVisible()
+  },
+}

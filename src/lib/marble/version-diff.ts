@@ -298,18 +298,37 @@ export function computeLineDiff(
   }
 }
 
+const NAMED_HTML_ENTITIES: Record<string, string> = {
+  nbsp: ' ',
+  amp: '&',
+  lt: '<',
+  gt: '>',
+  quot: '"',
+  apos: "'",
+}
+
+function decodeCodePoint(cp: number, raw: string): string {
+  if (!Number.isInteger(cp) || cp < 0 || cp > 0x10ffff) return raw
+  try {
+    return String.fromCodePoint(cp)
+  } catch {
+    return raw
+  }
+}
+
 function decodeHtmlEntities(input: string): string {
-  return input
-    .replace(/&nbsp;/gi, ' ')
-    .replace(/&amp;/gi, '&')
-    .replace(/&lt;/gi, '<')
-    .replace(/&gt;/gi, '>')
-    .replace(/&quot;/gi, '"')
-    .replace(/&#39;/gi, "'")
-    .replace(/&#(\d+);/g, (_match, dec: string) => {
-      const code = Number(dec)
-      return Number.isFinite(code) ? String.fromCodePoint(code) : ''
-    })
+  return input.replace(
+    /&(#x[0-9a-fA-F]+|#\d+|[a-zA-Z][a-zA-Z0-9]+);/g,
+    (full, entity: string) => {
+      if (entity.startsWith('#x') || entity.startsWith('#X')) {
+        return decodeCodePoint(Number.parseInt(entity.slice(2), 16), full)
+      }
+      if (entity.startsWith('#')) {
+        return decodeCodePoint(Number.parseInt(entity.slice(1), 10), full)
+      }
+      return NAMED_HTML_ENTITIES[entity.toLowerCase()] ?? full
+    },
+  )
 }
 
 function htmlToStructuredLines(html: string): string {
@@ -351,6 +370,32 @@ function readEmbeddedJsonScript(
   } catch {
     return null
   }
+}
+
+function readLiveDocBodyHtml(source: string): string | null {
+  const openRe =
+    /<([A-Za-z][\w:-]*)\b[^>]*\bdata-marble-id\s*=\s*(["'])doc-body\2[^>]*>/i
+  const open = openRe.exec(source)
+  if (!open) return null
+  const tag = open[1].replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  const innerStart = open.index + open[0].length
+  const tagRe = new RegExp(`<(/?)${tag}\\b[^>]*>`, 'gi')
+  tagRe.lastIndex = innerStart
+  let depth = 1
+  let match: RegExpExecArray | null
+  while ((match = tagRe.exec(source)) !== null) {
+    if (match[0].endsWith('/>')) continue
+    if (match[1] === '/') {
+      depth -= 1
+      if (depth === 0) {
+        const inner = source.slice(innerStart, match.index).trim()
+        return inner.length > 0 ? inner : null
+      }
+    } else {
+      depth += 1
+    }
+  }
+  return null
 }
 
 export function extractStructuredMarbleText(source: string): string {
@@ -494,8 +539,11 @@ export function extractStructuredMarbleText(source: string): string {
     if (typeof rec.title === 'string' && rec.title.trim()) {
       parts.push(`# ${rec.title.trim()}`)
     }
-    if (typeof rec.html === 'string' && rec.html.trim()) {
-      const bodyLines = htmlToStructuredLines(rec.html)
+    const liveBody = readLiveDocBodyHtml(source)
+    const embeddedHtml = typeof rec.html === 'string' ? rec.html : ''
+    const html = liveBody ?? embeddedHtml
+    if (html.trim()) {
+      const bodyLines = htmlToStructuredLines(html)
       if (bodyLines) parts.push(bodyLines)
     }
     if (parts.length > 0) return parts.join('\n')

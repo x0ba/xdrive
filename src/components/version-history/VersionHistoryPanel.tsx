@@ -90,6 +90,7 @@ export function VersionHistoryPanel({
   }, [initialVersions])
 
   useEffect(() => {
+    setDetailError(null)
     if (
       !open ||
       !selectedId ||
@@ -100,7 +101,6 @@ export function VersionHistoryPanel({
     }
     let cancelled = false
     setLoadingDetailId(selectedId)
-    setDetailError(null)
     void onLoadVersion(docId, selectedId)
       .then((detail) => {
         if (cancelled) return

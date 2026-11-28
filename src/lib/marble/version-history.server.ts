@@ -23,6 +23,7 @@ import {
   writeAtomicText,
   writeMetadata,
 } from './drive-storage.server'
+import type { DriveDocumentLocation } from './drive-storage.server'
 import {
   AUTO_SNAPSHOT_INTERVAL_MS,
   DEFAULT_VERSION_RETENTION_POLICY,
@@ -254,6 +255,35 @@ export function shouldCreateAutoSnapshot(
   return { create: true }
 }
 
+/**
+ * Timestamp for the pre-history baseline captured on the first tracked edit.
+ * A file older than the daily retention window used to be dated with its
+ * mtime and then deleted by the same save. Ancient baselines are pinned
+ * inside that window, still earlier than the autosave interval, so both the
+ * original content and the edit survive.
+ */
+export function baselineSnapshotTimestampMs(
+  priorMtimeMs: number | undefined,
+  nowMs: number,
+  policy: VersionRetentionPolicy = DEFAULT_VERSION_RETENTION_POLICY,
+): number {
+  const latest = nowMs - 1
+  const raw =
+    priorMtimeMs !== undefined && Number.isFinite(priorMtimeMs)
+      ? Math.floor(priorMtimeMs)
+      : latest
+  if (raw >= latest) return latest
+  const earliest = nowMs - policy.dailyWindowMs
+  if (raw >= earliest) return raw
+  const safety = Math.min(DAY_MS, Math.max(0, policy.dailyWindowMs))
+  let pinned = earliest + safety
+  const throttleSafe = nowMs - AUTO_SNAPSHOT_INTERVAL_MS
+  if (pinned > throttleSafe) pinned = throttleSafe
+  if (pinned < earliest) pinned = earliest
+  if (pinned > latest) pinned = latest
+  return pinned
+}
+
 export function selectVersionsToPrune(
   versions: readonly DocumentVersionSummary[],
   nowMs: number,
@@ -342,6 +372,54 @@ async function applyRetentionPruningUnlocked(
   return { kept, prunedIds: pruned.map((p) => p.id) }
 }
 
+async function retainHistoryUnlocked(
+  docId: string,
+  versions: readonly DocumentVersionSummary[],
+  nowMs: number,
+  policy: VersionRetentionPolicy,
+): Promise<{ kept: DocumentVersionSummary[]; prunedIds: string[] }> {
+  const { kept, prunedIds } = await applyRetentionPruningUnlocked(
+    docId,
+    versions,
+    nowMs,
+    policy,
+  )
+  if (prunedIds.length > 0) {
+    await writeVersionIndexUnlocked(docId, kept, nowMs)
+  }
+  return { kept, prunedIds }
+}
+
+async function resolveHistoryDocIdUnlocked(
+  docId: string,
+  slug?: string,
+  folderPath?: string | null,
+): Promise<string> {
+  const located = await findDocumentByDocIdUnlocked(docId, slug, folderPath)
+  if (!located) return docId
+  const metadata = await readMetadata()
+  const stored = metadata.documents[located.relPath]?.id?.trim()
+  return stored || docId
+}
+
+async function persistStableDocumentIdUnlocked(
+  located: DriveDocumentLocation,
+  docId: string,
+): Promise<string> {
+  const metadata = await readMetadata()
+  const existing = metadata.documents[located.relPath]
+  const stored = existing?.id?.trim()
+  if (stored) return stored
+  metadata.documents[located.relPath] = {
+    ...existing,
+    id: docId,
+    slug: located.slug,
+    updatedAt: existing?.updatedAt ?? new Date().toISOString(),
+  }
+  await writeMetadata(metadata)
+  return docId
+}
+
 async function appendVersionUnlocked(input: {
   docId: string
   slug: string
@@ -388,8 +466,17 @@ async function appendVersionUnlocked(input: {
 export async function listVersionsUnlocked(
   docId: string,
 ): Promise<DocumentVersionSummary[]> {
-  if (!docId.trim()) fail(400, 'docId is required')
-  return readVersionIndexUnlocked(docId.trim())
+  const clean = docId.trim()
+  if (!clean) fail(400, 'docId is required')
+  const stableId = await resolveHistoryDocIdUnlocked(clean)
+  const existing = await readVersionIndexUnlocked(stableId)
+  const { kept } = await retainHistoryUnlocked(
+    stableId,
+    existing,
+    Date.now(),
+    DEFAULT_VERSION_RETENTION_POLICY,
+  )
+  return kept
 }
 
 export async function listVersions(
@@ -408,13 +495,20 @@ export async function getVersionUnlocked(
   if (!cleanDocId) fail(400, 'docId is required')
   if (!cleanVersionId) fail(400, 'versionId is required')
 
-  const versions = await readVersionIndexUnlocked(cleanDocId)
-  const summary = versions.find((v) => v.id === cleanVersionId)
+  const stableId = await resolveHistoryDocIdUnlocked(cleanDocId)
+  const existing = await readVersionIndexUnlocked(stableId)
+  const { kept } = await retainHistoryUnlocked(
+    stableId,
+    existing,
+    Date.now(),
+    DEFAULT_VERSION_RETENTION_POLICY,
+  )
+  const summary = kept.find((v) => v.id === cleanVersionId)
   if (!summary) return null
 
   try {
     const source = await readFile(
-      snapshotFilePath(cleanDocId, cleanVersionId),
+      snapshotFilePath(stableId, cleanVersionId),
       'utf8',
     )
     return { ...summary, source }
@@ -478,18 +572,18 @@ export async function createVersionUnlocked(
   let resolvedSlug = input.slug ? assertSlug(input.slug) : undefined
   let resolvedSource = typeof input.source === 'string' ? input.source : null
 
-  if (resolvedSource === null || !resolvedSlug) {
-    const located = await findDocumentByDocIdUnlocked(
-      docId,
-      resolvedSlug,
-      input.folderPath,
-    )
-    if (located) {
-      resolvedSlug = located.slug
-      if (resolvedSource === null) {
-        resolvedSource = await readFile(located.fullPath, 'utf8')
-      }
+  const located = await findDocumentByDocIdUnlocked(
+    docId,
+    resolvedSlug,
+    input.folderPath,
+  )
+  let stableDocId = docId
+  if (located) {
+    if (!resolvedSlug) resolvedSlug = located.slug
+    if (resolvedSource === null) {
+      resolvedSource = await readFile(located.fullPath, 'utf8')
     }
+    stableDocId = await persistStableDocumentIdUnlocked(located, docId)
   }
 
   if (resolvedSource === null) {
@@ -497,7 +591,7 @@ export async function createVersionUnlocked(
   }
   const slug = resolvedSlug ?? 'document'
 
-  let existing = await readVersionIndexUnlocked(docId)
+  let existing = await readVersionIndexUnlocked(stableDocId)
   const contentHash = hashVersionSource(resolvedSource)
 
   if (kind === 'auto' && !input.bypassDedupe) {
@@ -508,18 +602,24 @@ export async function createVersionUnlocked(
       input.bypassThrottle ? 0 : input.minAutoIntervalMs,
     )
     if (!check.create) {
+      const retained = await retainHistoryUnlocked(
+        stableDocId,
+        existing,
+        nowMs,
+        policy,
+      )
       return {
         created: false,
         reason: check.reason,
         version: null,
-        versions: existing,
-        prunedIds: [],
+        versions: retained.kept,
+        prunedIds: retained.prunedIds,
       }
     }
   }
 
   const appended = await appendVersionUnlocked({
-    docId,
+    docId: stableDocId,
     slug,
     title: input.title,
     category: input.category,
@@ -534,12 +634,12 @@ export async function createVersionUnlocked(
   existing = appended.versions
 
   const { kept, prunedIds } = await applyRetentionPruningUnlocked(
-    docId,
+    stableDocId,
     existing,
     nowMs,
     policy,
   )
-  await writeVersionIndexUnlocked(docId, kept, nowMs)
+  await writeVersionIndexUnlocked(stableDocId, kept, nowMs)
 
   return {
     created: true,
@@ -584,11 +684,10 @@ export async function recordAutoVersionUnlocked(input: {
     input.priorSource !== null &&
     input.priorSource !== input.source
   ) {
-    const baselineMs = Math.min(
-      input.priorMtimeMs !== undefined && Number.isFinite(input.priorMtimeMs)
-        ? Math.floor(input.priorMtimeMs)
-        : nowMs - 1,
-      nowMs - 1,
+    const baselineMs = baselineSnapshotTimestampMs(
+      input.priorMtimeMs,
+      nowMs,
+      policy,
     )
     const baseline = await appendVersionUnlocked({
       docId,
@@ -614,12 +713,13 @@ export async function recordAutoVersionUnlocked(input: {
     minAutoIntervalMs,
   )
   if (!check.create) {
+    const retained = await retainHistoryUnlocked(docId, existing, nowMs, policy)
     return {
       created: false,
       reason: check.reason,
       version: null,
-      versions: existing,
-      prunedIds: [],
+      versions: retained.kept,
+      prunedIds: retained.prunedIds,
     }
   }
 

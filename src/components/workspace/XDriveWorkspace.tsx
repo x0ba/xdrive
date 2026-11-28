@@ -7080,8 +7080,11 @@ export function XDriveWorkspace({
                       onLoadVersion={
                         syncWithServer ? getDocumentVersionApi : undefined
                       }
-                      onCreateNamedVersion={(label) =>
-                        handleCreateNamedVersion(activeDoc, label)
+                      onCreateNamedVersion={
+                        syncWithServer
+                          ? (label) =>
+                              handleCreateNamedVersion(activeDoc, label)
+                          : undefined
                       }
                       onRestoreVersion={(version) =>
                         handleRestoreDocumentVersion(activeDoc, version)

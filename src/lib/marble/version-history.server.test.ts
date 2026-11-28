@@ -21,6 +21,7 @@ import {
   createFolderOnDisk,
   deleteDocumentPermanentlyOnDisk,
   deleteFolderOnDisk,
+  deterministicId,
   emptyTrashOnDisk,
   getTrashDir,
   listDriveSummary,
@@ -28,6 +29,7 @@ import {
   loadDriveWorkspace,
   moveDocumentOnDisk,
   purgeExpiredTrashOnDisk,
+  readMetadata,
   renameDocumentOnDisk,
   renameFolderOnDisk,
   restoreDocumentOnDisk,
@@ -705,5 +707,177 @@ describe('version-history server storage and lifecycle', () => {
       ),
     })
     expect(missingVersionRes.status).toBe(404)
+  })
+
+  it('keeps the original baseline when the file is older than the retention window', async () => {
+    const nowMs = Date.now()
+    const day = 24 * 60 * 60 * 1000
+    const rawOriginal = makeHtml('Ancient Doc', 'Original ancient text')
+    const rawFile = path.join(tempDir, 'ancient-doc.mrbl')
+    await writeFile(rawFile, rawOriginal, 'utf8')
+    const oldMtime = new Date(nowMs - 40 * day)
+    await utimes(rawFile, oldMtime, oldMtime)
+
+    const loaded = await loadDriveWorkspace(countMarbleNodes)
+    const doc = loaded.docs.find((item) => item.slug === 'ancient-doc')
+    expect(doc).toBeDefined()
+
+    const edited = makeHtml('Ancient Doc', 'First tracked edit')
+    await saveDocumentToDisk({
+      slug: 'ancient-doc',
+      folderPath: '',
+      source: edited,
+      meta: { id: doc!.id, title: 'Ancient Doc' },
+      nowMs,
+    })
+
+    const indexRaw = await readFile(
+      path.join(getDocVersionHistoryDir(doc!.id), 'index.json'),
+      'utf8',
+    )
+    const index = JSON.parse(indexRaw) as {
+      versions: DocumentVersionSummary[]
+    }
+    expect(index.versions).toHaveLength(2)
+    expect(index.versions[0].contentHash).toBe(hashVersionSource(edited))
+    const baseline = index.versions[1]
+    expect(baseline.contentHash).toBe(hashVersionSource(rawOriginal))
+    const age = nowMs - Date.parse(baseline.createdAt)
+    expect(age).toBeGreaterThan(AUTO_SNAPSHOT_INTERVAL_MS)
+    expect(age).toBeLessThanOrEqual(
+      DEFAULT_VERSION_RETENTION_POLICY.dailyWindowMs,
+    )
+
+    const detail = await getVersion(doc!.id, baseline.id)
+    expect(detail?.source).toBe(rawOriginal)
+  })
+
+  it('persists the stable document id so named versions survive folder rename and move', async () => {
+    await createFolderOnDisk({ name: 'Notes' })
+    const source = makeHtml('Paper', 'Draft body')
+    const relPath = 'Notes/paper.mrbl'
+    await writeFile(path.join(tempDir, relPath), source, 'utf8')
+    const docId = deterministicId('doc', relPath)
+
+    const created = await createVersion({
+      docId,
+      slug: 'paper',
+      folderPath: 'Notes',
+      source,
+      kind: 'named',
+      label: 'Submitted draft',
+      nowMs: Date.now(),
+    })
+    expect(created.created).toBe(true)
+    expect(created.version?.docId).toBe(docId)
+
+    const before = await readMetadata()
+    expect(before.documents[relPath]?.id).toBe(docId)
+
+    await renameFolderOnDisk({ oldPath: 'Notes', newName: 'Archive' })
+    expect(deterministicId('doc', 'Archive/paper.mrbl')).not.toBe(docId)
+    const renamed = await loadDriveWorkspace(countMarbleNodes)
+    const renamedDoc = renamed.docs.find((item) => item.slug === 'paper')
+    expect(renamedDoc?.id).toBe(docId)
+
+    const afterRename = await listVersions(docId)
+    expect(
+      afterRename.some(
+        (item) => item.kind === 'named' && item.label === 'Submitted draft',
+      ),
+    ).toBe(true)
+
+    await createFolderOnDisk({ name: 'Elsewhere' })
+    await moveDocumentOnDisk({
+      slug: 'paper',
+      fromFolderPath: 'Archive',
+      toFolderPath: 'Elsewhere',
+    })
+    const moved = await loadDriveWorkspace(countMarbleNodes)
+    const movedDoc = moved.docs.find((item) => item.slug === 'paper')
+    expect(movedDoc?.id).toBe(docId)
+    const afterMove = await listVersions(movedDoc!.id)
+    expect(afterMove.some((item) => item.label === 'Submitted draft')).toBe(
+      true,
+    )
+  })
+
+  it('prunes expired auto snapshots on skipped saves and when history is listed', async () => {
+    const ancient = Date.parse('2000-01-01T00:00:00.000Z')
+    const source = makeHtml('Quiet Doc', 'Unchanged body')
+    await saveDocumentToDisk({
+      slug: 'quiet-doc',
+      folderPath: '',
+      source,
+      meta: { id: 'doc-quiet', title: 'Quiet Doc' },
+      nowMs: ancient,
+    })
+    await createVersion({
+      docId: 'doc-quiet',
+      slug: 'quiet-doc',
+      kind: 'named',
+      label: 'Keep forever',
+      nowMs: ancient + 1_000,
+    })
+
+    await saveDocumentToDisk({
+      slug: 'quiet-doc',
+      folderPath: '',
+      source,
+      meta: { id: 'doc-quiet', title: 'Quiet Doc' },
+      nowMs: Date.now(),
+    })
+
+    const indexRaw = await readFile(
+      path.join(getDocVersionHistoryDir('doc-quiet'), 'index.json'),
+      'utf8',
+    )
+    const index = JSON.parse(indexRaw) as {
+      versions: DocumentVersionSummary[]
+    }
+    expect(index.versions.map((item) => item.kind)).toEqual(['named'])
+    expect(index.versions[0]?.label).toBe('Keep forever')
+
+    const skipSource = makeHtml('Skip Doc', 'Same body')
+    await createVersion({
+      docId: 'doc-skip-retention',
+      slug: 'skip-retention',
+      source: skipSource,
+      kind: 'auto',
+      nowMs: ancient,
+      bypassThrottle: true,
+    })
+    const skipped = await createVersion({
+      docId: 'doc-skip-retention',
+      slug: 'skip-retention',
+      source: skipSource,
+      kind: 'auto',
+      nowMs: Date.now(),
+    })
+    expect(skipped.created).toBe(false)
+    expect(skipped.reason).toBe('unchanged')
+    expect(skipped.prunedIds).toHaveLength(1)
+    expect(skipped.versions).toHaveLength(0)
+
+    const listedSource = makeHtml('Listed Doc', 'Old auto only')
+    await createVersion({
+      docId: 'doc-listed',
+      slug: 'listed-doc',
+      source: listedSource,
+      kind: 'auto',
+      nowMs: ancient,
+      bypassThrottle: true,
+    })
+    await createVersion({
+      docId: 'doc-listed',
+      slug: 'listed-doc',
+      source: listedSource,
+      kind: 'named',
+      label: 'Pinned',
+      nowMs: ancient + 1_000,
+    })
+    const listed = await listVersions('doc-listed')
+    expect(listed.map((item) => item.kind)).toEqual(['named'])
+    expect(listed[0]?.label).toBe('Pinned')
   })
 })

@@ -174,4 +174,63 @@ describe('version-diff utilities', () => {
     expect(blankDiff.pastShapeCount).toBe(0)
     expect(blankDiff.addedCount).toBe(2)
   })
+
+  it('compares the live doc-body and falls back to embedded html', () => {
+    function docsSource(live: string, embedded: string) {
+      return `<!doctype html><html><head><title>Spec</title></head><body>
+<article>
+  <div data-marble-id="doc-body"><div class="callout"><p>${live}</p></div></div>
+</article>
+<script type="application/json" data-marble-docs-state="1">${JSON.stringify({
+        title: 'Quantum Spec',
+        html: `<p>${embedded}</p>`,
+      })}</script>
+</body></html>`
+    }
+
+    const past = docsSource('Old live sentence', 'Stale embedded sentence')
+    const current = docsSource(
+      'New live sentence about qubits',
+      'Stale embedded sentence',
+    )
+    const text = extractStructuredMarbleText(current)
+    expect(text).toContain('New live sentence about qubits')
+    expect(text).not.toContain('Stale embedded sentence')
+
+    const diff = diffMarbleDocuments(past, current)
+    expect(
+      diff.structuredDiff.lines.some(
+        (line) =>
+          line.kind === 'added' &&
+          line.text.includes('New live sentence about qubits'),
+      ),
+    ).toBe(true)
+    expect(
+      diff.structuredDiff.lines.some((line) =>
+        line.text.includes('Stale embedded sentence'),
+      ),
+    ).toBe(false)
+
+    const fallback = `<!doctype html><html><body>
+<div data-marble-id="doc-body">   </div>
+<script type="application/json" data-marble-docs-state="1">${JSON.stringify({
+      title: 'Spec',
+      html: '<p>Embedded fallback text</p>',
+    })}</script>
+</body></html>`
+    expect(extractStructuredMarbleText(fallback)).toContain(
+      'Embedded fallback text',
+    )
+  })
+
+  it('decodes HTML entities once and does not throw on invalid code points', () => {
+    const source = `<!doctype html><html><body><p>Tom &amp; Jerry &#65; &#99999999; &amp;#99999999; &#x110000;</p></body></html>`
+    expect(() => extractStructuredMarbleText(source)).not.toThrow()
+    const text = extractStructuredMarbleText(source)
+    expect(text).toContain('Tom & Jerry')
+    expect(text).toContain('A')
+    expect(text).toContain('&#99999999;')
+    expect(text).toContain('&#x110000;')
+    expect(text).not.toContain('&amp;')
+  })
 })
