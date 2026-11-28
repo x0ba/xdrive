@@ -50,6 +50,7 @@ export interface ChatComposerProps {
   onOpenProviders?: () => void
   placeholder?: string
   showContextStrip?: boolean
+  focusNonce?: number
   className?: string
 }
 
@@ -94,6 +95,7 @@ export function ChatComposer({
   onOpenProviders,
   placeholder = 'Ask anything, @ pin files, or edit across your Drive…',
   showContextStrip = true,
+  focusNonce,
   className,
 }: ChatComposerProps) {
   const [openMenu, setOpenMenu] = useState<OpenMenu>(null)
@@ -118,6 +120,18 @@ export function ChatComposer({
     el.style.height = 'auto'
     el.style.height = `${Math.min(el.scrollHeight, 210)}px`
   }, [value])
+
+  useEffect(() => {
+    if (!focusNonce) return
+    const frame = window.requestAnimationFrame(() => {
+      const el = textareaRef.current
+      if (!el) return
+      el.focus()
+      const len = el.value.length
+      el.setSelectionRange(len, len)
+    })
+    return () => window.cancelAnimationFrame(frame)
+  }, [focusNonce])
 
   useEffect(() => {
     if (!openMenu) return

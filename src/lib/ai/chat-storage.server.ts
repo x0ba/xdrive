@@ -18,6 +18,11 @@ import type {
   ReasoningEffort,
 } from '#/lib/ai/drive-chat-types'
 import { getDriveDir, isEnoent } from '#/lib/marble/drive-storage.server'
+import {
+  removeChatThreadFromSearchIndexSafe,
+  syncDriveSearchIndexSafe,
+  upsertChatThreadInSearchIndexSafe,
+} from '#/lib/search/drive-search.server'
 import type { AIMessage, AIProviderId, MarbleOpProposal } from '#/lib/types'
 
 export const CHAT_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/
@@ -341,33 +346,37 @@ export async function readChatThread(
 }
 
 export async function createChatThread(raw: unknown): Promise<DriveChatThread> {
-  return await withChatLock(async () => {
-    const thread = sanitizeDriveChatThread(raw, { generateIdIfMissing: true })
-    const existing = await readThreadFileOptional(thread.id)
+  const thread = await withChatLock(async () => {
+    const created = sanitizeDriveChatThread(raw, { generateIdIfMissing: true })
+    const existing = await readThreadFileOptional(created.id)
     if (existing) {
-      fail(409, `Chat thread "${thread.id}" already exists`)
+      fail(409, `Chat thread "${created.id}" already exists`)
     }
-    await writeAtomicJson(resolveThreadFilePath(thread.id), thread)
-    return thread
+    await writeAtomicJson(resolveThreadFilePath(created.id), created)
+    return created
   })
+  await upsertChatThreadInSearchIndexSafe(thread)
+  return thread
 }
 
 export async function saveChatThread(
   threadId: string,
   raw: unknown,
 ): Promise<DriveChatThread> {
-  return await withChatLock(async () => {
-    const thread = sanitizeDriveChatThread(raw, { forcedId: threadId })
-    await writeAtomicJson(resolveThreadFilePath(thread.id), thread)
-    return thread
+  const thread = await withChatLock(async () => {
+    const saved = sanitizeDriveChatThread(raw, { forcedId: threadId })
+    await writeAtomicJson(resolveThreadFilePath(saved.id), saved)
+    return saved
   })
+  await upsertChatThreadInSearchIndexSafe(thread)
+  return thread
 }
 
 export async function patchChatThread(
   threadId: string,
   rawPatch: unknown,
 ): Promise<DriveChatThread> {
-  return await withChatLock(async () => {
+  const next = await withChatLock(async () => {
     if (!rawPatch || typeof rawPatch !== 'object' || Array.isArray(rawPatch)) {
       fail(400, 'Patch payload must be a JSON object')
     }
@@ -388,20 +397,24 @@ export async function patchChatThread(
           ? patch.updatedAt
           : new Date().toISOString(),
     }
-    const next = sanitizeDriveChatThread(merged, { forcedId: validId })
-    await writeAtomicJson(resolveThreadFilePath(validId), next)
-    return next
+    const updated = sanitizeDriveChatThread(merged, { forcedId: validId })
+    await writeAtomicJson(resolveThreadFilePath(validId), updated)
+    return updated
   })
+  await upsertChatThreadInSearchIndexSafe(next)
+  return next
 }
 
 export async function deleteChatThread(
   threadId: string,
 ): Promise<{ ok: true; id: string; deleted: true }> {
-  return await withChatLock(async () => {
+  const result = await withChatLock(async () => {
     const validId = assertChatId(threadId, 'threadId')
     await rm(resolveThreadFilePath(validId), { force: true })
-    return { ok: true, id: validId, deleted: true }
+    return { ok: true as const, id: validId, deleted: true as const }
   })
+  await removeChatThreadFromSearchIndexSafe(result.id)
+  return result
 }
 
 export async function importChatThreads(rawThreads: unknown): Promise<{
@@ -412,7 +425,7 @@ export async function importChatThreads(rawThreads: unknown): Promise<{
   if (!Array.isArray(rawThreads)) {
     fail(400, 'threads must be an array')
   }
-  return await withChatLock(async () => {
+  const result = await withChatLock(async () => {
     let imported = 0
     let skipped = 0
 
@@ -436,6 +449,10 @@ export async function importChatThreads(rawThreads: unknown): Promise<{
     const threads = await listChatThreads()
     return { imported, skipped, threads }
   })
+  if (result.imported > 0) {
+    await syncDriveSearchIndexSafe()
+  }
+  return result
 }
 
 function sanitizeAIMessage(raw: unknown): AIMessage | null {

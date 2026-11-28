@@ -94,6 +94,13 @@ import {
 import { canMarkPersistedSourceSaved } from '#/components/apps/whiteboard/save-gate'
 import { isWhiteboardMarbleSource } from '#/lib/marble/whiteboard-document'
 import { DriveChatView } from '#/components/chat'
+import { DriveSearchView } from '#/components/search'
+import {
+  DriveSearchError,
+  buildClientSearchIndex,
+  fetchDriveSearch,
+} from '#/lib/search'
+import type { SearchDriveOptions, SearchFilterType } from '#/lib/search'
 import {
   buildDriveChatModels,
   buildDriveSnapshot,
@@ -218,6 +225,11 @@ import type {
   SketchStroke,
 } from '#/lib/types'
 import { cn } from '#/lib/utils'
+import {
+  WorkspaceCommandPalette,
+  createBlankDocumentFile,
+} from '#/components/command-palette'
+import type { WorkspaceCommandSourceDeps } from '#/components/command-palette'
 
 // Legacy localStorage key read once on first load to migrate existing Drive Chat threads to disk.
 const CHAT_STORAGE_KEY = 'xdrive.drive-chat.threads.v1'
@@ -325,7 +337,6 @@ type FolderModalState =
 type PermanentDeleteTarget =
   { mode: 'single'; doc: MarbleDocumentFile } | { mode: 'empty' }
 type TrashUndoBanner = { docId: string; title: string; pending?: boolean }
-type PaletteItem = { id: string; label: string; hint: string; run: () => void }
 
 const YOU = { name: 'You', initials: 'YO' }
 
@@ -1027,6 +1038,9 @@ export function XDriveWorkspace({
     string[] | undefined
   >(undefined)
   const [localSearchQuery, setLocalSearchQuery] = useState('')
+  const [localSearchTypeFilter, setLocalSearchTypeFilter] =
+    useState<SearchFilterType>('all')
+  const [localSearchIncludeTrash, setLocalSearchIncludeTrash] = useState(false)
   const [localShareId, setLocalShareId] = useState<string | null>(null)
   const [historyOpenDocId, setHistoryOpenDocId] = useState<string | null>(null)
   const [versionsByDocId, setVersionsByDocId] = useState<
@@ -1037,8 +1051,11 @@ export function XDriveWorkspace({
   )
   const [namer, setNamer] = useState<NamerState | null>(null)
   const [paletteOpen, setPaletteOpen] = useState(false)
-  const [paletteQuery, setPaletteQuery] = useState('')
-  const [paletteIndex, setPaletteIndex] = useState(0)
+  const pendingChatDraftNonceRef = useRef(0)
+  const [pendingChatDraft, setPendingChatDraft] = useState<{
+    nonce: number
+    text: string
+  } | null>(null)
   const [agentStatus, setAgentStatus] = useState<string | null>(null)
   const [frameDoc, setFrameDoc] = useState('')
   const [chatReasoningEffort, setChatReasoningEffort] =
@@ -1068,6 +1085,8 @@ export function XDriveWorkspace({
         return 'trash'
       case 'templates':
         return 'templates'
+      case 'search':
+        return 'search'
       case 'chat':
         return 'chat'
       case 'settings':
@@ -1103,6 +1122,12 @@ export function XDriveWorkspace({
   const searchQuery: string = isRouted
     ? (routeSearch.q ?? '')
     : localSearchQuery
+  const searchTypeFilter: SearchFilterType = isRouted
+    ? (routeSearch.type ?? 'all')
+    : localSearchTypeFilter
+  const searchIncludeTrash: boolean = isRouted
+    ? routeSearch.trash === '1'
+    : localSearchIncludeTrash
   const activeSettingsProviderId: AIProviderId =
     isRouted && routeMatch?.kind === 'settings'
       ? routeMatch.providerId
@@ -1913,6 +1938,55 @@ export function XDriveWorkspace({
     )
   }
 
+  function setSearchTypeFilter(next: SearchFilterType) {
+    setLocalSearchTypeFilter(next)
+    if (!isRouted) return
+    updateRouteSearch(
+      (prev) => ({
+        ...prev,
+        type: next === 'all' ? undefined : next,
+      }),
+      { replace: true },
+    )
+  }
+
+  function setSearchIncludeTrash(next: boolean) {
+    setLocalSearchIncludeTrash(next)
+    if (!isRouted) return
+    updateRouteSearch(
+      (prev) => ({
+        ...prev,
+        trash: next ? '1' : undefined,
+      }),
+      { replace: true },
+    )
+  }
+
+  async function runWorkspaceSearch(
+    options: SearchDriveOptions,
+    signal?: AbortSignal,
+  ) {
+    if (!syncWithServer) {
+      return buildClientSearchIndex({
+        docs: allDocsRef.current,
+        folders: foldersRef.current,
+        chatThreads: chatThreadsRef.current,
+      }).search(options)
+    }
+    try {
+      return await fetchDriveSearch(options, { signal })
+    } catch (error) {
+      if (error instanceof DriveSearchError && error.code === 'UNAVAILABLE') {
+        return buildClientSearchIndex({
+          docs: allDocsRef.current,
+          folders: foldersRef.current,
+          chatThreads: chatThreadsRef.current,
+        }).search(options)
+      }
+      throw error
+    }
+  }
+
   // Canonicalize folder & document slugs, track open tabs, and keep document.title fresh
   useEffect(() => {
     if (!isRouted || !routeMatch) return
@@ -1981,6 +2055,14 @@ export function XDriveWorkspace({
         if (typeof document !== 'undefined') {
           document.title = 'Drive Chat · xDrive'
         }
+      }
+      return
+    }
+    if (routeMatch.kind === 'search') {
+      if (typeof document !== 'undefined') {
+        document.title = routeSearch.q
+          ? `${routeSearch.q} · Search · xDrive`
+          : 'Search · xDrive'
       }
     }
   }, [
@@ -2959,15 +3041,6 @@ export function XDriveWorkspace({
 
   useEffect(() => {
     function onKey(event: KeyboardEvent) {
-      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') {
-        event.preventDefault()
-        setPaletteOpen((open) => !open)
-        return
-      }
-      if (event.key === 'Escape') {
-        setPaletteOpen(false)
-        return
-      }
       const target = event.target
       const typing =
         target instanceof HTMLElement &&
@@ -6100,100 +6173,162 @@ export function XDriveWorkspace({
     })
   }
 
-  const paletteItems: PaletteItem[] = (() => {
-    const needle = paletteQuery.trim().toLowerCase()
-    const views: PaletteItem[] = [
-      {
-        id: 'nav-chat',
-        label: 'Drive Chat',
-        hint: 'Query and modify across your entire Drive with AI',
-        run: () => visit('home', 'chat'),
-      },
-      {
-        id: 'action-new-ai',
-        label: 'New app with AI agent',
-        hint: 'Build a .mrbl app from a prompt',
-        run: () => setNewAppModalMode('agent'),
-      },
-      {
-        id: 'action-new-template',
-        label: 'New app from template',
-        hint: 'Choose from your templates',
-        run: () => setNewAppModalMode('templates'),
-      },
-      {
-        id: 'nav-drive',
-        label: 'My Drive',
-        hint: 'Browse folders and .mrbl apps',
-        run: () => navigateToFolder(null),
-      },
-      {
-        id: 'nav-starred',
-        label: 'Starred',
-        hint: 'Starred files',
-        run: () => visit('home', 'starred'),
-      },
-      {
-        id: 'nav-trash',
-        label: 'Trash',
-        hint:
-          trashedDocs.length > 0
-            ? `${trashedDocs.length} trashed · clears after ${effectiveTrashRetentionDays}d`
-            : `Auto-clears after ${effectiveTrashRetentionDays} days`,
-        run: () => visit('home', 'trash'),
-      },
-      {
-        id: 'nav-templates',
-        label: 'Templates',
-        hint: 'Saved & premade .mrbl templates',
-        run: () => visit('home', 'templates'),
-      },
-      ...(activeDoc && !isDocTemplate(activeDoc)
-        ? [
-            {
-              id: 'action-save-as-template',
-              label: 'Save current file as template',
-              hint: `Save a copy into ${TEMPLATES_FOLDER_NAME}`,
-              run: () => setSaveTemplateTarget(activeDoc),
-            },
-          ]
-        : []),
-      {
-        id: 'nav-shared',
-        label: 'Shared',
-        hint: 'Permissions and visitor roles',
-        run: () => visit('home', 'shared'),
-      },
-      {
-        id: 'nav-subs',
-        label: 'Models',
-        hint: 'Connected providers',
-        run: () => visit('home', 'subscriptions'),
-      },
-    ]
-    const folderItems: PaletteItem[] = folders.map((folder) => ({
-      id: folder.id,
-      label: folder.name,
-      hint: `Folder · ${getFolderPathLabel(folders, folder.parentId)}`,
-      run: () => navigateToFolder(folder.id),
-    }))
-    const files: PaletteItem[] = library.map((doc) => ({
-      id: doc.id,
-      label: doc.title,
-      hint: doc.fileName,
-      run: () => openDocument(doc.id),
-    }))
-    return [...views, ...folderItems, ...files]
-      .filter((item) => {
-        if (!needle) return true
-        return `${item.label} ${item.hint}`.toLowerCase().includes(needle)
+  const paletteActions = {
+    openDocument: (docId: string) => openDocument(docId),
+    openFolder: (folderId: string | null) => navigateToFolder(folderId),
+    openChatThread: (threadId: string) => {
+      handleSelectChatThread(threadId)
+      if (!isRouted) visit('home', 'chat')
+    },
+    openNav: (nextNav: PrimaryNavId) => visit('home', nextNav),
+    openRecent: () => {
+      setLocalCurrentFolderId(null)
+      setLocalSortBy('updated')
+      persistDriveSettings({ sortBy: 'updated' })
+      if (isRouted) {
+        navigateWithGlobalSearch('/drive', { sort: 'updated' })
+      } else {
+        visit('home', 'drive')
+      }
+    },
+    openSettingsProvider: (providerId?: AIProviderId) => {
+      if (providerId) {
+        setLocalSettingsProviderId(providerId)
+      }
+      if (isRouted) {
+        navigateWithGlobalSearch(settingsProviderHref(providerId))
+      } else {
+        visit('home', 'subscriptions')
+      }
+    },
+    createBlankDocument: () => {
+      const targetFolder = defaultCreateFolderId
+        ? foldersRef.current.find((item) => item.id === defaultCreateFolderId)
+        : null
+      const blank = createBlankDocumentFile({
+        title: 'Untitled document',
+        folderId: targetFolder ? targetFolder.id : null,
+        folderName: targetFolder ? targetFolder.name : 'My Drive',
+        authorName: YOU.name,
       })
-      .slice(0, 12)
-  })()
+      const adopted = adoptDocument(blank, allDocsRef.current)
+      const placed = placePendingFirstSave({
+        ...adopted,
+        folderId: targetFolder ? targetFolder.id : null,
+        folder: targetFolder ? targetFolder.name : 'My Drive',
+      })
+      allDocsRef.current = [placed, ...allDocsRef.current]
+      setDocs((prev) => [placed, ...prev])
+      openDocument(placed.id, { doc: placed })
+      persist(placed.id, placed.slug, placed.source, [], placed.source, placed)
+      setAgentStatus(`Created ${placed.fileName}`)
+    },
+    createFromTemplate: (template: MarbleDocumentFile) => {
+      createAppFromTemplate({
+        template,
+        title: template.title,
+        folderId: defaultCreateFolderId,
+      })
+    },
+    openNewTemplateModal: () => setNewAppModalMode('templates'),
+    openNewAiAgentModal: () => setNewAppModalMode('agent'),
+    createFolder: () =>
+      setFolderModal({ mode: 'create', parentId: currentFolderId }),
+    createWhiteboard: () => {
+      const wbTemplate =
+        templates.find((item) => item.category === 'whiteboard') ??
+        PREDEFINED_MARBLE_TEMPLATES.find(
+          (item) => item.category === 'whiteboard',
+        )
+      if (!wbTemplate) return
+      createAppFromTemplate({
+        template: wbTemplate,
+        title: 'Untitled whiteboard',
+        folderId: defaultCreateFolderId,
+      })
+    },
+    startAiPrompt: (prompt?: string) => {
+      handleNewChatThread()
+      if (!isRouted) visit('home', 'chat')
+      pendingChatDraftNonceRef.current += 1
+      setPendingChatDraft({
+        nonce: pendingChatDraftNonceRef.current,
+        text: (prompt ?? '').trim(),
+      })
+    },
+    toggleTheme: () =>
+      setTheme((current) => (current === 'dark' ? 'light' : 'dark')),
+    toggleAiSidebar: () => setAiSidebarOpen((open) => !open),
+    saveCurrentAsTemplate: (doc: MarbleDocumentFile) =>
+      setSaveTemplateTarget(doc),
+    isDocTemplate,
+  }
+  const paletteActionsRef = useRef(paletteActions)
+  paletteActionsRef.current = paletteActions
 
-  useEffect(() => {
-    setPaletteIndex(0)
-  }, [paletteQuery, paletteOpen])
+  const commandPaletteDeps = useMemo<WorkspaceCommandSourceDeps>(
+    () => ({
+      docs: library,
+      trashedDocs,
+      folders,
+      templates,
+      chatThreads,
+      subscriptions,
+      trashRetentionDays: effectiveTrashRetentionDays,
+      theme,
+      activeDoc: activeDoc ?? null,
+      isDocTemplate: (doc) => paletteActionsRef.current.isDocTemplate(doc),
+      aiSidebarOpen,
+      onOpenDocument: (docId) => paletteActionsRef.current.openDocument(docId),
+      onOpenFolder: (folderId) =>
+        paletteActionsRef.current.openFolder(folderId),
+      onOpenChatThread: (threadId) =>
+        paletteActionsRef.current.openChatThread(threadId),
+      onOpenNav: (nextNav) => paletteActionsRef.current.openNav(nextNav),
+      onOpenRecent: () => paletteActionsRef.current.openRecent(),
+      onOpenSettingsProvider: (providerId) =>
+        paletteActionsRef.current.openSettingsProvider(providerId),
+      onCreateBlankDocument: () =>
+        paletteActionsRef.current.createBlankDocument(),
+      onCreateFromTemplate: (tpl) =>
+        paletteActionsRef.current.createFromTemplate(tpl),
+      onOpenNewTemplateModal: () =>
+        paletteActionsRef.current.openNewTemplateModal(),
+      onOpenNewAiAgentModal: () =>
+        paletteActionsRef.current.openNewAiAgentModal(),
+      onCreateFolder: () => paletteActionsRef.current.createFolder(),
+      onCreateWhiteboard: () => paletteActionsRef.current.createWhiteboard(),
+      onStartAiPrompt: (prompt) =>
+        paletteActionsRef.current.startAiPrompt(prompt),
+      onToggleTheme: () => paletteActionsRef.current.toggleTheme(),
+      onToggleAiSidebar: () => paletteActionsRef.current.toggleAiSidebar(),
+      onSaveCurrentAsTemplate: (doc) =>
+        paletteActionsRef.current.saveCurrentAsTemplate(doc),
+    }),
+    [
+      library,
+      trashedDocs,
+      folders,
+      templates,
+      chatThreads,
+      subscriptions,
+      effectiveTrashRetentionDays,
+      theme,
+      activeDoc,
+      aiSidebarOpen,
+    ],
+  )
+
+  const commandPaletteContext = useMemo(
+    () => ({
+      pathname: workspaceRoute?.pathname ?? '/drive',
+      activeNav: nav,
+      currentFolderId,
+      activeDoc: activeDoc ?? null,
+      theme,
+    }),
+    [workspaceRoute?.pathname, nav, currentFolderId, activeDoc, theme],
+  )
 
   const shareDoc = findDoc(shareId)
   const frameTitle = activeDoc ? `${activeDoc.title} .mrbl app` : 'Marble app'
@@ -6615,6 +6750,7 @@ export function XDriveWorkspace({
         aiSidebarOpen={aiSidebarOpen}
         onToggleAiSidebar={() => setAiSidebarOpen((open) => !open)}
         pendingProposalsCount={pendingProposals}
+        onOpenCommandPalette={() => setPaletteOpen(true)}
       />
       <div className="flex min-h-0 flex-1">
         <SidebarRail
@@ -7091,6 +7227,12 @@ export function XDriveWorkspace({
                         )
                     : undefined
                 }
+                prefillDraft={pendingChatDraft}
+                onConsumePrefillDraft={(nonce) =>
+                  setPendingChatDraft((current) =>
+                    current?.nonce === nonce ? null : current,
+                  )
+                }
               />
             </div>
           ) : (
@@ -7499,6 +7641,39 @@ export function XDriveWorkspace({
                     </div>
                   )}
                 </div>
+              )}
+
+              {nav === 'search' && (
+                <DriveSearchView
+                  query={searchQuery}
+                  typeFilter={searchTypeFilter}
+                  includeTrash={searchIncludeTrash}
+                  onQueryChange={setSearchQuery}
+                  onTypeFilterChange={setSearchTypeFilter}
+                  onIncludeTrashChange={setSearchIncludeTrash}
+                  searchFn={runWorkspaceSearch}
+                  initialIndexedCount={docs.length + folders.length}
+                  onOpenResult={(item) => {
+                    if (item.type === 'folder') {
+                      navigateToFolder(item.id)
+                      return
+                    }
+                    if (item.type === 'chat') {
+                      handleSelectChatThread(item.id)
+                      if (!isRouted) visit('home', 'chat')
+                      return
+                    }
+                    if (item.trashed) {
+                      if (isRouted) {
+                        navigateWithGlobalSearch(item.href)
+                      } else {
+                        visit('home', 'trash')
+                      }
+                      return
+                    }
+                    openDocument(item.id)
+                  }}
+                />
               )}
 
               {nav === 'trash' && (
@@ -8181,88 +8356,12 @@ export function XDriveWorkspace({
           onSubmit={(input) => renameDocument(renameDocTarget, input)}
         />
       )}
-      {paletteOpen && (
-        <div
-          className="fixed inset-0 z-50 flex items-start justify-center bg-black/45 px-4 pt-[14vh]"
-          onMouseDown={() => setPaletteOpen(false)}
-        >
-          <div
-            role="dialog"
-            aria-label="Command palette"
-            className="w-full max-w-md overflow-hidden rounded-lg border border-[var(--xd-border-strong)] bg-[var(--xd-canvas)] shadow-xl"
-            onMouseDown={(event) => event.stopPropagation()}
-          >
-            <div className="flex items-center gap-2 border-b border-[var(--xd-border)] px-3">
-              <Search className="size-3.5 text-[var(--xd-ink-muted)]" />
-              <input
-                autoFocus
-                value={paletteQuery}
-                onChange={(event) => setPaletteQuery(event.target.value)}
-                onKeyDown={(event) => {
-                  if (event.key === 'ArrowDown') {
-                    event.preventDefault()
-                    setPaletteIndex((index) =>
-                      Math.min(paletteItems.length - 1, index + 1),
-                    )
-                  }
-                  if (event.key === 'ArrowUp') {
-                    event.preventDefault()
-                    setPaletteIndex((index) => Math.max(0, index - 1))
-                  }
-                  if (event.key === 'Enter') {
-                    event.preventDefault()
-                    const item = paletteItems.at(paletteIndex)
-                    if (!item) return
-                    setPaletteOpen(false)
-                    setPaletteQuery('')
-                    item.run()
-                  }
-                }}
-                placeholder="Jump to file or view..."
-                aria-label="Quick search"
-                className="h-9 w-full bg-transparent text-[12.5px] outline-none"
-              />
-              <button
-                type="button"
-                aria-label="Close command palette"
-                onClick={() => setPaletteOpen(false)}
-                className="text-[var(--xd-ink-muted)]"
-              >
-                <X className="size-3.5" />
-              </button>
-            </div>
-            <ul className="max-h-72 overflow-y-auto py-1">
-              {paletteItems.length === 0 && (
-                <li className="px-3 py-3 text-[12px] text-[var(--xd-ink-muted)]">
-                  No matches.
-                </li>
-              )}
-              {paletteItems.map((item, index) => (
-                <li key={item.id}>
-                  <button
-                    type="button"
-                    onMouseEnter={() => setPaletteIndex(index)}
-                    onClick={() => {
-                      setPaletteOpen(false)
-                      setPaletteQuery('')
-                      item.run()
-                    }}
-                    className={cn(
-                      'flex w-full items-center justify-between gap-3 px-3 py-1.5 text-left',
-                      index === paletteIndex && 'bg-[var(--xd-surface-hover)]',
-                    )}
-                  >
-                    <span className="truncate text-[12.5px]">{item.label}</span>
-                    <span className="xd-mono shrink-0 text-[10.5px] text-[var(--xd-ink-muted)]">
-                      {item.hint}
-                    </span>
-                  </button>
-                </li>
-              ))}
-            </ul>
-          </div>
-        </div>
-      )}
+      <WorkspaceCommandPalette
+        open={paletteOpen}
+        onOpenChange={setPaletteOpen}
+        context={commandPaletteContext}
+        deps={commandPaletteDeps}
+      />
     </div>
   )
 }

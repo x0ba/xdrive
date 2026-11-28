@@ -30,6 +30,7 @@ import type {
   SharePermissionLevel,
   SketchAnnotation,
 } from '../types'
+import { syncDriveSearchIndexSafe } from '#/lib/search/drive-search.server'
 import { updateMarbleSourceTitle } from './engine-client'
 import {
   DRIVE_HIDDEN_DIRS,
@@ -310,6 +311,12 @@ export async function withDriveLock<T>(fn: () => Promise<T>): Promise<T> {
   } finally {
     release()
   }
+}
+
+async function withDriveMutation<T>(fn: () => Promise<T>): Promise<T> {
+  const result = await withDriveLock(fn)
+  await syncDriveSearchIndexSafe()
+  return result
 }
 
 export function isEnoent(error: unknown): boolean {
@@ -1322,7 +1329,7 @@ export async function saveDocumentToDisk(input: {
   skipAutoSnapshot?: boolean
   minAutoIntervalMs?: number
 }): Promise<DriveDocumentLocation> {
-  return await withDriveLock(async () => {
+  return await withDriveMutation(async () => {
     const validSlug = assertSlug(input.slug)
     await failIfSlugInTrash(validSlug, 'save')
     let target: DriveDocumentLocation
@@ -1410,7 +1417,7 @@ export async function updateDocumentMetaOnDisk(input: {
   checkpoints?: unknown
   intentHistory?: unknown
 }): Promise<{ ok: true; slug: string; relPath: string }> {
-  return await withDriveLock(async () => {
+  return await withDriveMutation(async () => {
     const validSlug = assertSlug(input.slug)
     const patch = sanitizeMetaPatch(input.meta)
     const checkpoints = sanitizeCheckpoints(input.checkpoints)
@@ -1464,7 +1471,7 @@ export async function moveDocumentOnDisk(input: {
   folderPath: string
   isTemplate: boolean
 }> {
-  return await withDriveLock(async () => {
+  return await withDriveMutation(async () => {
     const validSlug = assertSlug(input.slug)
     const fromLoc =
       (await findDocumentBySlug(validSlug, input.fromFolderPath)) ??
@@ -1525,7 +1532,7 @@ export async function createFolderOnDisk(input: {
   createdAt?: string
   updatedAt?: string
 }): Promise<{ ok: true; folder: DriveFolder; path: string }> {
-  return await withDriveLock(async () => {
+  return await withDriveMutation(async () => {
     const cleanName = assertFolderSegment(input.name)
     const parent = resolveDriveDirPath(input.parentPath)
     const relPath = parent.folderPath
@@ -1629,7 +1636,7 @@ export async function renameFolderOnDisk(input: {
   newPath: string
   folder: DriveFolder
 }> {
-  return await withDriveLock(async () => {
+  return await withDriveMutation(async () => {
     const normalizedOld = normalizeFolderPath(input.oldPath)
     if (!normalizedOld) {
       fail(400, 'oldPath is required')
@@ -1739,7 +1746,7 @@ export async function deleteFolderOnDisk(input: {
   parentPath: string
   movedFiles: Array<{ from: string; to: string; slug: string }>
 }> {
-  return await withDriveLock(async () => {
+  return await withDriveMutation(async () => {
     const normalized = normalizeFolderPath(input.folderPath)
     if (!normalized) {
       fail(400, 'folderPath is required')
@@ -1945,13 +1952,17 @@ export async function purgeExpiredTrashOnDisk(
   retentionDays?: number,
   options?: { recordTimestamp?: boolean },
 ): Promise<string[]> {
-  return await withDriveLock(async () => {
+  const purged = await withDriveLock(async () => {
     const result = await purgeExpiredTrashUnlocked({
       retentionDays,
       recordTimestamp: options?.recordTimestamp,
     })
     return result.purged
   })
+  if (purged.length > 0) {
+    await syncDriveSearchIndexSafe()
+  }
+  return purged
 }
 
 export async function trashDocumentOnDisk(input: {
@@ -1970,7 +1981,7 @@ export async function trashDocumentOnDisk(input: {
   existedOnDisk: boolean
   retentionDays: number
 }> {
-  return await withDriveLock(async () => {
+  return await withDriveMutation(async () => {
     const validSlug = assertSlug(input.slug)
     const trashedAt =
       input.trashedAt && !Number.isNaN(Date.parse(input.trashedAt))
@@ -2067,7 +2078,7 @@ export async function restoreDocumentOnDisk(input: {
   restoredOnDisk: boolean
   folderPath: string
 }> {
-  return await withDriveLock(async () => {
+  return await withDriveMutation(async () => {
     const validSlug = assertSlug(input.slug)
     const src = trashFilePath(validSlug)
     const trashMeta = await readTrashMeta(validSlug)
@@ -2121,7 +2132,7 @@ export async function deleteDocumentPermanentlyOnDisk(input: {
   slug: string
   folderPath?: string | null
 }): Promise<{ ok: true; slug: string; deleted: true }> {
-  return await withDriveLock(async () => {
+  return await withDriveMutation(async () => {
     const validSlug = assertSlug(input.slug)
     const located = await findDocumentBySlug(validSlug, input.folderPath)
     const trashMeta = await readTrashMeta(validSlug)
@@ -2184,9 +2195,9 @@ export async function emptyTrashOnDisk(ids: readonly string[]): Promise<{
   const wanted = new Set(
     ids.map((id) => id.trim()).filter((id) => id.length > 0),
   )
-  return await withDriveLock(async () => {
+  const result = await withDriveLock(async () => {
     if (wanted.size === 0) {
-      return { ok: true, deletedCount: 0, deletedIds: [] }
+      return { ok: true as const, deletedCount: 0, deletedIds: [] as string[] }
     }
     const trashDir = getTrashDir()
     let names: string[]
@@ -2194,7 +2205,11 @@ export async function emptyTrashOnDisk(ids: readonly string[]): Promise<{
       names = await readdir(trashDir)
     } catch (error) {
       if (isEnoent(error)) {
-        return { ok: true, deletedCount: 0, deletedIds: [] }
+        return {
+          ok: true as const,
+          deletedCount: 0,
+          deletedIds: [] as string[],
+        }
       }
       throw error
     }
@@ -2229,11 +2244,15 @@ export async function emptyTrashOnDisk(ids: readonly string[]): Promise<{
     }
 
     return {
-      ok: true,
+      ok: true as const,
       deletedCount: purgedSlugs.length,
       deletedIds: [...docIdsToDelete],
     }
   })
+  if (result.deletedCount > 0) {
+    await syncDriveSearchIndexSafe()
+  }
+  return result
 }
 
 function countNodesFallback(source: string): number {
@@ -2360,14 +2379,14 @@ async function collectExistingDocIds(
 export async function seedPremadeTemplatesOnDisk(
   premadeTemplates: readonly MarbleDocumentFile[] = PREDEFINED_MARBLE_TEMPLATES,
 ): Promise<{ seededSlugs: string[]; skippedIds: string[] }> {
-  return await withDriveLock(async () => {
+  const result = await withDriveLock(async () => {
     const metadata = await readMetadata()
     const seededSet = new Set(metadata.templates.seededIds)
     const unseeded = premadeTemplates.filter((tpl) => !seededSet.has(tpl.id))
 
     if (unseeded.length === 0) {
       return {
-        seededSlugs: [],
+        seededSlugs: [] as string[],
         skippedIds: premadeTemplates.map((tpl) => tpl.id),
       }
     }
@@ -2447,6 +2466,10 @@ export async function seedPremadeTemplatesOnDisk(
 
     return { seededSlugs, skippedIds }
   })
+  if (result.seededSlugs.length > 0) {
+    await syncDriveSearchIndexSafe()
+  }
+  return result
 }
 
 export async function listTemplatesOnDisk(
@@ -2470,7 +2493,7 @@ export async function saveAsTemplateOnDisk(input: {
   createdBy?: MarbleDocumentFile['createdBy']
   nodeCountOf?: (source: string) => number
 }): Promise<{ ok: true; folder: DriveFolder; doc: MarbleDocumentFile }> {
-  return await withDriveLock(async () => {
+  return await withDriveMutation(async () => {
     const cleanTitle = input.title.trim()
     if (!cleanTitle) {
       fail(400, 'title is required')
@@ -2617,7 +2640,7 @@ export async function renameDocumentOnDisk(input: {
   source: string
   updatedAt: string
 }> {
-  return await withDriveLock(async () => {
+  return await withDriveMutation(async () => {
     const validSlug = assertSlug(input.slug)
     const cleanTitle = input.title.trim()
     if (!cleanTitle) {
